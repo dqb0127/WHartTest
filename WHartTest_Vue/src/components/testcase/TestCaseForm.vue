@@ -395,6 +395,9 @@ const formState = reactive<FormState>({
   notes: '',
 });
 
+// 保存原始数据用于变更追踪
+const originalFormData = ref<FormState | null>(null);
+
 // 截图相关状态
 const fileInputRef = ref<HTMLInputElement>();
 const existingScreenshots = ref<TestCaseScreenshot[]>([]);
@@ -458,6 +461,17 @@ const fetchDetailsAndSetForm = async (id: number) => {
       formState.notes = data.notes || ''; // 设置备注信息
       formState.steps = data.steps.map((step, index) => ({ ...step, temp_id: `${Date.now()}-${index}` }));
       stepErrors.value = Array(data.steps.length).fill({});
+      
+      // 保存原始数据的深拷贝，用于后续比较变更
+      originalFormData.value = JSON.parse(JSON.stringify({
+        id: data.id,
+        name: data.name,
+        precondition: data.precondition,
+        level: data.level,
+        module_id: data.module_id,
+        notes: data.notes || '',
+        steps: data.steps
+      }));
       
       // 设置现有截图，并确保每个截图都有url字段用于兼容性
       existingScreenshots.value = (data.screenshots || []).map((screenshot: TestCaseScreenshot) => ({
@@ -567,15 +581,63 @@ const handleSubmit = async () => {
 
     let response;
     if (isEditing.value && formState.id) {
-      const updatePayload: UpdateTestCaseRequest = {
-        name: formState.name,
-        precondition: formState.precondition,
-        level: formState.level,
-        module_id: formState.module_id,
-        steps: payloadSteps,
-        notes: formState.notes,
-      };
-      response = await updateTestCase(currentProjectId.value, formState.id, updatePayload);
+      // 编辑模式：只发送变更的字段（PATCH 语义）
+      const updatePayload: Partial<UpdateTestCaseRequest> = {};
+      
+      if (originalFormData.value) {
+        // 比较基础字段，只添加变更的字段
+        if (formState.name !== originalFormData.value.name) {
+          updatePayload.name = formState.name;
+        }
+        if (formState.precondition !== originalFormData.value.precondition) {
+          updatePayload.precondition = formState.precondition;
+        }
+        if (formState.level !== originalFormData.value.level) {
+          updatePayload.level = formState.level;
+        }
+        if (formState.module_id !== originalFormData.value.module_id) {
+          updatePayload.module_id = formState.module_id;
+        }
+        if (formState.notes !== originalFormData.value.notes) {
+          updatePayload.notes = formState.notes;
+        }
+        
+        // 比较步骤：检查是否有变更
+        // 将原始步骤数据标准化为与 payloadSteps 相同的格式后再比较
+        const normalizedOriginalSteps = originalFormData.value.steps.map(s => ({
+          id: s.id,
+          step_number: s.step_number,
+          description: s.description,
+          expected_result: s.expected_result
+        }));
+        const stepsChanged = JSON.stringify(payloadSteps) !== JSON.stringify(normalizedOriginalSteps);
+        if (stepsChanged) {
+          updatePayload.steps = payloadSteps;
+        }
+      } else {
+        // 如果没有原始数据（不应该发生），发送所有字段
+        updatePayload.name = formState.name;
+        updatePayload.precondition = formState.precondition;
+        updatePayload.level = formState.level;
+        updatePayload.module_id = formState.module_id;
+        updatePayload.steps = payloadSteps;
+        updatePayload.notes = formState.notes;
+      }
+      
+      // 检查是否有任何变更
+      if (Object.keys(updatePayload).length === 0) {
+        Message.info('没有检测到任何变更');
+        formLoading.value = false;
+        return;
+      }
+      
+      // 开发环境下输出变更信息（便于调试）
+      if (import.meta.env.DEV) {
+        console.log('📝 PATCH 请求 - 只发送变更字段:', updatePayload);
+        console.log('🔍 变更字段数量:', Object.keys(updatePayload).length);
+      }
+      
+      response = await updateTestCase(currentProjectId.value, formState.id, updatePayload as UpdateTestCaseRequest);
     } else {
       const createPayload: CreateTestCaseRequest = {
         name: formState.name,

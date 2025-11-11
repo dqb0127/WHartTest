@@ -82,22 +82,23 @@ class TestCaseViewSet(viewsets.ModelViewSet):
     #     headers = self.get_success_headers(serializer.data)
     #     return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
-    # def update(self, request, *args, **kwargs):
-    #     partial = kwargs.pop('partial', False)
-    #     instance = self.get_object() # get_object 会进行对象级权限检查
-    #
-    #     # 可以在这里添加额外的逻辑
-    #
-    #     serializer = self.get_serializer(instance, data=request.data, partial=partial)
-    #     serializer.is_valid(raise_exception=True)
-    #     self.perform_update(serializer) # perform_update 默认只调用 serializer.save()
-    #
-    #     if getattr(instance, '_prefetched_objects_cache', None):
-    #         # If 'prefetch_related' has been applied to a queryset, we need to
-    #         # forcibly invalidate the prefetch cache on the instance.
-    #         instance._prefetched_objects_cache = {}
-    #
-    #     return Response(serializer.data)
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object() # get_object 会进行对象级权限检查
+
+        # 可以在这里添加额外的逻辑
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        
+        self.perform_update(serializer) # perform_update 默认只调用 serializer.save()
+
+        if getattr(instance, '_prefetched_objects_cache', None):
+            # If 'prefetch_related' has been applied to a queryset, we need to
+            # forcibly invalidate the prefetch cache on the instance.
+            instance._prefetched_objects_cache = {}
+
+        return Response(serializer.data)
 
     # perform_update 默认调用 serializer.save()，我们的序列化器 update 方法会处理嵌套步骤。
     # perform_destroy 默认调用 instance.delete()。

@@ -341,7 +341,7 @@ LOGGING = {
     },
     'handlers': {
         'console': {
-            'level': 'INFO', # 将控制台日志级别设置为 INFO
+            'level': 'DEBUG', # 将控制台日志级别设置为 DEBUG
             'class': 'logging.StreamHandler',
             'formatter': 'simple',
         },
@@ -371,6 +371,21 @@ LOGGING = {
             'handlers': ['knowledge_console'],
             'level': 'INFO',
             'propagate': False,
+        },
+        'testcases': { # 为 testcases 应用添加 logger
+            'handlers': ['console'],
+            'level': 'DEBUG', # 设置为 DEBUG 级别
+            'propagate': True, # 改为 True 让日志向上传播
+        },
+        'testcases.views': { # 为 testcases.views 模块添加专门的 logger
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'testcases.serializers': { # 为 testcases.serializers 模块添加专门的 logger
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
         },
         # 可以根据需要添加其他应用的 logger
     },

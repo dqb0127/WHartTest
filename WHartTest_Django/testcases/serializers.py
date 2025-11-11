@@ -35,7 +35,7 @@ class TestCaseSerializer(serializers.ModelSerializer):
         queryset=TestCaseModule.objects.all(),
         source='module', # 关联到模型中的 'module' 字段
         allow_null=False, # 不允许为空
-        required=True     # 必填字段
+        required=False    # 改为 False，允许 PATCH 请求时不传该字段
     )
     module_detail = serializers.StringRelatedField(source='module', read_only=True) # 用于只读展示模块名称
 
@@ -74,10 +74,17 @@ class TestCaseSerializer(serializers.ModelSerializer):
         steps_data = validated_data.pop('steps', None)
 
         # 更新 TestCase 实例的字段
-        instance.name = validated_data.get('name', instance.name)
-        instance.precondition = validated_data.get('precondition', instance.precondition)
-        instance.level = validated_data.get('level', instance.level)
-        instance.notes = validated_data.get('notes', instance.notes)
+        if 'name' in validated_data:
+            instance.name = validated_data['name']
+        if 'precondition' in validated_data:
+            instance.precondition = validated_data['precondition']
+        if 'level' in validated_data:
+            instance.level = validated_data['level']
+        if 'module' in validated_data:
+            instance.module = validated_data['module']
+        if 'notes' in validated_data:
+            instance.notes = validated_data['notes']
+        
         # project 和 creator 通常不允许通过此接口更新
         instance.save()
 
