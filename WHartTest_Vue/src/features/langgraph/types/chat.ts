@@ -14,6 +14,9 @@ export interface ChatRequest {
   use_knowledge_base?: boolean; // 是否启用知识库功能，默认true
   similarity_threshold?: number; // 相似度阈值，范围0.0-1.0，默认0.3
   top_k?: number; // 检索结果数量，范围1-20，默认5
+
+  // 多模态相关参数
+  image?: string; // 图片base64编码（不含前缀），可选
 }
 
 /**
@@ -42,6 +45,7 @@ export interface ChatHistoryMessage {
   type: 'human' | 'ai' | 'tool' | 'system'; // 🆕 添加 system 类型
   content: string;
   timestamp: string; // 消息时间戳
+  image?: string; // 🆕 图片Data URL（包含完整的data:image/xxx;base64,前缀）
 }
 
 /**

@@ -342,6 +342,7 @@ class ChatAPIView(APIView):
         user_message_content = request.data.get('message')
         session_id = request.data.get('session_id')
         project_id = request.data.get('project_id')
+        image_base64 = request.data.get('image')  # 图片base64编码（不含前缀）
 
         # 知识库相关参数
         knowledge_base_id = request.data.get('knowledge_base_id')
@@ -413,6 +414,17 @@ class ChatAPIView(APIView):
                 "message": "Multiple active LLM configurations found. Ensure only one is active.", "data": {},
                 "errors": {"llm_config": ["Multiple active LLM configurations found."]}
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # 验证图片输入是否支持
+        if image_base64 and not active_config.supports_vision:
+            logger.warning(f"ChatAPIView: Image input rejected - model {active_config.name} does not support vision")
+            return Response({
+                "status": "error",
+                "code": status.HTTP_400_BAD_REQUEST,
+                "message": f"当前模型 {active_config.name} 不支持图片输入，请切换到支持多模态的模型（如 GPT-4V、Claude 3、Gemini Vision 或 Qwen-VL）",
+                "data": {},
+                "errors": {"image": ["Current model does not support image input. Please switch to a vision-capable model."]}
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             # 使用新的LLM工厂函数，支持多供应商
@@ -603,7 +615,21 @@ class ChatAPIView(APIView):
                     messages_list.append(SystemMessage(content=effective_prompt))
                     logger.info(f"ChatAPIView: Added {prompt_source} system prompt: {effective_prompt[:100]}...")
 
-                messages_list.append(HumanMessage(content=user_message_content))
+                # 构建用户消息（支持多模态）
+                if image_base64:
+                    # 如果有图片，创建多模态消息
+                    human_message_content = [
+                        {"type": "text", "text": user_message_content},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
+                        }
+                    ]
+                    messages_list.append(HumanMessage(content=human_message_content))
+                    logger.info(f"ChatAPIView: Added multimodal message with image")
+                else:
+                    # 纯文本消息
+                    messages_list.append(HumanMessage(content=user_message_content))
                 input_messages = {"messages": messages_list}
 
                 invoke_config = {
@@ -839,13 +865,39 @@ class ChatHistoryAPIView(APIView):
                                     content = msg.content if hasattr(msg, 'content') else str(msg)
                                 elif isinstance(msg, HumanMessage):
                                     msg_type = "human"
-                                    content = msg.content if hasattr(msg, 'content') else str(msg)
+                                    raw_content = msg.content if hasattr(msg, 'content') else str(msg)
+                                    # 处理多模态消息（包含图片的列表格式）
+                                    image_data = None  # 用于存储图片数据
+                                    if isinstance(raw_content, list):
+                                        # 提取文本部分
+                                        text_parts = []
+                                        for item in raw_content:
+                                            if isinstance(item, dict):
+                                                if item.get("type") == "text":
+                                                    text_parts.append(item.get("text", ""))
+                                                elif item.get("type") == "image_url":
+                                                    # 提取图片URL中的Base64数据
+                                                    image_url = item.get("image_url", {})
+                                                    if isinstance(image_url, dict):
+                                                        url = image_url.get("url", "")
+                                                        # url格式: data:image/jpeg;base64,xxx
+                                                        if url and url.startswith("data:image/"):
+                                                            image_data = url  # 保存完整的Data URL
+                                        content = " ".join(text_parts) if text_parts else "[包含图片的消息]"
+                                    else:
+                                        content = raw_content
                                 elif isinstance(msg, AIMessage):
                                     msg_type = "ai"
-                                    content = msg.content if hasattr(msg, 'content') else str(msg)
+                                    raw_content = msg.content if hasattr(msg, 'content') else str(msg)
+                                    # AI消息通常不是多模态，但为了安全也检查一下
+                                    if isinstance(raw_content, list):
+                                        text_parts = [item.get("text", "") for item in raw_content if isinstance(item, dict) and item.get("type") == "text"]
+                                        content = " ".join(text_parts) if text_parts else ""
+                                    else:
+                                        content = raw_content
 
                                     # 跳过空的AI消息（工具调用前的中间状态）
-                                    if not content or content.strip() == "":
+                                    if not content or (isinstance(content, str) and content.strip() == ""):
                                         logger.debug(f"ChatHistoryAPIView: Skipping empty AI message at index {i}")
                                         continue
 
@@ -861,14 +913,17 @@ class ChatHistoryAPIView(APIView):
                                     else:
                                         msg_type = "unknown"
 
-                                logger.debug(f"ChatHistoryAPIView: Message {i}: type={msg_type}, content={content[:50]}...")
+                                logger.debug(f"ChatHistoryAPIView: Message {i}: type={msg_type}, content={str(content)[:50]}...")
 
                                 # 只添加有内容的消息
-                                if content and content.strip():
+                                if content and (not isinstance(content, str) or content.strip()):
                                     message_data = {
                                         "type": msg_type,
                                         "content": content,
                                     }
+                                    # 如果消息包含图片，添加图片数据
+                                    if msg_type == "human" and 'image_data' in locals() and image_data:
+                                        message_data["image"] = image_data
                                     # 添加对应的时间戳
                                     if i in message_timestamps:
                                         timestamp_str = message_timestamps[i]
@@ -1299,7 +1354,7 @@ class ChatStreamAPIView(View):
             return None
 
     async def _create_sse_generator(self, request, user_message_content, session_id, project_id, project,
-                                   knowledge_base_id=None, use_knowledge_base=True, similarity_threshold=0.7, top_k=5, prompt_id=None):
+                                   knowledge_base_id=None, use_knowledge_base=True, similarity_threshold=0.7, top_k=5, prompt_id=None, image_base64=None):
         """创建SSE数据生成器"""
         try:
             # 获取活跃的LLM配置
@@ -1310,6 +1365,12 @@ class ChatStreamAPIView(View):
             return
         except LLMConfig.MultipleObjectsReturned:
             yield f"data: {json.dumps({'type': 'error', 'message': 'Multiple active LLM configurations found'})}\n\n"
+            return
+
+        # 验证图片输入是否支持
+        if image_base64 and not active_config.supports_vision:
+            logger.warning(f"ChatStreamAPIView: Image input rejected - model {active_config.name} does not support vision")
+            yield f"data: {json.dumps({'type': 'error', 'message': f'当前模型 {active_config.name} 不支持图片输入，请切换到支持多模态的模型（如 GPT-4V、Claude 3、Gemini Vision 或 Qwen-VL）'})}\n\n"
             return
 
         try:
@@ -1504,12 +1565,26 @@ class ChatStreamAPIView(View):
 
                 # 确保用户消息内容格式正确
                 clean_user_message = user_message_content.strip()
-                if not clean_user_message:
+                if not clean_user_message and not image_base64:
                     logger.error("ChatStreamAPIView: User message is empty after stripping")
                     yield create_sse_data({'type': 'error', 'message': 'User message cannot be empty'})
                     return
 
-                messages_list.append(HumanMessage(content=clean_user_message))
+                # 构建用户消息（支持多模态）
+                if image_base64:
+                    # 如果有图片，创建多模态消息
+                    human_message_content = [
+                        {"type": "text", "text": clean_user_message},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}
+                        }
+                    ]
+                    messages_list.append(HumanMessage(content=human_message_content))
+                    logger.info(f"ChatStreamAPIView: Added multimodal message with image")
+                else:
+                    # 纯文本消息
+                    messages_list.append(HumanMessage(content=clean_user_message))
                 logger.info(f"ChatStreamAPIView: Final messages list length: {len(messages_list)}")
 
                 # 验证消息列表不为空且所有消息都有有效内容
@@ -1622,6 +1697,7 @@ class ChatStreamAPIView(View):
         user_message_content = body_data.get('message')
         session_id = body_data.get('session_id')
         project_id = body_data.get('project_id')
+        image_base64 = body_data.get('image')  # 图片base64编码（不含前缀）
 
         # 知识库相关参数
         knowledge_base_id = body_data.get('knowledge_base_id')
@@ -1696,7 +1772,7 @@ class ChatStreamAPIView(View):
         async def async_generator():
             async for chunk in self._create_sse_generator(
                 request, user_message_content, session_id, project_id, project,
-                knowledge_base_id, use_knowledge_base, similarity_threshold, top_k, prompt_id
+                knowledge_base_id, use_knowledge_base, similarity_threshold, top_k, prompt_id, image_base64
             ):
                 yield chunk
 

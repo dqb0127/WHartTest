@@ -12,7 +12,7 @@ class LLMConfigSerializer(serializers.ModelSerializer):
         model = LLMConfig
         fields = [
             'id', 'config_name', 'provider', 'name', 'api_url', 'api_key', 'system_prompt', 
-            'is_active', 'created_at', 'updated_at'
+            'supports_vision', 'is_active', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
         extra_kwargs = {

@@ -43,6 +43,7 @@
       <ChatInput
         :is-loading="isLoading"
         :has-prompts="hasPrompts"
+        :supports-vision="currentLlmConfig?.supports_vision || false"
         @send-message="handleSendMessage"
       />
     </div>
@@ -77,6 +78,7 @@ import { getUserPrompts } from '@/features/prompts/services/promptService';
 import type { ChatRequest } from '@/features/langgraph/types/chat';
 import type { LlmConfig } from '@/features/langgraph/types/llmConfig';
 import { useProjectStore } from '@/store/projectStore';
+import { useLlmConfigRefresh } from '@/composables/useLlmConfigRefresh';
 import { marked } from 'marked';
 
 // 导入子组件
@@ -100,6 +102,8 @@ interface ChatMessage {
   messageType?: 'human' | 'ai' | 'tool' | 'system'; // 🆕 消息类型，用于区分头像，添加 system 类型
   isExpanded?: boolean; // 工具消息是否展开
   isStreaming?: boolean; // 是否正在流式输出
+  imageBase64?: string; // 🆕 消息携带的图片（Base64格式）
+  imageDataUrl?: string; // 🆕 完整的图片Data URL（包含MIME类型）
 }
 
 interface ChatSession {
@@ -133,6 +137,7 @@ const currentLlmConfig = ref<LlmConfig | null>(null);
 
 // 项目store
 const projectStore = useProjectStore();
+const { getRefreshTrigger } = useLlmConfigRefresh();
 
 // 组件引用
 const chatHeaderRef = ref<{ refreshPrompts: () => Promise<void> } | null>(null);
@@ -143,6 +148,7 @@ let abortController = new AbortController();
 // 定时刷新控制
 let historyRefreshTimer: number | null = null;
 const isAutoRefreshing = ref(false); // 是否正在自动刷新
+let isMountedLoadComplete = false; // 标记onMounted是否完成了首次加载
 
 // 静默加载历史记录(不显示loading状态)
 const loadChatHistorySilently = async () => {
@@ -178,6 +184,11 @@ const loadChatHistorySilently = async () => {
 
           if (historyItem.type === 'tool') {
             message.isExpanded = false;
+          }
+
+          // 如果消息包含图片，添加图片数据
+          if (historyItem.image) {
+            message.imageDataUrl = historyItem.image;
           }
 
           messages.value.push(message);
@@ -304,9 +315,9 @@ const saveSessionsToStorage = () => {
 
 // 从服务器加载会话列表
 const loadSessionsFromServer = async () => {
-  // 检查是否有当前项目ID
+  // 🔧 修复：静默处理没有项目ID的情况
   if (!projectStore.currentProjectId) {
-    console.warn('没有选择项目，无法加载会话列表');
+    console.log('⏳ 等待项目加载完成，暂不加载会话列表');
     return;
   }
 
@@ -373,9 +384,25 @@ const loadSessionsFromServer = async () => {
                 lastTime,
                 messageCount: history.length
               });
+            } else {
+              // 🔧 修复：如果获取历史失败（会话可能已损坏），仍然显示在列表中但标记为异常
+              console.warn(`⚠️ 会话 ${sessionId} 历史记录获取失败，状态: ${historyResponse.status}`);
+              tempSessions.push({
+                id: sessionId,
+                title: `会话 ${sessionId.substring(0, 8)}... (历史记录异常)`,
+                lastTime: new Date(),
+                messageCount: 0
+              });
             }
           } catch (error) {
-            console.error(`获取会话 ${sessionId} 的历史记录失败:`, error);
+            // 🔧 修复：网络错误或其他异常，仍然显示会话但标记为异常
+            console.error(`❌ 获取会话 ${sessionId} 历史记录异常:`, error);
+            tempSessions.push({
+              id: sessionId,
+              title: `会话 ${sessionId.substring(0, 8)}... (加载失败)`,
+              lastTime: new Date(),
+              messageCount: 0
+            });
           }
         }));
       }
@@ -406,7 +433,18 @@ const loadSessionsFromServer = async () => {
 // 加载聊天历史记录
 const loadChatHistory = async () => {
   const storedSessionId = getSessionIdFromStorage();
-  if (!storedSessionId || !projectStore.currentProjectId) return;
+  
+  // 🔧 修复：静默处理无会话ID的情况，不显示任何提示
+  if (!storedSessionId) {
+    console.log('💭 没有保存的会话ID，显示空白对话界面');
+    return;
+  }
+  
+  // 如果没有项目ID，也静默返回（watch会在项目加载完成后重新调用）
+  if (!projectStore.currentProjectId) {
+    console.log('⏳ 等待项目加载完成...');
+    return;
+  }
 
   try {
     isLoading.value = true;
@@ -437,6 +475,11 @@ const loadChatHistory = async () => {
           message.isExpanded = false;
         }
 
+        // 如果消息包含图片，添加图片数据
+        if (historyItem.image) {
+          message.imageDataUrl = historyItem.image;
+        }
+
         messages.value.push(message);
       });
 
@@ -446,13 +489,19 @@ const loadChatHistory = async () => {
         const firstHumanMessage = response.data.history.find(msg => msg.type === 'human')?.content;
         updateSessionInList(response.data.session_id, firstHumanMessage, false);
       }
+      
+      console.log(`✅ 成功加载会话历史: ${sessionId.value}, ${messages.value.length} 条消息`);
     } else {
-      // 如果获取历史失败，可能是会话过期，清除存储的会话ID
+      // 🔧 修复：获取历史失败时静默处理，不显示错误提示
+      // 可能是会话已被删除或过期，清除存储的会话ID即可
+      console.warn('⚠️ 会话历史获取失败，可能已被删除');
       localStorage.removeItem('langgraph_session_id');
       sessionId.value = '';
     }
   } catch (error) {
-    console.error('加载聊天历史失败:', error);
+    // 🔧 修复：网络错误等异常情况才显示错误提示
+    console.error('❌ 加载聊天历史异常:', error);
+    // 只在真正的错误情况下提示用户
     Message.error('加载聊天历史失败，将开始新的对话');
     localStorage.removeItem('langgraph_session_id');
     sessionId.value = '';
@@ -598,6 +647,11 @@ const switchSession = async (id: string) => {
         // 如果是工具消息，设置默认折叠状态
         if (historyItem.type === 'tool') {
           message.isExpanded = false;
+        }
+
+        // 如果消息包含图片，添加图片数据
+        if (historyItem.image) {
+          message.imageDataUrl = historyItem.image;
         }
 
         messages.value.push(message);
@@ -768,8 +822,10 @@ const clearChat = async () => {
 };
 
 // 发送消息
-const handleSendMessage = async (message: string) => {
-  if (!message.trim()) {
+const handleSendMessage = async (data: { message: string; image?: string; imageDataUrl?: string }) => {
+  const { message, image, imageDataUrl } = data;
+  
+  if (!message.trim() && !image) {
     Message.warning('消息内容不能为空！');
     return;
   }
@@ -779,12 +835,14 @@ const handleSendMessage = async (message: string) => {
     return;
   }
 
-  // 添加用户消息
+  // 添加用户消息（保存图片数据以便显示）
   messages.value.push({
     content: message,
     isUser: true,
     time: getCurrentTime(),
-    messageType: 'human'
+    messageType: 'human',
+    imageBase64: image, // 保存图片Base64数据（用于发送到后端）
+    imageDataUrl: imageDataUrl // 保存完整Data URL（用于前端显示）
   });
 
   isLoading.value = true;
@@ -794,6 +852,11 @@ const handleSendMessage = async (message: string) => {
     session_id: sessionId.value || undefined,
     project_id: String(projectStore.currentProjectId), // 转换为string类型
   };
+  
+  // 如果有图片，添加到请求中
+  if (image) {
+    (requestData as any).image = image; // 临时使用any，稍后更新ChatRequest类型
+  }
 
   // 添加提示词参数
   if (selectedPromptId.value) {
@@ -1234,6 +1297,11 @@ watch(
                 message.isExpanded = false;
               }
               
+              // 如果消息包含图片，添加图片数据
+              if (historyItem.image) {
+                message.imageDataUrl = historyItem.image;
+              }
+              
               messages.value.push(message);
             });
             
@@ -1274,6 +1342,35 @@ watch(() => sessionId.value, (newSessionId) => {
   }
 });
 
+// 🔧 修复：监听项目ID变化，当项目加载完成后自动加载会话数据
+watch(() => projectStore.currentProjectId, async (newProjectId, oldProjectId) => {
+  console.log(`📊 项目ID变化: ${oldProjectId} -> ${newProjectId}`);
+  
+  if (newProjectId && newProjectId !== oldProjectId) {
+    // 项目切换或首次加载完成
+    console.log('🔄 项目已切换，重新加载会话数据...');
+    
+    // 只有在onMounted完成后才通过watch加载（避免重复）
+    // 或者如果onMounted时没有项目，现在项目加载完成了，也需要加载
+    if (isMountedLoadComplete || !oldProjectId) {
+      await loadSessionsFromServer();
+      await loadChatHistory();
+      
+      // 启动自动刷新(如果有会话)
+      if (sessionId.value) {
+        startAutoRefresh();
+      }
+    }
+  } else if (!newProjectId && oldProjectId) {
+    // 项目被清除
+    console.log('⚠️ 项目已清除');
+    messages.value = [];
+    chatSessions.value = [];
+    sessionId.value = '';
+    stopAutoRefresh();
+  }
+});
+
 watch([useKnowledgeBase, selectedKnowledgeBaseId, similarityThreshold, topK], () => {
   saveKnowledgeBaseSettings();
 }, { deep: true });
@@ -1282,24 +1379,57 @@ onMounted(async () => {
   // 加载知识库设置
   loadKnowledgeBaseSettings();
   
-  // 🔧 修复：先加载会话列表，再加载当前会话历史
-  // 这样可以避免 loadChatHistory 中的 updateSessionInList 导致重复
-  await loadSessionsFromServer();
-
-  // 尝试加载当前会话的历史记录（只加载消息，不更新会话列表）
-  await loadChatHistory();
+  // 🔧 修复：确保项目已选择
+  // 如果没有当前项目，等待项目store加载完成
+  if (!projectStore.currentProjectId) {
+    console.log('⏳ 等待项目初始化...');
+    // 尝试从projectStore加载项目列表
+    if (projectStore.projectList.length === 0) {
+      try {
+        await projectStore.fetchProjects();
+      } catch (error) {
+        console.error('❌ 加载项目列表失败:', error);
+      }
+    }
+    
+    // 如果还是没有项目，提示用户
+    // 注意：不直接return，因为watch会在项目加载后自动加载会话数据
+    if (!projectStore.currentProjectId) {
+      console.warn('⚠️ 没有选择项目，等待项目选择...');
+      // 不显示提示，因为MainLayout会处理项目选择
+    }
+  }
   
-  // 启动自动刷新(如果有会话)
-  if (sessionId.value) {
-    startAutoRefresh();
+  // 只有在有项目时才加载会话数据（避免watch中重复加载）
+  if (projectStore.currentProjectId) {
+    // 🔧 修复：先加载会话列表，再加载当前会话历史
+    // 这样可以避免 loadChatHistory 中的 updateSessionInList 导致重复
+    await loadSessionsFromServer();
+
+    // 尝试加载当前会话的历史记录（只加载消息，不更新会话列表）
+    await loadChatHistory();
+    
+    // 启动自动刷新(如果有会话)
+    if (sessionId.value) {
+      startAutoRefresh();
+    }
   }
 
-  // 加载当前LLM配置
+  // 加载当前LLM配置（不依赖项目）
   await loadCurrentLlmConfig();
   
   // 检查提示词状态（如果没有会自动弹出管理弹窗）
   await checkPromptStatus();
+  
+  // 标记onMounted完成
+  isMountedLoadComplete = true;
 });
+
+// 监听 LLM 配置变化
+watch(getRefreshTrigger(), async () => {
+  console.log('🔄 检测到 LLM 配置变化,重新加载配置...');
+  await loadCurrentLlmConfig();
+}, { immediate: false });
 
 onActivated(async () => {
   // 每次组件被激活时（从其他页面切回来）

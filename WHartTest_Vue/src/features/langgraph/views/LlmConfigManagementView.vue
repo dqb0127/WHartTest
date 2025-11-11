@@ -14,6 +14,7 @@
       :pagination="pagination"
       @edit="handleEditConfig"
       @delete="handleDeleteConfig"
+      @toggle-active="handleToggleActive"
       @page-change="handlePageChange"
       @page-size-change="handlePageSizeChange"
     />
@@ -45,8 +46,10 @@ import {
 } from '@/features/langgraph/services/llmConfigService';
 import type { PaginationProps } from '@arco-design/web-vue';
 import { useProjectStore } from '@/store/projectStore';
+import { useLlmConfigRefresh } from '@/composables/useLlmConfigRefresh';
 
 const projectStore = useProjectStore();
+const { triggerLlmConfigRefresh } = useLlmConfigRefresh();
 
 const llmConfigs = ref<LlmConfig[]>([]);
 const isLoading = ref(false);
@@ -129,6 +132,8 @@ const handleDeleteConfig = async (configId: number) => {
     if (response.status === 'success') {
       Message.success('LLM 配置删除成功');
       await fetchLlmConfigs(); // 刷新列表
+      // 通知其他组件配置已更新
+      triggerLlmConfigRefresh();
       // 检查当前页码是否仍然有效，如果当前页码超出了新的总页数，则调整到最后一页或第一页
       if (pagination.total > 0 && pagination.current > Math.ceil(pagination.total / pagination.pageSize)) {
         pagination.current = Math.ceil(pagination.total / pagination.pageSize);
@@ -169,6 +174,8 @@ const handleSubmitConfig = async (
       Message.success(id ? 'LLM 配置更新成功' : 'LLM 配置创建成功');
       isModalVisible.value = false;
       await fetchLlmConfigs(); // 刷新列表
+      // 通知其他组件配置已更新
+      triggerLlmConfigRefresh();
     } else {
       // API 返回的 errors 对象可以用于在表单中显示具体字段错误，此处简化处理
       const errorMessages = response.errors ? Object.values(response.errors).flat().join('; ') : '';
@@ -180,6 +187,28 @@ const handleSubmitConfig = async (
     Message.error(errorDetail);
   } finally {
     isFormLoading.value = false;
+  }
+};
+
+const handleToggleActive = async (configId: number, isActive: boolean) => {
+  try {
+    const response = await partialUpdateLlmConfig(configId, { is_active: isActive });
+    if (response.status === 'success') {
+      Message.success(isActive ? 'LLM 配置已激活' : 'LLM 配置已停用');
+      await fetchLlmConfigs(); // 刷新列表
+      // 通知其他组件配置已更新
+      triggerLlmConfigRefresh();
+    } else {
+      Message.error(response.message || '更新状态失败');
+      // 如果失败，刷新列表以恢复开关状态
+      await fetchLlmConfigs();
+    }
+  } catch (error: any) {
+    console.error('Error toggling LLM config active state:', error);
+    const errorDetail = error.response?.data?.message || error.message || '更新状态失败';
+    Message.error(errorDetail);
+    // 如果失败，刷新列表以恢复开关状态
+    await fetchLlmConfigs();
   }
 };
 

@@ -60,6 +60,12 @@
           <div class="text-xs text-gray-500">用于指导AI助手的行为和回答风格。</div>
         </template>
       </a-form-item>
+      <a-form-item field="supports_vision" label="支持图片输入">
+        <a-switch v-model="formData.supports_vision" />
+        <template #extra>
+          <div class="text-xs text-gray-500">模型是否支持图片/多模态输入（如GPT-4V、Qwen-VL、Gemini Vision等）。</div>
+        </template>
+      </a-form-item>
       <a-form-item field="is_active" label="激活状态">
         <a-switch v-model="formData.is_active" />
         <template #extra>
@@ -116,6 +122,7 @@ const defaultFormData: CreateLlmConfigRequest = {
   api_url: '',
   api_key: '',
   system_prompt: '',
+  supports_vision: false,
   is_active: false,
 };
 const formData = ref<CreateLlmConfigRequest>({ ...defaultFormData });
@@ -166,6 +173,7 @@ watch(
           api_url: props.configData.api_url,
           api_key: '', // 编辑时不显示旧 Key，留空表示不修改
           system_prompt: props.configData.system_prompt || '', // 填充系统提示词
+          supports_vision: props.configData.supports_vision || false, // 填充多模态支持
           is_active: props.configData.is_active,
         };
       } else {
@@ -205,6 +213,9 @@ const handleSubmit = async () => {
     }
     if (formData.value.system_prompt !== undefined) { // 包含系统提示词（可以为空字符串）
       partialData.system_prompt = formData.value.system_prompt;
+    }
+    if (formData.value.supports_vision !== undefined) { // 包含多模态支持
+      partialData.supports_vision = formData.value.supports_vision;
     }
     submitData = partialData;
     emit('submit', submitData, props.configData.id);

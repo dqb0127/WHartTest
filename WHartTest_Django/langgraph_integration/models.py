@@ -37,6 +37,10 @@ class LLMConfig(models.Model):
     system_prompt = models.TextField(blank=True, null=True, verbose_name="系统提示词",
                                     help_text="指导LLM行为的系统级提示词")
     
+    # 多模态支持（新增）
+    supports_vision = models.BooleanField(default=False, verbose_name="支持图片输入",
+                                        help_text="模型是否支持图片/多模态输入（如GPT-4V、Qwen-VL等）")
+    
     # 状态字段（保持不变）
     is_active = models.BooleanField(default=False, verbose_name="是否激活",
                                    help_text="是否为当前激活的LLM配置")

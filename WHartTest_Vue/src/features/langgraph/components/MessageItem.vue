@@ -7,6 +7,15 @@
           </div>
         </div>
     <div class="message-content">
+      <!-- 图片显示（在消息气泡之前） -->
+      <div v-if="message.imageDataUrl || message.imageBase64" class="message-image-container">
+        <img 
+          :src="message.imageDataUrl || `data:image/jpeg;base64,${message.imageBase64}`" 
+          alt="上传的图片" 
+          class="message-image" 
+        />
+      </div>
+      
       <div class="message-bubble">
         <div v-if="message.isLoading" class="typing-indicator">
           <span></span>
@@ -69,6 +78,8 @@ interface ChatMessage {
   messageType?: 'human' | 'ai' | 'tool' | 'system'; // 🆕 添加 system 类型
   isExpanded?: boolean;
   isStreaming?: boolean; // 新增：标识是否正在流式输出
+  imageBase64?: string; // 🆕 消息携带的图片（Base64）
+  imageDataUrl?: string; // 🆕 完整的图片Data URL
 }
 
 interface Props {
@@ -413,6 +424,27 @@ const formatToolMessage = (content: string) => {
   flex-direction: column;
   min-width: 0; /* 允许flex子项收缩 */
   flex: 1; /* 占用剩余空间 */
+}
+
+/* 图片容器样式 */
+.message-image-container {
+  margin-bottom: 8px;
+  max-width: 300px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.message-image {
+  width: 100%;
+  height: auto;
+  display: block;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.message-image:hover {
+  transform: scale(1.02);
 }
 
 .message-bubble {

@@ -9,6 +9,22 @@
         @search="handleSearch"
       />
       <a-select
+        v-model="selectedModule"
+        placeholder="筛选模块"
+        allow-clear
+        :loading="modulesLoading"
+        style="width: 180px; margin-left: 12px;"
+        @change="handleModuleChange"
+      >
+        <a-option
+          v-for="module in flatModuleList"
+          :key="module.id"
+          :value="module.id"
+        >
+          {{ module.indentName }}
+        </a-option>
+      </a-select>
+      <a-select
         v-model="selectedLevel"
         placeholder="筛选优先级"
         allow-clear
@@ -73,6 +89,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { Message } from '@arco-design/web-vue';
 import { getTestCaseList, type TestCase } from '@/services/testcaseService';
+import { getTestCaseModules, type TestCaseModule } from '@/services/testcaseModuleService';
 import { formatDate, getLevelColor } from '@/utils/formatters';
 
 interface Props {
@@ -90,10 +107,13 @@ const emit = defineEmits<{
 }>();
 
 const loading = ref(false);
+const modulesLoading = ref(false);
 const searchKeyword = ref('');
 const selectedLevel = ref<string>('');
+const selectedModule = ref<number | undefined>(undefined);
 const testCaseData = ref<TestCase[]>([]);
 const localSelectedIds = ref<number[]>([...props.initialSelectedIds]);
+const moduleList = ref<TestCaseModule[]>([]);
 
 const paginationConfig = reactive({
   total: 0,
@@ -189,6 +209,7 @@ const fetchTestCases = async () => {
       pageSize: paginationConfig.pageSize,
       search: searchKeyword.value,
       level: selectedLevel.value || undefined,
+      module_id: selectedModule.value,
     });
 
     if (response.success && response.data) {
@@ -219,6 +240,56 @@ const handleLevelChange = () => {
   fetchTestCases();
 };
 
+const handleModuleChange = () => {
+  paginationConfig.current = 1;
+  fetchTestCases();
+};
+
+// 将树形模块列表扁平化为带缩进的列表
+const flatModuleList = computed(() => {
+  const flatList: Array<TestCaseModule & { indentName: string }> = [];
+  
+  const flatten = (modules: TestCaseModule[], level: number = 0) => {
+    modules.forEach((module) => {
+      const indent = '　'.repeat(level); // 使用全角空格缩进
+      flatList.push({
+        ...module,
+        indentName: `${indent}${module.name}`
+      });
+      if (module.children && module.children.length > 0) {
+        flatten(module.children, level + 1);
+      }
+    });
+  };
+  
+  flatten(moduleList.value);
+  return flatList;
+});
+
+// 加载模块列表
+const fetchModules = async () => {
+  if (!props.currentProjectId) {
+    moduleList.value = [];
+    return;
+  }
+
+  modulesLoading.value = true;
+  try {
+    const response = await getTestCaseModules(props.currentProjectId);
+    if (response.success && response.data) {
+      moduleList.value = response.data;
+    } else {
+      console.error('获取模块列表失败:', response.error);
+      moduleList.value = [];
+    }
+  } catch (error) {
+    console.error('获取模块列表出错:', error);
+    moduleList.value = [];
+  } finally {
+    modulesLoading.value = false;
+  }
+};
+
 const onPageChange = (page: number) => {
   paginationConfig.current = page;
   fetchTestCases();
@@ -239,6 +310,7 @@ const handleCancel = () => {
 };
 
 onMounted(() => {
+  fetchModules();
   fetchTestCases();
 });
 
@@ -248,6 +320,8 @@ watch(
     paginationConfig.current = 1;
     searchKeyword.value = '';
     selectedLevel.value = '';
+    selectedModule.value = undefined;
+    fetchModules();
     fetchTestCases();
   }
 );

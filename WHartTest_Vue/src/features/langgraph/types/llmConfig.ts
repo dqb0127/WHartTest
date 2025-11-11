@@ -9,6 +9,7 @@ export interface LlmConfig {
   api_url: string;
   api_key?: string; // 在列表视图中可能不返回，在详细视图中可能返回
   system_prompt?: string; // 🆕 新增系统提示词字段
+  supports_vision?: boolean; // 🆕 是否支持图片/多模态输入
   is_active: boolean;
   created_at: string; // ISO 8601 date string
   updated_at: string; // ISO 8601 date string
@@ -24,6 +25,7 @@ export interface CreateLlmConfigRequest {
   api_url: string;
   api_key: string;
   system_prompt?: string; // 🆕 新增系统提示词字段（可选）
+  supports_vision?: boolean; // 🆕 是否支持图片/多模态输入（可选）
   is_active?: boolean; // 可选,布尔值, 默认为 false
 }
 
@@ -42,5 +44,6 @@ export interface PartialUpdateLlmConfigRequest {
   api_url?: string;
   api_key?: string;
   system_prompt?: string; // 🆕 新增系统提示词字段（可选）
+  supports_vision?: boolean; // 🆕 是否支持图片/多模态输入（可选）
   is_active?: boolean;
 }

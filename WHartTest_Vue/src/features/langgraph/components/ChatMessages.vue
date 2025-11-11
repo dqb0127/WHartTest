@@ -29,6 +29,8 @@ interface ChatMessage {
   messageType?: 'human' | 'ai' | 'tool' | 'system'; // 🆕 添加 system 类型
   isExpanded?: boolean;
   isStreaming?: boolean;
+  imageBase64?: string; // 🆕 消息携带的图片（Base64）
+  imageDataUrl?: string; // 🆕 完整的图片Data URL
 }
 
 interface Props {

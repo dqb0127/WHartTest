@@ -21,9 +21,14 @@
         </a-tag>
       </template>
       <template #isActive="{ record }">
-        <a-tag :color="record.is_active ? 'green' : 'red'">
-          {{ record.is_active ? '已激活' : '未激活' }}
-        </a-tag>
+        <a-switch
+          :model-value="record.is_active"
+          :disabled="loading"
+          @change="(value) => emit('toggle-active', record.id, !!value)"
+        >
+          <template #checked>已激活</template>
+          <template #unchecked>未激活</template>
+        </a-switch>
       </template>
       <template #actions="{ record }">
         <a-space>
@@ -61,6 +66,7 @@ import {
   Button as AButton,
   Space as ASpace,
   Popconfirm as APopconfirm,
+  Switch as ASwitch,
   type TableColumnData,
   type PaginationProps,
 } from '@arco-design/web-vue';
@@ -90,6 +96,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'edit', config: LlmConfig): void;
   (e: 'delete', configId: number): void;
+  (e: 'toggle-active', configId: number, isActive: boolean): void;
   (e: 'page-change', page: number): void;
   (e: 'page-size-change', pageSize: number): void;
 }>();
