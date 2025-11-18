@@ -27,6 +27,7 @@ interface ChatMessage {
   time: string;
   isLoading?: boolean;
   messageType?: 'human' | 'ai' | 'tool' | 'system';
+  toolName?: string;
   isExpanded?: boolean;
   isStreaming?: boolean;
   imageBase64?: string;

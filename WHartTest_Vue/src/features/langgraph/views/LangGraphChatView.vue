@@ -348,37 +348,7 @@ const loadKnowledgeBaseSettings = () => {
 };
 
 // 从本地存储加载会话列表
-const loadSessionsFromStorage = () => {
-  const sessionsJson = localStorage.getItem('langgraph_sessions');
-  if (sessionsJson) {
-    try {
-      const parsedSessions = JSON.parse(sessionsJson);
-      // 确保日期对象正确恢复
-      chatSessions.value = parsedSessions.map((session: any) => {
-        let lastTime = new Date();
-        try {
-          // 尝试解析存储的时间
-          lastTime = new Date(session.lastTime);
-          // 检查日期是否有效
-          if (isNaN(lastTime.getTime())) {
-            lastTime = new Date();
-          }
-        } catch (error) {
-          console.error('解析会话时间失败:', error);
-          lastTime = new Date();
-        }
 
-        return {
-          ...session,
-          lastTime
-        };
-      });
-    } catch (e) {
-      console.error('解析会话列表失败:', e);
-      chatSessions.value = [];
-    }
-  }
-};
 
 // 保存会话列表到本地存储
 const saveSessionsToStorage = () => {
@@ -599,16 +569,7 @@ const getCurrentTime = () => {
 };
 
 // 获取Agent的emoji标识
-const getAgentEmoji = (agentType: string): string => {
-  const emojiMap: Record<string, string> = {
-    'chat': '💬',
-    'requirement': '📋',
-    'testcase': '🧪',
-    'knowledge': '📚',
-    'brain': '🧠'
-  };
-  return emojiMap[agentType.toLowerCase()] || '🤖';
-};
+
 
 // 🎨 合并连续的思考过程消息（保持对象引用，避免丢失状态）
 const mergeThinkingProcessMessages = (messages: ChatMessage[]): ChatMessage[] => {
@@ -654,16 +615,7 @@ const mergeThinkingProcessMessages = (messages: ChatMessage[]): ChatMessage[] =>
 };
 
 // 获取Agent的中文名称
-const getAgentName = (agentType: string): string => {
-  const nameMap: Record<string, string> = {
-    'chat': 'Chat Agent',
-    'requirement': 'Requirement Agent',
-    'testcase': 'TestCase Agent',
-    'knowledge': 'Knowledge Agent',
-    'brain': 'Brain'
-  };
-  return nameMap[agentType.toLowerCase()] || 'Agent';
-};
+
 
 // 格式化历史消息时间
 const formatHistoryTime = (timestamp: string) => {

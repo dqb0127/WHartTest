@@ -46,6 +46,7 @@ export interface ChatHistoryMessage {
   content: string;
   timestamp: string; // 消息时间戳
   image?: string; // 🆕 图片Data URL（包含完整的data:image/xxx;base64,前缀）
+  is_thinking_process?: boolean; // 思考过程标记
 }
 
 /**

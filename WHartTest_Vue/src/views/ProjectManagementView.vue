@@ -281,7 +281,7 @@ import {
   type CreateProjectRequest,
   type UpdateProjectRequest
 } from '@/services/projectService';
-import { getUserList, type User } from '@/services/userService';
+import { getUserList } from '@/services/userService';
 import { useAuthStore } from '@/store/authStore';
 
 // 加载状态
@@ -348,14 +348,14 @@ const columns = [
   {
     title: '创建者',
     dataIndex: 'creator_detail',
-    render: ({ record }) => {
+    render: ({ record }: { record: Project }) => {
       return record.creator_detail?.username || '-';
     }
   },
   {
     title: '创建时间',
     dataIndex: 'created_at',
-    render: ({ record }) => {
+    render: ({ record }: { record: Project }) => {
       const date = new Date(record.created_at);
       return date.toLocaleString();
     }
@@ -497,7 +497,7 @@ const memberColumns = [
 ];
 
 // 监听项目成员数据变化
-watch(projectMembers, (newValue) => {
+watch(projectMembers, () => {
   // 成员数据已更新
 }, { deep: true });
 

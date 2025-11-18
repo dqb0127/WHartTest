@@ -93,6 +93,7 @@ interface ChatMessage {
   time: string;
   isLoading?: boolean;
   messageType?: 'human' | 'ai' | 'tool' | 'system'; // 🆕 添加 system 类型
+  toolName?: string; // 工具名称
   isExpanded?: boolean;
   isStreaming?: boolean; // 新增：标识是否正在流式输出
   imageBase64?: string; // 🆕 消息携带的图片（Base64）
@@ -294,75 +295,7 @@ const handleStreamingMarkdown = (content: string) => {
 };
 
 // 检查代码内容是否看起来完整（根据txt文件中的实际代码格式优化）
-const isCodeContentComplete = (codeContent: string, language: string): boolean => {
-  const trimmedContent = codeContent.trim();
 
-  // 如果内容为空，肯定不完整
-  if (!trimmedContent) {
-    return false;
-  }
-
-  // 对于Python代码（txt文件中的主要格式）
-  if (language === 'python' || language === 'py') {
-    // 检查是否有完整的函数定义
-    if (trimmedContent.includes('def ')) {
-      // 检查函数是否有完整的结构：def name(): 和缩进的内容
-      const lines = trimmedContent.split('\n');
-      let hasDefLine = false;
-      let hasIndentedContent = false;
-
-      for (const line of lines) {
-        if (line.trim().startsWith('def ') && line.includes(':')) {
-          hasDefLine = true;
-        }
-        if (hasDefLine && line.startsWith('    ') && line.trim()) {
-          hasIndentedContent = true;
-        }
-      }
-
-      // 如果有函数定义和缩进内容，认为相对完整
-      return hasDefLine && hasIndentedContent;
-    }
-
-    // 对于简单的Python代码，检查是否有基本的语法结构
-    const lines = trimmedContent.split('\n');
-    if (lines.length > 1) {
-      // 检查最后一行是否看起来是完整的
-      const lastLine = lines[lines.length - 1].trim();
-      // 如果最后一行不是明显的不完整状态，认为可能完整
-      return !lastLine.endsWith(',') && !lastLine.endsWith('\\') && lastLine.length > 0;
-    }
-  }
-
-  // 对于JSON格式，检查是否有完整的结构
-  if (language === 'json') {
-    try {
-      // 检查是否以{开头}结尾，或者以[开头]结尾
-      if ((trimmedContent.startsWith('{') && trimmedContent.endsWith('}')) ||
-          (trimmedContent.startsWith('[') && trimmedContent.endsWith(']'))) {
-        JSON.parse(trimmedContent);
-        return true;
-      }
-    } catch (e) {
-      // JSON解析失败，可能不完整
-      return false;
-    }
-  }
-
-  // 对于其他语言，基于txt文件的实际情况进行判断
-  // 如果内容有多行且不以明显的不完整标记结尾，认为可能完整
-  const lines = trimmedContent.split('\n');
-  if (lines.length > 2) {
-    const lastLine = lines[lines.length - 1].trim();
-    const incompleteEndings = [',', '+', '-', '*', '/', '=', '&&', '||', '\\'];
-    const endsWithIncomplete = incompleteEndings.some(ending => lastLine.endsWith(ending));
-
-    return !endsWithIncomplete && lastLine.length > 0;
-  }
-
-  // 默认情况下，对于流式输出，我们倾向于认为内容不完整，以确保正确的代码块渲染
-  return false;
-};
 
 // 格式化工具消息
 const formatToolMessage = (content: string) => {
