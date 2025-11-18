@@ -89,6 +89,7 @@ INSTALLED_APPS = [
     'knowledge', # Knowledge Base Management App
     'prompts', # 提示词管理应用
     'requirements', # 需求评审管理应用
+    'orchestrator_integration', # 智能编排集成应用
 ]
 
 MIDDLEWARE = [

@@ -1,6 +1,8 @@
 from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
 from prompts.models import UserPrompt, PromptType
+import os
+from pathlib import Path
 
 class Command(BaseCommand):
     help = 'Initializes the database with default prompts for the system.'
@@ -32,8 +34,26 @@ class Command(BaseCommand):
 
         self.stdout.write(f'Using user: {user.username} (ID: {user.id})')
 
+        # 读取Brain Orchestrator提示词文件
+        brain_prompt_path = Path(__file__).parent.parent.parent.parent / 'orchestrator_integration' / 'brain_system_prompt.md'
+        brain_prompt_content = ""
+        if brain_prompt_path.exists():
+            with open(brain_prompt_path, 'r', encoding='utf-8') as f:
+                brain_prompt_content = f.read()
+            self.stdout.write(f'Loaded Brain Orchestrator prompt from: {brain_prompt_path}')
+        else:
+            self.stdout.write(self.style.WARNING(f'Brain prompt file not found at: {brain_prompt_path}'))
+            brain_prompt_content = "你是一个智能编排 Brain Agent，负责与用户协作完成测试用例生成任务。"
+
         # 提示词内容
         prompts_to_create = [
+            {
+                "name": "Brain编排器提示词",
+                "prompt_type": PromptType.BRAIN_ORCHESTRATOR,
+                "content": brain_prompt_content,
+                "description": "Brain Agent的系统提示词，负责智能判断用户意图并编排子Agent执行任务",
+                "is_active": True,
+            },
             {
                 "name": "测试用例执行提示词",
                 "prompt_type": PromptType.TEST_CASE_EXECUTION,

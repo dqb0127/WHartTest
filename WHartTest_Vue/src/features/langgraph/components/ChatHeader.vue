@@ -3,7 +3,8 @@
     <div class="chat-header">
       <h1 class="chat-title">LLM对话</h1>
       <div class="chat-actions">
-        <div class="stream-toggle">
+        <!-- ⭐大脑模式下隐藏流式开关 -->
+        <div v-if="!brainMode" class="stream-toggle">
           <span class="toggle-label">流式输出</span>
           <a-switch
             :model-value="isStreamMode"
@@ -12,19 +13,19 @@
           />
         </div>
 
-        <!-- 知识库开关 -->
-        <div class="kb-toggle">
+        <!-- ⭐大脑模式下隐藏知识库开关 -->
+        <div v-if="!brainMode" class="kb-toggle">
           <span class="kb-icon">📚</span>
           <span class="toggle-label">知识库</span>
           <a-switch
             :model-value="useKnowledgeBase"
-            @update:model-value="$emit('update:use-knowledge-base', $event)"
+            @update:model-value="handleKnowledgeBaseToggle"
             size="small"
           />
         </div>
 
-        <!-- 提示词选择器 -->
-        <div class="prompt-selector">
+        <!-- ⭐大脑模式下隐藏提示词选择器 -->
+        <div v-if="!brainMode" class="prompt-selector">
           <span class="prompt-label">提示词：</span>
           <a-select
             v-model="selectedPromptId"
@@ -52,7 +53,8 @@
           </a-select>
         </div>
 
-        <a-button type="text" @click="$emit('show-system-prompt')">
+        <!-- ⭐大脑模式下隐藏管理提示词按钮 -->
+        <a-button v-if="!brainMode" type="text" @click="$emit('show-system-prompt')">
           <template #icon>
             <i class="icon-settings"></i>
           </template>
@@ -68,8 +70,8 @@
       </div>
     </div>
 
-    <!-- 知识库选择和设置面板 -->
-    <div v-if="useKnowledgeBase" class="kb-settings-panel">
+    <!-- ⭐大脑模式下隐藏知识库设置面板 -->
+    <div v-if="useKnowledgeBase && !brainMode" class="kb-settings-panel">
       <KnowledgeBaseSelector
         :project-id="projectId"
         :use-knowledge-base="useKnowledgeBase"
@@ -105,19 +107,22 @@ interface Props {
   similarityThreshold: number;
   topK: number;
   selectedPromptId: number | null;
+  brainMode?: boolean; // ⭐大脑模式
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  brainMode: false
+});
 
 const emit = defineEmits<{
-  'update:is-stream-mode': [value: boolean];
-  'clear-chat': [];
-  'show-system-prompt': []; // 🆕 新增提示词管理事件
-  'update:use-knowledge-base': [value: boolean];
-  'update:selected-knowledge-base-id': [value: string | null];
-  'update:similarity-threshold': [value: number];
-  'update:top-k': [value: number];
-  'update:selected-prompt-id': [value: number | null];
+  (e: 'update:is-stream-mode', value: boolean): void;
+  (e: 'clear-chat'): void;
+  (e: 'show-system-prompt'): void;
+  (e: 'update:use-knowledge-base', value: boolean): void;
+  (e: 'update:selected-knowledge-base-id', value: string | null): void;
+  (e: 'update:similarity-threshold', value: number): void;
+  (e: 'update:top-k', value: number): void;
+  (e: 'update:selected-prompt-id', value: number | null): void;
 }>();
 
 // 截断会话ID以便展示
@@ -144,7 +149,6 @@ const loadUserPrompts = async () => {
   try {
     const [promptsResponse, defaultResponse] = await Promise.all([
       getUserPrompts({
-        prompt_type: 'general',
         is_active: true,
         ordering: 'name', // 先按名称排序
         page_size: 100
@@ -160,16 +164,23 @@ const loadUserPrompts = async () => {
         allPrompts = promptsResponse.data.results;
       }
       
+      // 🆕 过滤：只显示 general 和 brain_orchestrator 类型的提示词
+      const allowedTypes = ['general', 'brain_orchestrator'];
+      allPrompts = allPrompts.filter(prompt => 
+        allowedTypes.includes(prompt.prompt_type || 'general')
+      );
+      
       // 🆕 在前端手动排序：默认提示词在前，然后按类型和名称排序
       userPrompts.value = allPrompts.sort((a, b) => {
         // 第一级：按 is_default 排序，默认的在前
         if (a.is_default && !b.is_default) return -1;
         if (!a.is_default && b.is_default) return 1;
         
-        // 第二级：按提示词类型排序，通用对话类型在前
+        // 第二级：按提示词类型排序，通用对话类型在前，智能规划在后
         const getTypeSort = (type: string) => {
           if (type === 'general') return 1; // 通用对话类型
-          return 2; // 其他程序调用类型
+          if (type === 'brain_orchestrator') return 2; // 智能规划类型
+          return 3; // 其他类型(理论上不会出现)
         };
         
         const aTypeSort = getTypeSort(a.prompt_type || 'general');
@@ -208,6 +219,11 @@ const loadUserPrompts = async () => {
 const handlePromptChange = (promptId: number | null) => {
   selectedPromptId.value = promptId;
   emit('update:selected-prompt-id', promptId);
+};
+
+// 处理知识库开关变化
+const handleKnowledgeBaseToggle = (value: string | number | boolean) => {
+  emit('update:use-knowledge-base', Boolean(value));
 };
 
 // 监听props变化

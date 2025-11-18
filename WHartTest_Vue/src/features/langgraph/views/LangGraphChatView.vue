@@ -24,6 +24,7 @@
         :similarity-threshold="similarityThreshold"
         :top-k="topK"
         :selected-prompt-id="selectedPromptId"
+        :brain-mode="isBrainMode"
         @update:is-stream-mode="isStreamMode = $event"
         @clear-chat="clearChat"
         @show-system-prompt="showSystemPromptModal"
@@ -44,6 +45,7 @@
         :is-loading="isLoading"
         :has-prompts="hasPrompts"
         :supports-vision="currentLlmConfig?.supports_vision || false"
+        v-model:brain-mode="isBrainMode"
         @send-message="handleSendMessage"
       />
     </div>
@@ -75,6 +77,11 @@ import {
 } from '@/features/langgraph/services/chatService';
 import { listLlmConfigs, partialUpdateLlmConfig } from '@/features/langgraph/services/llmConfigService';
 import { getUserPrompts } from '@/features/prompts/services/promptService';
+import { 
+  sendOrchestratorStreamMessage, 
+  activeOrchestratorStreams,
+  clearOrchestratorStreamState
+} from '@/features/langgraph/services/orchestratorService';
 import type { ChatRequest } from '@/features/langgraph/types/chat';
 import type { LlmConfig } from '@/features/langgraph/types/llmConfig';
 import { useProjectStore } from '@/store/projectStore';
@@ -99,11 +106,14 @@ interface ChatMessage {
   isUser: boolean;
   time: string;
   isLoading?: boolean;
-  messageType?: 'human' | 'ai' | 'tool' | 'system'; // 🆕 消息类型，用于区分头像，添加 system 类型
-  isExpanded?: boolean; // 工具消息是否展开
-  isStreaming?: boolean; // 是否正在流式输出
-  imageBase64?: string; // 🆕 消息携带的图片（Base64格式）
-  imageDataUrl?: string; // 🆕 完整的图片Data URL（包含MIME类型）
+  messageType?: 'human' | 'ai' | 'tool' | 'system';
+  toolName?: string;
+  isExpanded?: boolean;
+  isStreaming?: boolean;
+  imageBase64?: string;
+  imageDataUrl?: string;
+  isThinkingProcess?: boolean;
+  isThinkingExpanded?: boolean;
 }
 
 interface ChatSession {
@@ -119,6 +129,13 @@ const sessionId = ref<string>('');
 const chatSessions = ref<ChatSession[]>([]);
 const isStreamMode = ref(true); // 流式模式开关，默认开启
 
+// ⭐大脑模式开关 - 从localStorage加载
+const loadBrainModeState = (): boolean => {
+  const saved = localStorage.getItem('langgraph_brain_mode');
+  return saved === 'true';
+};
+const isBrainMode = ref(loadBrainModeState());
+
 // 知识库相关
 const useKnowledgeBase = ref(false); // 是否启用知识库功能
 const selectedKnowledgeBaseId = ref<string | null>(null); // 选中的知识库ID
@@ -128,6 +145,32 @@ const topK = ref(5); // 检索结果数量
 // 提示词相关
 const selectedPromptId = ref<number | null>(null); // 用户选择的提示词ID
 const hasPrompts = ref(false); // 是否有可用的提示词
+
+// ⭐从localStorage恢复选中的提示词
+const PROMPT_STORAGE_KEY = 'wharttest_selected_prompt_id';
+const loadSavedPromptId = () => {
+  try {
+    const saved = localStorage.getItem(PROMPT_STORAGE_KEY);
+    if (saved) {
+      selectedPromptId.value = parseInt(saved, 10);
+    }
+  } catch (error) {
+    console.error('加载保存的提示词ID失败:', error);
+  }
+};
+
+// ⭐监听selectedPromptId变化,保存到localStorage
+watch(selectedPromptId, (newValue) => {
+  try {
+    if (newValue !== null) {
+      localStorage.setItem(PROMPT_STORAGE_KEY, String(newValue));
+    } else {
+      localStorage.removeItem(PROMPT_STORAGE_KEY);
+    }
+  } catch (error) {
+    console.error('保存提示词ID失败:', error);
+  }
+});
 
 
 // 系统提示词相关
@@ -166,10 +209,20 @@ const loadChatHistorySilently = async () => {
       if (historyMessageCount > currentMessageCount) {
         console.log(`📥 检测到新消息: ${historyMessageCount - currentMessageCount}条`);
         
+        // 🎨 保存当前的展开状态
+        const expandedStates = new Map<string, boolean>();
+        messages.value.forEach(msg => {
+          if (msg.isThinkingProcess && msg.isThinkingExpanded) {
+            const key = msg.content.substring(0, 100);
+            expandedStates.set(key, true);
+          }
+        });
+        
         // 清空当前消息列表
         messages.value = [];
 
         // 重新加载所有消息
+        const tempMessages: ChatMessage[] = [];
         response.data.history.forEach(historyItem => {
           if (historyItem.type === 'system') {
             return;
@@ -186,12 +239,31 @@ const loadChatHistorySilently = async () => {
             message.isExpanded = false;
           }
 
+          // 🎨 如果是思考过程消息，设置折叠状态
+          if (historyItem.is_thinking_process) {
+            message.isThinkingProcess = true;
+            message.isThinkingExpanded = false;
+          }
+
           // 如果消息包含图片，添加图片数据
           if (historyItem.image) {
             message.imageDataUrl = historyItem.image;
           }
 
-          messages.value.push(message);
+          tempMessages.push(message);
+        });
+
+        // 🎨 合并连续的思考过程消息
+        messages.value = mergeThinkingProcessMessages(tempMessages);
+        
+        // 🎨 恢复展开状态
+        messages.value.forEach(msg => {
+          if (msg.isThinkingProcess) {
+            const key = msg.content.substring(0, 100);
+            if (expandedStates.has(key)) {
+              msg.isThinkingExpanded = true;
+            }
+          }
         });
       }
     }
@@ -456,7 +528,8 @@ const loadChatHistory = async () => {
       // 清空当前消息列表
       messages.value = [];
 
-      // 将历史记录转换为消息格式并添加到列表
+      // 将历史记录转换为消息格式
+      const tempMessages: ChatMessage[] = [];
       response.data.history.forEach(historyItem => {
         // 🆕 跳过系统消息，不在消息列表中显示
         if (historyItem.type === 'system') {
@@ -467,7 +540,7 @@ const loadChatHistory = async () => {
           content: historyItem.content,
           isUser: historyItem.type === 'human',
           time: formatHistoryTime(historyItem.timestamp),
-          messageType: historyItem.type // 添加消息类型用于区分头像
+          messageType: historyItem.type
         };
 
         // 如果是工具消息，设置默认折叠状态
@@ -475,13 +548,22 @@ const loadChatHistory = async () => {
           message.isExpanded = false;
         }
 
+        // 🎨 如果是思考过程消息，设置折叠状态
+        if (historyItem.is_thinking_process) {
+          message.isThinkingProcess = true;
+          message.isThinkingExpanded = false;
+        }
+
         // 如果消息包含图片，添加图片数据
         if (historyItem.image) {
           message.imageDataUrl = historyItem.image;
         }
 
-        messages.value.push(message);
+        tempMessages.push(message);
       });
+
+      // 🎨 合并连续的思考过程消息
+      messages.value = mergeThinkingProcessMessages(tempMessages);
 
       // 只有在会话列表中不存在该会话时才添加（避免重复）
       const existingSession = chatSessions.value.find(s => s.id === response.data.session_id);
@@ -514,6 +596,73 @@ const loadChatHistory = async () => {
 const getCurrentTime = () => {
   const now = new Date();
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+};
+
+// 获取Agent的emoji标识
+const getAgentEmoji = (agentType: string): string => {
+  const emojiMap: Record<string, string> = {
+    'chat': '💬',
+    'requirement': '📋',
+    'testcase': '🧪',
+    'knowledge': '📚',
+    'brain': '🧠'
+  };
+  return emojiMap[agentType.toLowerCase()] || '🤖';
+};
+
+// 🎨 合并连续的思考过程消息（保持对象引用，避免丢失状态）
+const mergeThinkingProcessMessages = (messages: ChatMessage[]): ChatMessage[] => {
+  const result: ChatMessage[] = [];
+  let thinkingBuffer: ChatMessage[] = [];
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    
+    if (msg.isThinkingProcess) {
+      thinkingBuffer.push(msg);
+    } else {
+      // 遇到非思考过程消息，先处理缓冲区
+      if (thinkingBuffer.length > 0) {
+        if (thinkingBuffer.length === 1) {
+          // 只有一个思考过程，直接添加
+          result.push(thinkingBuffer[0]);
+        } else {
+          // 多个思考过程，合并内容到第一个对象（保持响应性）
+          const merged = thinkingBuffer[0];
+          merged.content = thinkingBuffer.map(m => m.content).join('\n\n---\n\n');
+          result.push(merged);
+        }
+        thinkingBuffer = [];
+      }
+      // 添加当前非思考过程消息
+      result.push(msg);
+    }
+  }
+
+  // 处理末尾剩余的思考过程消息
+  if (thinkingBuffer.length > 0) {
+    if (thinkingBuffer.length === 1) {
+      result.push(thinkingBuffer[0]);
+    } else {
+      const merged = thinkingBuffer[0];
+      merged.content = thinkingBuffer.map(m => m.content).join('\n\n---\n\n');
+      result.push(merged);
+    }
+  }
+
+  return result;
+};
+
+// 获取Agent的中文名称
+const getAgentName = (agentType: string): string => {
+  const nameMap: Record<string, string> = {
+    'chat': 'Chat Agent',
+    'requirement': 'Requirement Agent',
+    'testcase': 'TestCase Agent',
+    'knowledge': 'Knowledge Agent',
+    'brain': 'Brain'
+  };
+  return nameMap[agentType.toLowerCase()] || 'Agent';
 };
 
 // 格式化历史消息时间
@@ -555,9 +704,57 @@ const formatHistoryTime = (timestamp: string) => {
   }
 };
 
-// 切换工具消息的展开/收起状态
+// 切换工具消息或思考过程的展开/收起状态
 const toggleExpand = (message: ChatMessage) => {
-  message.isExpanded = !message.isExpanded;
+  if (message.isThinkingProcess) {
+    message.isThinkingExpanded = !message.isThinkingExpanded;
+  } else {
+    message.isExpanded = !message.isExpanded;
+  }
+};
+
+// ⭐大脑模式消息处理
+const handleBrainModeMessage = async (message: string) => {
+  // 添加用户消息
+  messages.value.push({
+    content: message,
+    isUser: true,
+    time: getCurrentTime(),
+    messageType: 'human'
+  });
+
+  isLoading.value = true;
+  let brainSessionId: string | null = null;
+
+  // onStart 回调
+  const handleStart = (newSessionId: string) => {
+    brainSessionId = newSessionId;
+    // 保存sessionId到全局状态和localStorage以保持上下文连续性
+    saveSessionId(newSessionId);
+    console.log(`Brain mode session started: ${brainSessionId}`);
+    
+    // 🔧 修复：不在这里停止loading，保持转圈直到流完成
+    // isLoading.value = false;
+    
+    // 不再创建占位符，由watch在检测到第一个流式内容时创建
+  };
+
+  try {
+    await sendOrchestratorStreamMessage(
+      message,
+      projectStore.currentProjectId!,
+      handleStart,
+      undefined,  // signal参数
+      sessionId.value || undefined  // 传递session_id以保持上下文
+    );
+
+    // sendOrchestratorStreamMessage 现在使用全局状态管理
+    // 需要监听 activeOrchestratorStreams 的变化来实时更新界面
+  } catch (error) {
+    console.error('Brain mode error:', error);
+    Message.error('消息发送失败');
+    isLoading.value = false;
+  }
 };
 
 // 添加或更新会话到列表
@@ -631,6 +828,7 @@ const switchSession = async (id: string) => {
     const response = await getChatHistory(id, projectStore.currentProjectId);
 
     if (response.status === 'success') {
+      const tempMessages: ChatMessage[] = [];
       response.data.history.forEach(historyItem => {
         // 🆕 跳过系统消息，不在消息列表中显示
         if (historyItem.type === 'system') {
@@ -641,7 +839,7 @@ const switchSession = async (id: string) => {
           content: historyItem.content,
           isUser: historyItem.type === 'human',
           time: formatHistoryTime(historyItem.timestamp),
-          messageType: historyItem.type // 添加消息类型用于区分头像
+          messageType: historyItem.type
         };
 
         // 如果是工具消息，设置默认折叠状态
@@ -649,13 +847,22 @@ const switchSession = async (id: string) => {
           message.isExpanded = false;
         }
 
+        // 🎨 如果是思考过程消息，设置折叠状态
+        if (historyItem.is_thinking_process) {
+          message.isThinkingProcess = true;
+          message.isThinkingExpanded = false;
+        }
+
         // 如果消息包含图片，添加图片数据
         if (historyItem.image) {
           message.imageDataUrl = historyItem.image;
         }
 
-        messages.value.push(message);
+        tempMessages.push(message);
       });
+
+      // 🎨 合并连续的思考过程消息
+      messages.value = mergeThinkingProcessMessages(tempMessages);
 
       // 更新会话信息（不更新时间，因为这是加载历史记录）
       updateSessionInList(id, undefined, false);
@@ -742,7 +949,7 @@ const batchDeleteSessions = async (sessionIds: string[]) => {
     const response = await batchDeleteChatHistory(sessionIds, projectStore.currentProjectId);
 
     if (response.status === 'success') {
-      const { deleted_count, processed_sessions, failed_sessions } = response.data;
+      const { processed_sessions, failed_sessions } = response.data;
       
       // 从列表中移除已删除的会话
       chatSessions.value = chatSessions.value.filter(s => !sessionIds.includes(s.id));
@@ -832,6 +1039,12 @@ const handleSendMessage = async (data: { message: string; image?: string; imageD
 
   if (!projectStore.currentProjectId) {
     Message.error('请先选择一个项目');
+    return;
+  }
+
+  // ⭐大脑模式使用orchestrator流式接口
+  if (isBrainMode.value) {
+    await handleBrainModeMessage(message);
     return;
   }
 
@@ -971,7 +1184,6 @@ const handleStreamMessage = async (requestData: ChatRequest) => {
 
 // 处理非流式消息
 const handleNormalMessage = async (requestData: ChatRequest, originalMessage: string) => {
-  const isNewSession = !sessionId.value; // 检查是否是新会话
   // 添加loading占位消息
   const loadingMessageIndex = messages.value.length;
   messages.value.push({
@@ -1371,11 +1583,181 @@ watch(() => projectStore.currentProjectId, async (newProjectId, oldProjectId) =>
   }
 });
 
+// 监听 Brain 模式的流式输出,实时更新消息
+watch(
+  () => {
+    const streams = activeOrchestratorStreams.value;
+    return Object.keys(streams).length > 0 ? streams : null;
+  },
+  async (streams) => {
+    if (!streams) return;
+    
+    const sessionIds = Object.keys(streams);
+    if (sessionIds.length === 0) return;
+    
+    const latestSessionId = sessionIds[sessionIds.length - 1];
+    const stream = streams[latestSessionId];
+    
+    if (!stream) return;
+    
+    // 1. 追加 stream.messages（Brain决策、工具消息等）
+    if (stream.messages && stream.messages.length > 0) {
+      if (!stream.processedMessageCount) {
+        stream.processedMessageCount = 0;
+      }
+      
+      const newMessages = stream.messages.slice(stream.processedMessageCount);
+      if (newMessages.length > 0) {
+        // 🎨 直接追加消息，不立即合并（保持对象引用稳定）
+        newMessages.forEach(msg => {
+          messages.value.push({
+            content: msg.content,
+            isUser: false,
+            time: msg.time,
+            messageType: msg.type,
+            toolName: msg.toolName,
+            isExpanded: msg.isExpanded,
+            isThinkingProcess: msg.isThinkingProcess,
+            isThinkingExpanded: msg.isThinkingExpanded
+          });
+        });
+        
+        stream.processedMessageCount = stream.messages.length;
+        console.log('[Brain Watch] Appended', newMessages.length, 'structured messages');
+      }
+    }
+    
+    // 2. 管理流式内容占位符
+    // 查找当前的流式内容占位符（标记为 isStreaming=true）
+    let streamingMessageIndex = -1;
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      if (messages.value[i].isStreaming === true) {
+        streamingMessageIndex = i;
+        break;
+      }
+    }
+    
+    if (stream.content && stream.content.trim()) {
+      // 有流式内容
+      if (streamingMessageIndex === -1) {
+        // 没有占位符，创建一个新的
+        messages.value.push({
+          content: stream.content,
+          isUser: false,
+          time: getCurrentTime(),
+          messageType: 'ai',
+          isStreaming: true // 使用isStreaming标记来识别流式内容占位符
+        });
+        console.log('[Brain Watch] Created streaming placeholder');
+      } else {
+        // 更新现有占位符
+        messages.value[streamingMessageIndex].content = stream.content;
+      }
+    }
+    
+    // 3. 流完成时的处理
+    if (stream.isComplete) {
+      console.log('[Brain Watch] Stream complete, reloading history');
+      
+      // 关闭流式状态
+      if (streamingMessageIndex !== -1) {
+        messages.value[streamingMessageIndex].isStreaming = false;
+      }
+      
+      // 重新加载完整历史，确保包含所有后端保存的消息
+      if (latestSessionId && projectStore.currentProjectId) {
+        try {
+          // 🎨 保存当前的展开状态（根据内容匹配）
+          const expandedStates = new Map<string, boolean>();
+          messages.value.forEach(msg => {
+            if (msg.isThinkingProcess && msg.isThinkingExpanded) {
+              // 使用内容的前100个字符作为key
+              const key = msg.content.substring(0, 100);
+              expandedStates.set(key, true);
+            }
+          });
+          
+          const response = await getChatHistory(latestSessionId, projectStore.currentProjectId);
+          if (response.status === 'success') {
+            // 清空当前消息并重新加载
+            messages.value = [];
+            
+            const tempMessages: ChatMessage[] = [];
+            response.data.history.forEach(historyItem => {
+              if (historyItem.type === 'system') return;
+              
+              const message: ChatMessage = {
+                content: historyItem.content,
+                isUser: historyItem.type === 'human',
+                time: formatHistoryTime(historyItem.timestamp),
+                messageType: historyItem.type
+              };
+              
+              if (historyItem.type === 'tool') {
+                message.isExpanded = false;
+              }
+              
+              // 🎨 如果是思考过程消息，设置折叠状态
+              if (historyItem.is_thinking_process) {
+                message.isThinkingProcess = true;
+                message.isThinkingExpanded = false;
+              }
+              
+              if (historyItem.image) {
+                message.imageDataUrl = historyItem.image;
+              }
+              
+              tempMessages.push(message);
+            });
+            
+            // 🎨 合并连续的思考过程消息
+            messages.value = mergeThinkingProcessMessages(tempMessages);
+            
+            // 🎨 恢复展开状态
+            messages.value.forEach(msg => {
+              if (msg.isThinkingProcess) {
+                const key = msg.content.substring(0, 100);
+                if (expandedStates.has(key)) {
+                  msg.isThinkingExpanded = true;
+                }
+              }
+            });
+            
+            // 更新会话列表
+            const firstUserMessage = messages.value.find(m => m.isUser);
+            if (firstUserMessage) {
+              updateSessionInList(latestSessionId, firstUserMessage.content, true);
+            }
+            
+            console.log('[Brain Watch] History reloaded:', messages.value.length, 'messages');
+          }
+        } catch (error) {
+          console.error('[Brain Watch] Failed to reload history:', error);
+        }
+      }
+      
+      // 清理流状态
+      clearOrchestratorStreamState(latestSessionId);
+      isLoading.value = false;
+    }
+  },
+  { deep: true }
+);
+
 watch([useKnowledgeBase, selectedKnowledgeBaseId, similarityThreshold, topK], () => {
   saveKnowledgeBaseSettings();
 }, { deep: true });
 
+// 监听Brain模式状态，保存到localStorage
+watch(isBrainMode, (newValue) => {
+  localStorage.setItem('langgraph_brain_mode', newValue.toString());
+  console.log('💾 Brain mode state saved:', newValue);
+});
+
 onMounted(async () => {
+  // ⭐加载保存的提示词ID
+  loadSavedPromptId();
+  
   // 加载知识库设置
   loadKnowledgeBaseSettings();
   

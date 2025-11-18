@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
+import os
 
 from wharttest_django.viewsets import BaseModelViewSet
 from wharttest_django.permissions import HasModelPermission
@@ -24,6 +25,23 @@ class UserPromptViewSet(BaseModelViewSet):
     search_fields = ['name', 'description']
     ordering_fields = ['created_at', 'updated_at', 'name']
     ordering = ['-updated_at']
+
+    def _load_brain_prompt_from_file(self):
+        """从文件加载Brain提示词"""
+        brain_prompt_file = os.path.join(
+            os.path.dirname(__file__),
+            '..',
+            'orchestrator_integration',
+            'brain_system_prompt.md'
+        )
+        try:
+            with open(brain_prompt_file, 'r', encoding='utf-8') as f:
+                return f.read()
+        except FileNotFoundError:
+            # 如果文件不存在，返回默认提示词
+            return """你是Brain Agent，负责智能判断用户意图并编排子Agent执行任务。
+
+请参考orchestrator_integration/brain_system_prompt.md文件配置完整提示词。"""
 
     def get_permissions(self):
         """返回此视图所需权限的实例列表"""
@@ -563,6 +581,48 @@ class UserPromptViewSet(BaseModelViewSet):
 - 执行完所有步骤后，务必关闭浏览器
 - 确保JSON格式正确，可以被程序解析
 - **并发安全**：使用唯一文件名避免多个测试用例同时执行时的文件冲突"""
+            },
+            'test_case_execution': {
+                'name': '测试用例执行',
+                'description': '用于驱动测试用例自动执行的系统提示词',
+                'content': """# 角色
+你是一个专业的软件测试执行引擎。
+
+# 任务
+根据下面提供的测试用例信息,使用你可用的工具(特别是Playwright浏览器工具)来执行UI自动化测试。
+
+# 测试用例信息
+- **用例ID**: {testcase_id}
+- **用例名称**: {testcase_name}
+- **前置条件**: {precondition}
+
+# 执行步骤
+{steps}
+
+# 输出格式
+在所有步骤执行完毕后,你**必须**返回一个JSON对象,格式如下:
+```json
+{{
+  "testcase_id": {testcase_id},
+  "status": "pass" | "fail",
+  "summary": "对执行过程的简短总结。",
+  "steps": [
+    {{
+      "step_number": 1,
+      "description": "步骤的描述",
+      "status": "pass" | "fail",
+      "screenshot": "path/to/screenshot.png" | null,
+      "error": "如果失败,记录错误信息" | null
+    }},
+    ...
+  ]
+}}
+```"""
+            },
+            'brain_orchestrator': {
+                'name': 'Brain编排器',
+                'description': 'Brain Agent的系统提示词，负责智能判断用户意图并编排子Agent执行任务',
+                'content': self._load_brain_prompt_from_file()
             }
         }
 

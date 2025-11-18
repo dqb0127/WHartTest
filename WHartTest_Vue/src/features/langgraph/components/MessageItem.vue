@@ -23,6 +23,9 @@
           <span></span>
         </div>
         <div v-else-if="message.messageType === 'tool'" class="tool-message-content">
+          <div v-if="message.toolName" class="tool-header">
+            🔧 {{ message.toolName }}
+          </div>
           <div
             :class="['tool-content', { 'collapsed': !message.isExpanded && shouldCollapse }]"
             :key="message.content"
@@ -38,6 +41,20 @@
           </div>
         </div>
 
+        <!-- 🎨 思考过程消息（可折叠） -->
+        <div v-else-if="message.isThinkingProcess" class="thinking-process-content">
+          <div class="thinking-header" @click="$emit('toggle-expand', message)">
+            <span class="thinking-label">思考过程</span>
+          </div>
+          <div
+            v-show="message.isThinkingExpanded"
+            :key="message.content"
+            class="thinking-body"
+            v-html="formattedContent"
+          ></div>
+        </div>
+
+        <!-- 普通AI消息 -->
         <div
           v-else
           :key="message.content"
@@ -80,6 +97,8 @@ interface ChatMessage {
   isStreaming?: boolean; // 新增：标识是否正在流式输出
   imageBase64?: string; // 🆕 消息携带的图片（Base64）
   imageDataUrl?: string; // 🆕 完整的图片Data URL
+  isThinkingProcess?: boolean; // 🎨 是否是思考过程
+  isThinkingExpanded?: boolean; // 🎨 思考过程是否展开
 }
 
 interface Props {
@@ -348,17 +367,24 @@ const isCodeContentComplete = (codeContent: string, language: string): boolean =
 // 格式化工具消息
 const formatToolMessage = (content: string) => {
   try {
-    // 尝试解析JSON
+    // 先尝试解析为 JSON
     const jsonData = JSON.parse(content);
-    // 如果解析成功，格式化为带代码块的JSON
     const formattedJson = JSON.stringify(jsonData, null, 2);
     return `\`\`\`json\n${formattedJson}\n\`\`\``;
-  } catch (error) {
-    // 如果不是有效的JSON，检查是否已经是代码块格式
+  } catch {
+    // 如果不是 JSON,检查是否已经包含代码块标记
     if (content.includes('```')) {
       return content;
     }
-    // 否则包装为代码块
+    
+    // 检测是否为纯数字或简单文本(少于 50 字符且无换行)
+    const trimmedContent = content.trim();
+    if (trimmedContent.length < 50 && !trimmedContent.includes('\n')) {
+      // 简单文本直接显示,无需代码块
+      return trimmedContent;
+    }
+    
+    // 其他情况包装为代码块
     return `\`\`\`\n${content}\n\`\`\``;
   }
 };
@@ -525,6 +551,15 @@ const formatToolMessage = (content: string) => {
 /* 工具消息折叠展开样式 */
 .tool-message-content {
   position: relative;
+}
+
+.tool-header {
+  font-size: 0.9em;
+  font-weight: 600;
+  color: #666;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e6f4ea;
 }
 
 .tool-content {
@@ -805,5 +840,40 @@ const formatToolMessage = (content: string) => {
   word-break: break-all;
   white-space: pre-wrap;
   overflow-wrap: break-word;
+}
+
+/* 🎨 思考过程样式 */
+.thinking-process-content {
+  width: 100%;
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: #f7f8fa;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  user-select: none;
+}
+
+.thinking-header:hover {
+  background-color: #ebeef5;
+}
+
+.thinking-label {
+  font-weight: 500;
+  color: #4e5969;
+  flex: 1;
+}
+
+.thinking-body {
+  margin-top: 8px;
+  padding: 12px;
+  background-color: #f9fafb;
+  border-radius: 8px;
+  border-left: 3px solid #165dff;
 }
 </style>

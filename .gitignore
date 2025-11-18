@@ -46,6 +46,7 @@ out/
 
 # Dependencies (handled by subdirectories, but backup)
 node_modules/
+nltk_data/
 
 # Python cache (handled by Django .gitignore, but backup)
 __pycache__/

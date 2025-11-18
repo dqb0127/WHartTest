@@ -12,6 +12,8 @@ chat_history.sqlite  # LangGraph聊天历史数据库
 chroma.sqlite3  # ChromaDB数据库文件
 /static/
 /media/  # 包含用户上传的文档和知识库数据
+# NLTK数据（通过nltk.download()下载，不应提交到版本控制）
+nltk_data/
 /logs/  # 应用日志文件
 browser_data/  # 浏览器用户数据
 knowledge_bases/  # 知识库数据（如果MEDIA_ROOT未正确设置时的位置）
@@ -29,6 +31,8 @@ env/
 # HuggingFace模型缓存
 .cache/
 media
+
+
 # IDE / Editor
 .idea/
 .vscode/

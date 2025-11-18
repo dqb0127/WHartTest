@@ -42,6 +42,19 @@
         </div>
       </div>
 
+      <!-- 大脑模式按钮 -->
+      <a-button
+        class="brain-button"
+        :type="isBrainMode ? 'primary' : 'outline'"
+        :loading="isLoading"
+        @click="toggleBrainMode"
+        title="智能规划模式"
+      >
+        <template #icon>
+          <icon-mind-mapping />
+        </template>
+      </a-button>
+
       <a-button
         type="primary"
         :loading="isLoading"
@@ -62,25 +75,35 @@ import {
   Button as AButton, 
   Message 
 } from '@arco-design/web-vue';
-import { IconImage, IconClose } from '@arco-design/web-vue/es/icon';
+import { IconImage, IconClose, IconMindMapping } from '@arco-design/web-vue/es/icon';
 
 interface Props {
   isLoading: boolean;
   supportsVision?: boolean; // 当前模型是否支持图片输入
+  brainMode?: boolean; // 是否为大脑模式
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  supportsVision: false
+  supportsVision: false,
+  brainMode: false
 });
 
 const emit = defineEmits<{
   'send-message': [data: { message: string; image?: string; imageDataUrl?: string }];
+  'update:brain-mode': [value: boolean];
 }>();
 
 const inputMessage = ref('');
 const imageFile = ref<File | null>(null);
 const imagePreview = ref<string>('');
 const isDragOver = ref(false);
+const isBrainMode = ref(props.brainMode);
+
+// 切换大脑模式
+const toggleBrainMode = () => {
+  isBrainMode.value = !isBrainMode.value;
+  emit('update:brain-mode', isBrainMode.value);
+};
 
 // 移除图片
 const removeImage = () => {
@@ -384,6 +407,22 @@ const handlePaste = (e: ClipboardEvent) => {
     opacity: 0.8;
     transform: scale(1.02);
   }
+}
+
+.brain-button {
+  flex-shrink: 0;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+  transition: all 0.3s ease;
+}
+
+.brain-button:hover {
+  transform: scale(1.1);
 }
 
 .send-button {

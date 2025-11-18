@@ -120,20 +120,26 @@ service.interceptors.response.use(
     // 检查后端返回的标准格式 { status, code, message, data, errors }
     if (res && 'status' in res && 'data' in res) {
       return {
-        success: res.status === 'success', // 根据后端状态判断是否成功
-        data: res.data, // 直接传递data字段
-        total: response.headers['x-total-count'] ? parseInt(response.headers['x-total-count']) : undefined,
-        message: res.message || 'success'
-      };
+        ...response,
+        data: {
+          success: res.status === 'success', // 根据后端状态判断是否成功
+          data: res.data, // 直接传递data字段
+          total: response.headers['x-total-count'] ? parseInt(response.headers['x-total-count']) : undefined,
+          message: res.message || 'success'
+        }
+      } as any;
     }
 
     // 旧的处理方式，保留兼容性
     return {
-      success: true,
-      data: res,
-      total: response.headers['x-total-count'] ? parseInt(response.headers['x-total-count']) : undefined,
-      message: 'success'
-    };
+      ...response,
+      data: {
+        success: true,
+        data: res,
+        total: response.headers['x-total-count'] ? parseInt(response.headers['x-total-count']) : undefined,
+        message: 'success'
+      }
+    } as any;
   },
   async (error) => {
     const originalRequest = error.config as RequestConfig;
@@ -143,17 +149,95 @@ service.interceptors.response.use(
 
     // 检查是否是401错误（未授权）
     if (response && response.status === 401) {
-      // 对于所有401错误，直接清除token并跳转到登录页
-      const authStore = useAuthStore();
-      authStore.logout();
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+      // 如果是刷新token的请求失败，直接登出
+      if (originalRequest.url?.includes('/token/refresh/')) {
+        const authStore = useAuthStore();
+        authStore.logout();
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+        return Promise.reject({
+          success: false,
+          status: 401,
+          error: '登录已过期，请重新登录',
+        });
       }
-      return Promise.reject({
-        success: false,
-        status: 401,
-        error: '登录已过期，请重新登录',
-      });
+
+      // 如果已经重试过，直接登出
+      if (originalRequest._retry) {
+        const authStore = useAuthStore();
+        authStore.logout();
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+        return Promise.reject({
+          success: false,
+          status: 401,
+          error: '登录已过期，请重新登录',
+        });
+      }
+
+      // 标记为已重试
+      originalRequest._retry = true;
+
+      // 如果正在刷新token，将请求加入队列
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          subscribeTokenRefresh((token: string) => {
+            if (!originalRequest.headers) {
+              originalRequest.headers = {};
+            }
+            originalRequest.headers['Authorization'] = `Bearer ${token}`;
+            resolve(service(originalRequest));
+          });
+        });
+      }
+
+      // 开始刷新token
+      isRefreshing = true;
+
+      try {
+        const newToken = await refreshToken();
+        
+        if (newToken) {
+          // 刷新成功，更新请求头并重试原请求
+          isRefreshing = false;
+          onRefreshed(newToken);
+          if (!originalRequest.headers) {
+            originalRequest.headers = {};
+          }
+          originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
+          return service(originalRequest);
+        } else {
+          // 刷新失败，清除队列并登出
+          isRefreshing = false;
+          refreshSubscribers = [];
+          const authStore = useAuthStore();
+          authStore.logout();
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+          return Promise.reject({
+            success: false,
+            status: 401,
+            error: '登录已过期，请重新登录',
+          });
+        }
+      } catch (refreshError) {
+        // 刷新token时发生异常
+        isRefreshing = false;
+        refreshSubscribers = [];
+        const authStore = useAuthStore();
+        authStore.logout();
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+        return Promise.reject({
+          success: false,
+          status: 401,
+          error: '登录已过期，请重新登录',
+        });
+      }
     }
 
     if (response) {
@@ -187,14 +271,6 @@ service.interceptors.response.use(
 
       // 处理特定的错误状态码
       switch (status) {
-        case 401:
-          // 检查是否是令牌无效的错误，或者是刷新token的请求失败，或者重试后仍然401
-          if (isTokenInvalidError(response.data) || originalRequest._retry || originalRequest.url === '/token/refresh/') {
-            message = '登录已过期，请重新登录';
-            // 清除token并重定向到登录页
-            handleAuthError(message);
-          }
-          break;
         case 403:
           // 对于403错误，优先使用从响应中解析的具体权限错误消息
           // 如果没有解析到具体消息，则使用默认消息
@@ -239,7 +315,7 @@ export async function request<T>(config: RequestConfig): Promise<{
 }> {
   try {
     const response = await service(config);
-    return response as { success: boolean; data: T; total?: number; message: string };
+    return response.data as { success: boolean; data: T; total?: number; message: string };
   } catch (error: any) {
     return error;
   }

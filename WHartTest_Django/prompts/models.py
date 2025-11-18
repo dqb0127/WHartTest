@@ -13,6 +13,7 @@ class PromptType(models.TextChoices):
     MODULE_ANALYSIS = 'module_analysis', _('模块分析')
     CONSISTENCY_ANALYSIS = 'consistency_analysis', _('一致性分析')
     TEST_CASE_EXECUTION = 'test_case_execution', _('测试用例执行')
+    BRAIN_ORCHESTRATOR = 'brain_orchestrator', _('智能规划')
 
 class UserPrompt(models.Model):
     """

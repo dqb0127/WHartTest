@@ -582,7 +582,7 @@ class ChatAPIView(APIView):
                 messages_list = []
 
                 # 获取有效的系统提示词（用户提示词优先）
-                effective_prompt, prompt_source = get_effective_system_prompt(request.user, prompt_id)
+                effective_prompt, prompt_source = await get_effective_system_prompt_async(request.user, prompt_id)
 
                 # 检查当前会话是否已经有系统提示词
                 should_add_system_prompt = False
@@ -900,6 +900,14 @@ class ChatHistoryAPIView(APIView):
                                     if not content or (isinstance(content, str) and content.strip() == ""):
                                         logger.debug(f"ChatHistoryAPIView: Skipping empty AI message at index {i}")
                                         continue
+                                    
+                                    # 提取additional_kwargs中的agent信息
+                                    agent_info = None
+                                    agent_type = None
+                                    if hasattr(msg, 'additional_kwargs') and msg.additional_kwargs:
+                                        agent_info = msg.additional_kwargs.get('agent')
+                                        agent_type = msg.additional_kwargs.get('agent_type')
+                                        logger.debug(f"ChatHistoryAPIView: AI message has agent info: {agent_info}, type: {agent_type}")
 
                                 elif isinstance(msg, ToolMessage):
                                     msg_type = "tool"
@@ -924,6 +932,15 @@ class ChatHistoryAPIView(APIView):
                                     # 如果消息包含图片，添加图片数据
                                     if msg_type == "human" and 'image_data' in locals() and image_data:
                                         message_data["image"] = image_data
+                                    # 如果AI消息包含agent信息，添加到返回数据中
+                                    if msg_type == "ai" and 'agent_info' in locals() and agent_info:
+                                        message_data["agent"] = agent_info
+                                        if 'agent_type' in locals() and agent_type:
+                                            message_data["agent_type"] = agent_type
+                                        # 🎨 检查是否是思考过程消息
+                                        if hasattr(msg, 'additional_kwargs') and msg.additional_kwargs:
+                                            if msg.additional_kwargs.get('is_thinking_process'):
+                                                message_data["is_thinking_process"] = True
                                     # 添加对应的时间戳
                                     if i in message_timestamps:
                                         timestamp_str = message_timestamps[i]

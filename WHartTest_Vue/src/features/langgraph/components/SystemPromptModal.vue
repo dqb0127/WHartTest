@@ -88,7 +88,7 @@
                       </template>
                     </a-button>
                     <a-button
-                      v-if="!prompt.is_default && prompt.prompt_type === 'general'"
+                      v-if="!prompt.is_default && !isProgramCallPromptType(prompt.prompt_type)"
                       type="text"
                       size="mini"
                       @click="setAsDefault(prompt)"
@@ -243,7 +243,8 @@ import type {
 import {
   PROMPT_TYPE_CHOICES,
   isRequirementPromptType,
-  getPromptTypeDisplayName
+  getPromptTypeDisplayName,
+  isProgramCallPromptType
 } from '@/features/prompts/types/prompt';
 import { formatDateTime } from '@/utils/formatters';
 
@@ -606,13 +607,13 @@ const handleCancel = () => {
 
 // 计算属性：是否为需求评审类型
 const isRequirementType = computed(() => {
-  return promptFormData.value.prompt_type !== 'general';
+  return isProgramCallPromptType(promptFormData.value.prompt_type);
 });
 
 // 处理提示词类型变更
 const handlePromptTypeChange = (type: PromptType) => {
-  // 如果切换到非通用对话类型，则禁用默认设置
-  if (type !== 'general') {
+  // 如果切换到程序调用类型，则禁用默认设置
+  if (isProgramCallPromptType(type)) {
     promptFormData.value.is_default = false;
   }
 };

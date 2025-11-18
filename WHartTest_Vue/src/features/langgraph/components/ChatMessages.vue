@@ -17,7 +17,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { IconMessage } from '@arco-design/web-vue/es/icon';
 import MessageItem from './MessageItem.vue';
 
@@ -26,11 +26,13 @@ interface ChatMessage {
   isUser: boolean;
   time: string;
   isLoading?: boolean;
-  messageType?: 'human' | 'ai' | 'tool' | 'system'; // 🆕 添加 system 类型
+  messageType?: 'human' | 'ai' | 'tool' | 'system';
   isExpanded?: boolean;
   isStreaming?: boolean;
-  imageBase64?: string; // 🆕 消息携带的图片（Base64）
-  imageDataUrl?: string; // 🆕 完整的图片Data URL
+  imageBase64?: string;
+  imageDataUrl?: string;
+  isThinkingProcess?: boolean;
+  isThinkingExpanded?: boolean;
 }
 
 interface Props {
@@ -45,6 +47,16 @@ defineEmits<{
 }>();
 
 const messagesContainer = ref<HTMLElement | null>(null);
+const userIsScrolling = ref(false); // 用户是否正在查看历史消息
+let scrollTimeout: number | null = null;
+
+// 检测用户是否在底部附近
+const isNearBottom = (): boolean => {
+  if (!messagesContainer.value) return true;
+  const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value;
+  // 如果距离底部小于100px，认为用户在底部
+  return scrollHeight - scrollTop - clientHeight < 100;
+};
 
 // 滚动到最新消息
 const scrollToBottom = async () => {
@@ -54,12 +66,33 @@ const scrollToBottom = async () => {
   }
 };
 
-// 监听消息数量变化，自动滚动（只在添加新消息时滚动，不在消息属性变化时滚动）
+// 处理滚动事件
+const handleScroll = () => {
+  // 检测用户是否在底部
+  const nearBottom = isNearBottom();
+  userIsScrolling.value = !nearBottom;
+  
+  // 清除之前的定时器
+  if (scrollTimeout !== null) {
+    clearTimeout(scrollTimeout);
+  }
+  
+  // 如果用户滚动到底部附近，恢复自动滚动
+  if (nearBottom) {
+    scrollTimeout = window.setTimeout(() => {
+      userIsScrolling.value = false;
+    }, 150);
+  }
+};
+
+// 监听消息数量变化，只在用户未主动滚动时自动滚动
 watch(() => props.messages.length, () => {
-  scrollToBottom();
+  if (!userIsScrolling.value) {
+    scrollToBottom();
+  }
 });
 
-// 监听流式消息内容变化，自动滚动
+// 监听流式消息内容变化，只在用户未主动滚动时自动滚动
 watch(() => {
   // 找到最后一条正在流式输出的消息
   const lastMessage = props.messages[props.messages.length - 1];
@@ -68,9 +101,26 @@ watch(() => {
   }
   return null;
 }, (newContent) => {
-  // 只有当内容确实发生变化时才滚动
-  if (newContent !== null) {
+  // 只有当内容确实发生变化且用户未主动滚动时才滚动
+  if (newContent !== null && !userIsScrolling.value) {
     scrollToBottom();
+  }
+});
+
+// 组件挂载时添加滚动监听
+onMounted(() => {
+  if (messagesContainer.value) {
+    messagesContainer.value.addEventListener('scroll', handleScroll);
+  }
+});
+
+// 组件卸载时移除滚动监听
+onUnmounted(() => {
+  if (messagesContainer.value) {
+    messagesContainer.value.removeEventListener('scroll', handleScroll);
+  }
+  if (scrollTimeout !== null) {
+    clearTimeout(scrollTimeout);
   }
 });
 

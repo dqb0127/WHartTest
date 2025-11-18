@@ -7,7 +7,9 @@ export type PromptType =
   | 'direct_analysis'
   | 'global_analysis'
   | 'module_analysis'
-  | 'consistency_analysis';
+  | 'consistency_analysis'
+  | 'test_case_execution'
+  | 'brain_orchestrator';
 
 /**
  * 提示词类型选项
@@ -19,6 +21,8 @@ export const PROMPT_TYPE_CHOICES = [
   { key: 'global_analysis', name: '全局分析', isProgramCall: true },
   { key: 'module_analysis', name: '模块分析', isProgramCall: true },
   { key: 'consistency_analysis', name: '一致性分析', isProgramCall: true },
+  { key: 'test_case_execution', name: '测试用例执行', isProgramCall: true },
+  { key: 'brain_orchestrator', name: '智能规划', isProgramCall: false },
 ] as const;
 
 /**
