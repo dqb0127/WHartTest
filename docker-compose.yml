@@ -7,17 +7,22 @@
 services:
   # Redis 服务 - Celery的broker和backend
   redis:
+    # 当前使用 DaoCloud 镜像加速（国内最稳定的公共镜像源之一）
+    # 如果拉取失败，可尝试：
+    # - dockerproxy.com/library/redis:7-alpine
+    # - docker.1panel.live/library/redis:7-alpine
+    # - docker.rainbond.cc/library/redis:7-alpine
     image: docker.m.daocloud.io/library/redis:7-alpine
     container_name: wharttest-redis
     ports:
-      - "8911:6379"
+      - "8911:6379" 
     volumes:
       - redis-data:/data
     networks:
       - wharttest-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -59,7 +64,7 @@ services:
       - wharttest-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/')"]
+      test: [ "CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/')" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -81,7 +86,7 @@ services:
       - wharttest-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -95,7 +100,7 @@ services:
     #   context: ./WHartTest_MCP
     #   dockerfile: Dockerfile
     container_name: wharttest-mcp
-    user: root 
+    user: root
     environment:
       # WHartTest Tools 配置
       - WHARTTEST_BACKEND_URL=${WHARTTEST_BACKEND_URL:-http://backend:8000}
@@ -106,17 +111,17 @@ services:
       - MS_ACCESS_KEY=${MS_ACCESS_KEY:-your_16byte_key1}
       - MS_SECRET_KEY=${MS_SECRET_KEY:-your_16byte_key2}
     ports:
-      - "8914:8006"  # WHartTest_tools 服务端口
-      - "8915:8007"  # ms_mcp_api 服务端口
+      - "8914:8006" # WHartTest_tools 服务端口
+      - "8915:8007" # ms_mcp_api 服务端口
     volumes:
-      - ./data/playwright-screenshots:/tmp/playwright-output  # 使用本地目录挂载
+      - ./data/playwright-screenshots:/tmp/playwright-output # 使用本地目录挂载
     depends_on:
       - backend
     networks:
       - wharttest-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8006/')"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8006/')" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -126,25 +131,19 @@ services:
   playwright-mcp:
     image: mcr.microsoft.com/playwright/mcp
     container_name: wharttest-playwright-mcp
-    user: root  # 以 root 用户运行,确保有权限写入挂载目录
+    user: root # 以 root 用户运行,确保有权限写入挂载目录
     entrypoint: node
-    command: [
-      "cli.js",
-      "--no-sandbox",
-      "--host", "0.0.0.0",
-      "--allowed-hosts", "*",
-      "--config", "/app/playwright-mcp-config.json"
-    ]
+    command: [ "cli.js", "--no-sandbox", "--host", "0.0.0.0", "--allowed-hosts", "*", "--config", "/app/playwright-mcp-config.json" ]
     ports:
       - "8916:8931"
     volumes:
-      - ./data/playwright-screenshots:/tmp/playwright-output  # 使用本地目录挂载
-      - ./WHartTest_MCP/playwright-mcp-config.json:/app/playwright-mcp-config.json:ro  # 挂载配置文件
+      - ./data/playwright-screenshots:/tmp/playwright-output # 使用本地目录挂载
+      - ./WHartTest_MCP/playwright-mcp-config.json:/app/playwright-mcp-config.json:ro # 挂载配置文件
     networks:
       - wharttest-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8931/mcp"]
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8931/mcp" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -158,5 +157,5 @@ volumes:
   backend-static:
   redis-data:
   celery-beat-schedule:
-  # db.sqlite3 和 media 改用本地目录挂载，不再需要 named volume
-  # playwright-screenshots 改用本地目录挂载，不再需要 named volume
+    # db.sqlite3 和 media 改用本地目录挂载，不再需要 named volume
+    # playwright-screenshots 改用本地目录挂载，不再需要 named volume
