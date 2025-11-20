@@ -658,13 +658,8 @@ const handleSubmit = async () => {
 
       Message.success(isEditing.value ? '测试用例更新成功' : '测试用例创建成功');
       
-      // 编辑模式:保存后刷新当前页面数据
-      if (isEditing.value && formState.id) {
-        await fetchDetailsAndSetForm(formState.id);
-      } else {
-        // 新建模式:返回列表页
-        emit('submitSuccess');
-      }
+      // 无论编辑还是新建模式，保存成功后都返回列表页并刷新
+      emit('submitSuccess');
     } else {
       Message.error(response.error || (isEditing.value ? '更新失败' : '创建失败'));
     }
