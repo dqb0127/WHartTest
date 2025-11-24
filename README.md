@@ -54,7 +54,7 @@ docker-compose up -d
 - 提交 Issue
 - 项目讨论区
 
-<img width="400" alt="image" src="https://github.com/user-attachments/assets/6b0a5c6b-5d14-4d5a-958c-82c62b71299b" />
+<img width="400" alt="image" src="https://github.com/user-attachments/assets/074e7c56-39a6-40b5-a9c6-37232637dd09" />
 <img src="./docs/developer-guide/image.png" alt="contact" width="400">
 
 ---
