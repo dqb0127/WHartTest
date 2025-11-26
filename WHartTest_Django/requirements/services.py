@@ -38,6 +38,8 @@ def create_llm_instance(active_config, temperature=0.1):
             "model": model_identifier,
             "temperature": temperature,
             "api_key": active_config.api_key,
+            "max_retries": 3,  # 添加重试机制，处理临时性API故障
+            "timeout": 120,    # 增加超时时间
         }
         
         # 如果不是官方OpenAI，设置base_url
@@ -51,6 +53,62 @@ def create_llm_instance(active_config, temperature=0.1):
         logger.info(f"Initialized ChatOpenAI with model: {model_identifier}")
     
     return llm
+
+
+def safe_llm_invoke(llm, messages, max_retries=3, retry_delay=2):
+    """
+    安全地调用 LLM，处理空响应和临时性错误。
+    
+    某些 API（如非官方 OpenAI 兼容服务）可能返回 HTTP 200 但 choices 为空，
+    这个函数会检测并重试这种情况。
+    
+    Args:
+        llm: LangChain LLM 实例
+        messages: 消息列表
+        max_retries: 最大重试次数
+        retry_delay: 重试间隔（秒）
+    
+    Returns:
+        LLM 响应对象
+    
+    Raises:
+        Exception: 如果所有重试都失败
+    """
+    import time
+    
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = llm.invoke(messages)
+            
+            # 验证响应是否有效
+            if response and hasattr(response, 'content') and response.content:
+                return response
+            
+            # 响应为空，记录并重试
+            logger.warning(f"LLM 返回空响应，尝试重试 ({attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))  # 递增延迟
+            continue
+            
+        except TypeError as e:
+            # 捕获 'NoneType' object is not iterable 错误
+            if "'NoneType' object is not iterable" in str(e):
+                logger.warning(f"LLM API 返回空 choices，尝试重试 ({attempt + 1}/{max_retries})")
+                last_error = e
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                continue
+            raise
+        except Exception as e:
+            last_error = e
+            logger.warning(f"LLM 调用失败: {e}，尝试重试 ({attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))
+            continue
+    
+    # 所有重试都失败
+    raise last_error or Exception("LLM 调用失败，所有重试都未成功")
 
 
 class DocumentProcessor:
@@ -525,7 +583,7 @@ class ModuleSplitter:
                 HumanMessage(content=formatted_prompt)
             ]
             
-            response = self.llm.invoke(messages)
+            response = safe_llm_invoke(self.llm, messages)
             
             # 提取JSON内容
             json_match = re.search(r'```json\s*(.*?)\s*```', response.content, re.DOTALL)
@@ -1577,7 +1635,7 @@ class RequirementReviewEngine:
                 HumanMessage(content=formatted_prompt)
             ]
 
-            response = self.llm.invoke(messages)
+            response = safe_llm_invoke(self.llm, messages)
 
             # 提取JSON内容
             json_match = re.search(r'```json\s*(.*?)\s*```', response.content, re.DOTALL)
@@ -1648,7 +1706,7 @@ class RequirementReviewEngine:
             ]
             
             logger.info("调用LLM进行完整性分析...")
-            response = self.llm.invoke(messages)
+            response = safe_llm_invoke(self.llm, messages)
             logger.info(f"LLM响应完成，内容长度: {len(response.content)}")
             
             json_match = re.search(r'```json\s*(.*?)\s*```', response.content, re.DOTALL)
@@ -1687,7 +1745,7 @@ class RequirementReviewEngine:
             ]
             
             logger.info("调用LLM进行一致性分析...")
-            response = self.llm.invoke(messages)
+            response = safe_llm_invoke(self.llm, messages)
             logger.info(f"LLM响应完成，内容长度: {len(response.content)}")
             
             json_match = re.search(r'```json\s*(.*?)\s*```', response.content, re.DOTALL)
@@ -1724,7 +1782,7 @@ class RequirementReviewEngine:
                 HumanMessage(content=formatted_prompt)
             ]
             
-            response = self.llm.invoke(messages)
+            response = safe_llm_invoke(self.llm, messages)
             json_match = re.search(r'```json\s*(.*?)\s*```', response.content, re.DOTALL)
             
             if json_match:
@@ -1754,7 +1812,7 @@ class RequirementReviewEngine:
                 HumanMessage(content=formatted_prompt)
             ]
             
-            response = self.llm.invoke(messages)
+            response = safe_llm_invoke(self.llm, messages)
             json_match = re.search(r'```json\s*(.*?)\s*```', response.content, re.DOTALL)
             
             if json_match:
@@ -1784,7 +1842,7 @@ class RequirementReviewEngine:
                 HumanMessage(content=formatted_prompt)
             ]
             
-            response = self.llm.invoke(messages)
+            response = safe_llm_invoke(self.llm, messages)
             json_match = re.search(r'```json\s*(.*?)\s*```', response.content, re.DOTALL)
             
             if json_match:
@@ -2028,7 +2086,7 @@ class RequirementReviewEngine:
                 HumanMessage(content=formatted_prompt)
             ]
 
-            response = self.llm.invoke(messages)
+            response = safe_llm_invoke(self.llm, messages)
 
             # 提取JSON内容
             json_match = re.search(r'```json\s*(.*?)\s*```', response.content, re.DOTALL)
@@ -2088,7 +2146,7 @@ class RequirementReviewEngine:
                 HumanMessage(content=formatted_prompt)
             ]
 
-            response = self.llm.invoke(messages)
+            response = safe_llm_invoke(self.llm, messages)
 
             # 提取JSON内容
             json_match = re.search(r'```json\s*(.*?)\s*```', response.content, re.DOTALL)
@@ -2131,7 +2189,7 @@ class RequirementReviewEngine:
                 HumanMessage(content=formatted_prompt)
             ]
 
-            response = self.llm.invoke(messages)
+            response = safe_llm_invoke(self.llm, messages)
 
             # 提取JSON内容
             json_match = re.search(r'```json\s*(.*?)\s*```', response.content, re.DOTALL)
@@ -2628,3 +2686,4 @@ class RequirementReviewService:
                 'progress': 0,
                 'message': '评审失败，请重试'
             }
+
