@@ -16,12 +16,14 @@
           v-if="viewMode === 'list'"
           :current-project-id="currentProjectId"
           :selected-module-id="selectedModuleId"
+          :module-tree="moduleTreeForForm"
           @add-test-case="showAddTestCaseForm"
           @generate-test-cases="showGenerateCasesModal"
           @edit-test-case="showEditTestCaseForm"
           @view-test-case="showViewTestCaseDetail"
           @execute-test-case="handleExecuteTestCase"
           @test-case-deleted="handleTestCaseDeleted"
+          @module-filter-change="handleModuleSelected"
           ref="testCaseListRef"
         />
 

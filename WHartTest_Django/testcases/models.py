@@ -165,6 +165,15 @@ class TestCaseModule(models.Model):
         self.clean()
         super().save(*args, **kwargs)
 
+    def get_all_descendant_ids(self):
+        """
+        获取当前模块及其所有子模块的ID列表（递归）
+        """
+        ids = [self.id]
+        for child in self.children.all():
+            ids.extend(child.get_all_descendant_ids())
+        return ids
+
 
 class TestCaseScreenshot(models.Model):
     """

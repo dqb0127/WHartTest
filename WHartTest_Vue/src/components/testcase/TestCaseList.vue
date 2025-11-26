@@ -9,6 +9,14 @@
           @search="onSearch"
           v-model="localSearchKeyword"
         />
+        <a-tree-select
+          v-model="localSelectedModuleId"
+          :data="moduleTree"
+          placeholder="筛选模块"
+          allow-clear
+          style="width: 180px; margin-left: 12px;"
+          @change="onModuleChange"
+        />
         <a-select
           v-model="selectedLevel"
           placeholder="筛选优先级"
@@ -129,13 +137,14 @@ import {
   exportAllTestCasesToExcel,
   exportSelectedTestCasesToExcel,
   type TestCase,
-  type BatchDeleteResponse,
 } from '@/services/testcaseService';
 import { formatDate, getLevelColor } from '@/utils/formatters'; // 假设工具函数已移至此处
+import type { TreeNodeData } from '@arco-design/web-vue';
 
 const props = defineProps<{
   currentProjectId: number | null;
   selectedModuleId?: number | null; // 可选的模块ID，用于筛选
+  moduleTree?: TreeNodeData[]; // 模块树数据
 }>();
 
 const emit = defineEmits<{
@@ -145,9 +154,14 @@ const emit = defineEmits<{
   (e: 'viewTestCase', testCase: TestCase): void;
   (e: 'testCaseDeleted'): void;
   (e: 'executeTestCase', testCase: TestCase): void;
+  (e: 'module-filter-change', moduleId: number | null): void;
 }>();
 
 const { currentProjectId, selectedModuleId } = toRefs(props);
+const moduleTree = computed(() => props.moduleTree || []);
+
+// 本地模块选择（与外部 selectedModuleId 同步）
+const localSelectedModuleId = ref<number | null>(props.selectedModuleId || null);
 
 const loading = ref(false);
 const localSearchKeyword = ref('');
@@ -270,7 +284,7 @@ const fetchTestCases = async () => {
       page: paginationConfig.current,
       pageSize: paginationConfig.pageSize,
       search: localSearchKeyword.value,
-      module_id: selectedModuleId?.value || undefined, // 添加模块ID筛选
+      module_id: localSelectedModuleId.value || undefined, // 使用本地模块筛选
       level: selectedLevel.value || undefined, // 添加优先级筛选
     });
     if (response.success && response.data) {
@@ -298,6 +312,13 @@ const fetchTestCases = async () => {
 const onSearch = (value: string) => {
   localSearchKeyword.value = value;
   paginationConfig.current = 1;
+  fetchTestCases();
+};
+
+const onModuleChange = (value: number | null) => {
+  localSelectedModuleId.value = value;
+  paginationConfig.current = 1;
+  emit('module-filter-change', value);
   fetchTestCases();
 };
 
@@ -469,10 +490,13 @@ watch(currentProjectId, () => {
   fetchTestCases();
 });
 
-watch(selectedModuleId, () => {
-  paginationConfig.current = 1; // 模块切换时重置到第一页
-  selectedLevel.value = ''; // 模块变化时清空优先级筛选
-  fetchTestCases();
+// 监听外部模块选择变化（来自左侧模块管理面板）
+watch(selectedModuleId, (newVal) => {
+  if (newVal !== localSelectedModuleId.value) {
+    localSelectedModuleId.value = newVal || null;
+    paginationConfig.current = 1;
+    fetchTestCases();
+  }
 });
 
 // 暴露给父组件的方法
