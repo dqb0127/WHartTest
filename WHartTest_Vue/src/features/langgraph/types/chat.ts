@@ -57,6 +57,8 @@ export interface ChatHistoryResponseData {
   session_id: string;
   project_id: string; // 🆕 新增项目ID字段
   project_name: string; // 🆕 新增项目名称字段
+  prompt_id: number | null; // 🆕 新增提示词ID字段
+  prompt_name: string | null; // 🆕 新增提示词名称字段
   history: ChatHistoryMessage[];
 }
 

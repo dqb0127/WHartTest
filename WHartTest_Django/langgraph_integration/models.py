@@ -74,6 +74,8 @@ class ChatSession(models.Model):
                                   help_text="LangGraph会话的唯一标识符")
     title = models.CharField(max_length=200, verbose_name="对话标题", default="新对话")
     project = models.ForeignKey('projects.Project', on_delete=models.CASCADE, null=True, blank=True, verbose_name="关联项目")
+    prompt = models.ForeignKey('prompts.UserPrompt', on_delete=models.SET_NULL, null=True, blank=True,
+                               verbose_name="关联提示词", help_text="该会话使用的提示词")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 

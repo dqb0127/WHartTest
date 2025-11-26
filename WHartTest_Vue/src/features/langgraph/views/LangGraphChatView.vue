@@ -497,6 +497,13 @@ const loadChatHistory = async () => {
     if (response.status === 'success') {
       sessionId.value = response.data.session_id;
 
+      // 🆕 恢复该会话关联的提示词
+      if (response.data.prompt_id !== null && response.data.prompt_id !== undefined) {
+        selectedPromptId.value = response.data.prompt_id;
+        localStorage.setItem(PROMPT_STORAGE_KEY, String(response.data.prompt_id));
+        console.log(`🔄 恢复会话提示词: ${response.data.prompt_name} (ID: ${response.data.prompt_id})`);
+      }
+
       // 清空当前消息列表
       messages.value = [];
 
@@ -818,6 +825,13 @@ const switchSession = async (id: string) => {
     const response = await getChatHistory(id, projectStore.currentProjectId);
 
     if (response.status === 'success') {
+      // 🆕 恢复该会话关联的提示词
+      if (response.data.prompt_id !== null && response.data.prompt_id !== undefined) {
+        selectedPromptId.value = response.data.prompt_id;
+        localStorage.setItem(PROMPT_STORAGE_KEY, String(response.data.prompt_id));
+        console.log(`🔄 切换会话时恢复提示词: ${response.data.prompt_name} (ID: ${response.data.prompt_id})`);
+      }
+
       const tempMessages: ChatMessage[] = [];
       response.data.history.forEach(historyItem => {
         // 🆕 跳过系统消息，不在消息列表中显示

@@ -443,13 +443,26 @@ class ChatAPIView(APIView):
             # 如果是新会话，立即创建ChatSession对象
             if is_new_session:
                 try:
+                    # 获取关联的提示词对象
+                    prompt_obj = None
+                    if prompt_id:
+                        try:
+                            prompt_obj = await sync_to_async(UserPrompt.objects.get)(
+                                id=prompt_id,
+                                user=request.user,
+                                is_active=True
+                            )
+                        except UserPrompt.DoesNotExist:
+                            logger.warning(f"ChatAPIView: Prompt {prompt_id} not found or inactive")
+                    
                     await sync_to_async(ChatSession.objects.create)(
                         user=request.user,
                         session_id=session_id,
                         project=project,
-                        title=f"新对话 - {user_message_content[:30]}" # 使用消息内容作为临时标题
+                        prompt=prompt_obj,
+                        title=f"新对话 - {user_message_content[:30]}"
                     )
-                    logger.info(f"ChatAPIView: Created new ChatSession entry for session_id: {session_id}")
+                    logger.info(f"ChatAPIView: Created new ChatSession entry for session_id: {session_id}, prompt_id: {prompt_id}")
                 except Exception as e:
                     logger.error(f"ChatAPIView: Failed to create ChatSession entry: {e}", exc_info=True)
 
@@ -845,6 +858,21 @@ class ChatHistoryAPIView(APIView):
                 "errors": {"project_id": ["Permission denied or project not found."]}
             }, status=status.HTTP_403_FORBIDDEN)
 
+        # 获取会话信息（包括关联的提示词）
+        prompt_id = None
+        prompt_name = None
+        try:
+            chat_session = ChatSession.objects.select_related('prompt').get(
+                session_id=session_id,
+                user=request.user,
+                project_id=project_id
+            )
+            if chat_session.prompt:
+                prompt_id = chat_session.prompt.id
+                prompt_name = chat_session.prompt.name
+        except ChatSession.DoesNotExist:
+            pass  # 会话可能还没创建到数据库
+
         thread_id_parts = [str(request.user.id), str(project_id), str(session_id)]
         thread_id = "_".join(thread_id_parts)
 
@@ -1029,6 +1057,8 @@ class ChatHistoryAPIView(APIView):
                     "session_id": session_id,
                     "project_id": project_id,
                     "project_name": project.name,
+                    "prompt_id": prompt_id,
+                    "prompt_name": prompt_name,
                     "history": history_messages
                 }
             }, status=status.HTTP_200_OK)
@@ -1816,13 +1846,26 @@ class ChatStreamAPIView(View):
         # 如果是新会话，立即创建ChatSession对象
         if is_new_session:
             try:
+                # 获取关联的提示词对象
+                prompt_obj = None
+                if prompt_id:
+                    try:
+                        prompt_obj = await sync_to_async(UserPrompt.objects.get)(
+                            id=prompt_id,
+                            user=request.user,
+                            is_active=True
+                        )
+                    except UserPrompt.DoesNotExist:
+                        logger.warning(f"ChatStreamAPIView: Prompt {prompt_id} not found or inactive")
+                
                 await sync_to_async(ChatSession.objects.create)(
                     user=request.user,
                     session_id=session_id,
                     project=project,
-                    title=f"新对话 - {user_message_content[:30]}" # 使用消息内容作为临时标题
+                    prompt=prompt_obj,
+                    title=f"新对话 - {user_message_content[:30]}"
                 )
-                logger.info(f"ChatStreamAPIView: Created new ChatSession entry for session_id: {session_id}")
+                logger.info(f"ChatStreamAPIView: Created new ChatSession entry for session_id: {session_id}, prompt_id: {prompt_id}")
             except Exception as e:
                 logger.error(f"ChatStreamAPIView: Failed to create ChatSession entry: {e}", exc_info=True)
 
