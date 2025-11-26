@@ -76,7 +76,7 @@
 
           <a-menu-item key="requirements" v-if="hasRequirementsPermission">
             <template #icon><icon-file /></template>
-            <router-link to="/requirements">需求管理</router-link>
+            <a href="#" @click="checkProjectAndNavigate($event, '/requirements')">需求管理</a>
           </a-menu-item>
 
           <!-- 展开状态下显示测试管理子菜单 -->
@@ -88,15 +88,15 @@
               </template>
               <a-menu-item key="testcases" v-if="hasTestcasesPermission">
                 <template #icon><icon-code-block /></template>
-                <router-link to="/testcases">用例管理</router-link>
+                <a href="#" @click="checkProjectAndNavigate($event, '/testcases')">用例管理</a>
               </a-menu-item>
               <a-menu-item key="testsuites" v-if="hasTestSuitesPermission">
                 <template #icon><icon-folder /></template>
-                <router-link to="/testsuites">测试套件</router-link>
+                <a href="#" @click="checkProjectAndNavigate($event, '/testsuites')">测试套件</a>
               </a-menu-item>
               <a-menu-item key="test-executions" v-if="hasTestExecutionsPermission">
                 <template #icon><icon-history /></template>
-                <router-link to="/test-executions">执行历史</router-link>
+                <a href="#" @click="checkProjectAndNavigate($event, '/test-executions')">执行历史</a>
               </a-menu-item>
             </a-sub-menu>
           </template>
@@ -113,12 +113,12 @@
 
           <a-menu-item key="langgraph-chat" v-if="hasLangGraphChatPermission">
             <template #icon><icon-message /></template>
-            <router-link to="/langgraph-chat">LLM对话</router-link>
+            <a href="#" @click="checkProjectAndNavigate($event, '/langgraph-chat')">LLM对话</a>
           </a-menu-item>
 
           <a-menu-item key="knowledge-management" v-if="hasKnowledgePermission">
             <template #icon><icon-book /></template>
-            <router-link to="/knowledge-management">知识库管理</router-link>
+            <a href="#" @click="checkProjectAndNavigate($event, '/knowledge-management')">知识库管理</a>
           </a-menu-item>
 
           <!-- 展开状态下显示子菜单 -->
@@ -130,27 +130,27 @@
               </template>
               <a-menu-item key="users" v-if="hasUsersPermission">
                 <template #icon><icon-user /></template>
-                <router-link to="/users">用户管理</router-link>
+                <a href="#" @click="checkProjectAndNavigate($event, '/users')">用户管理</a>
               </a-menu-item>
               <a-menu-item key="organizations" v-if="hasOrganizationsPermission">
                 <template #icon><icon-apps /></template>
-                <router-link to="/organizations">组织管理</router-link>
+                <a href="#" @click="checkProjectAndNavigate($event, '/organizations')">组织管理</a>
               </a-menu-item>
               <a-menu-item key="permissions" v-if="hasPermissionsPermission">
                 <template #icon><icon-safe /></template>
-                <router-link to="/permissions">权限管理</router-link>
+                <a href="#" @click="checkProjectAndNavigate($event, '/permissions')">权限管理</a>
               </a-menu-item>
               <a-menu-item key="llm-configs" v-if="hasLlmConfigsPermission">
                 <template #icon><icon-tool /></template>
-                <router-link to="/llm-configs">LLM配置</router-link>
+                <a href="#" @click="checkProjectAndNavigate($event, '/llm-configs')">LLM配置</a>
               </a-menu-item>
               <a-menu-item key="api-keys" v-if="hasApiKeysPermission">
                 <template #icon><icon-safe /></template>
-                <router-link to="/api-keys">KEY管理</router-link>
+                <a href="#" @click="checkProjectAndNavigate($event, '/api-keys')">KEY管理</a>
               </a-menu-item>
               <a-menu-item key="remote-mcp-configs" v-if="hasMcpConfigsPermission">
                 <template #icon><icon-cloud /></template>
-                <router-link to="/remote-mcp-configs">MCP配置</router-link>
+                <a href="#" @click="checkProjectAndNavigate($event, '/remote-mcp-configs')">MCP配置</a>
               </a-menu-item>
             </a-sub-menu>
           </template>
@@ -206,7 +206,8 @@ import {
   Dropdown as ADropdown,
   Doption as ADoption,
   SubMenu as ASubMenu,
-  Select as ASelect
+  Select as ASelect,
+  Message
 } from '@arco-design/web-vue';
 import {
   IconSettings,
@@ -409,6 +410,16 @@ const handleSystemManagementClick = (event: MouseEvent) => {
   nextTick(() => {
     console.log('系统管理菜单状态更新:', openKeys.value);
   });
+};
+
+// 检查是否选择了项目，用于需要项目的菜单项
+const checkProjectAndNavigate = (event: MouseEvent, path: string) => {
+  if (!projectStore.currentProjectId) {
+    event.preventDefault();
+    Message.warning('请先选择或创建项目');
+    return;
+  }
+  router.push(path);
 };
 
 const handleLogout = () => {
