@@ -90,10 +90,16 @@
       <div class="documents-section">
         <div class="section-header">
           <h4>文档管理</h4>
-          <a-button type="primary" size="small" @click="showUploadModal">
-            <template #icon><icon-upload /></template>
-            上传文档
-          </a-button>
+          <a-space>
+            <a-button type="outline" size="small" @click="fetchDocuments" :loading="documentsLoading">
+              <template #icon><icon-refresh /></template>
+              刷新
+            </a-button>
+            <a-button type="primary" size="small" @click="showUploadModal">
+              <template #icon><icon-upload /></template>
+              上传文档
+            </a-button>
+          </a-space>
         </div>
 
         <div class="documents-list">
@@ -262,7 +268,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { Message } from '@arco-design/web-vue';
-import { IconClose, IconUpload, IconExclamationCircle } from '@arco-design/web-vue/es/icon';
+import { IconClose, IconUpload, IconExclamationCircle, IconRefresh } from '@arco-design/web-vue/es/icon';
 import { useProjectStore } from '@/store/projectStore';
 import { KnowledgeService } from '../services/knowledgeService';
 import type { KnowledgeBase, Document, QueryResponse } from '../types/knowledge';
