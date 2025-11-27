@@ -53,9 +53,15 @@ export default defineConfig({
         {
           text: '快速上手',
           items: [
-            { text: '后端部署 (Django)', link: '/quick-start/django-deployment' },
-            { text: '前端部署 (Vue)', link: '/quick-start/vue-deployment' },
-            { text: 'MCP 工具部署', link: '/quick-start/mcp-deployment' }
+            { text: 'Docker部署', link: '/quick-start/django-deployment' },
+            { text: '本地部署 (Local)',
+              items:[
+              { text: '前端部署 (Vue)', link: '/quick-start/vue-deployment' },
+              { text: '后端部署(Back)', link: '/quick-start/back-deployment' },
+              { text: 'MCP 工具部署', link: '/quick-start/mcp-deployment' },
+            ]},
+            { text: '配置流程', link:'/quick-start/example-deployment'},
+            { text: '常见问题', link: '/quick-start/problem-deployment' }
           ]
         }
       ],
