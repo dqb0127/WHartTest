@@ -298,7 +298,10 @@ async def _execute_testcase_via_chat_api(result: TestCaseResult):
             steps_text += f"{step.step_number}. {step.description}\n   预期结果: {step.expected_result}\n"
         
         # 4. 格式化提示词，填充测试用例信息
-        formatted_prompt = prompt.content.format(
+        # 使用 Template.safe_substitute 支持 $variable 格式的变量替换
+        from string import Template
+        prompt_template = Template(prompt.content)
+        formatted_prompt = prompt_template.safe_substitute(
             testcase_id=testcase.id,
             testcase_name=testcase.name,
             precondition=testcase.precondition or "无",

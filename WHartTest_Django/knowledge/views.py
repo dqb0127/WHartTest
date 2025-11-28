@@ -667,3 +667,147 @@ def embedding_services(request):
     return Response({
         'services': services
     })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def test_embedding_connection(request):
+    """
+    测试嵌入服务连接
+    由后端代理请求到嵌入服务，避免前端跨域问题
+    """
+    import requests as http_requests
+    
+    embedding_service = request.data.get('embedding_service')
+    api_base_url = request.data.get('api_base_url', '').rstrip('/')
+    api_key = request.data.get('api_key', '')
+    model_name = request.data.get('model_name', '')
+    
+    print(f"[嵌入测试] 收到请求: embedding_service={embedding_service}, api_base_url={api_base_url}, model_name={model_name}")
+    
+    if not embedding_service:
+        return Response({'error': '请选择嵌入服务'}, status=status.HTTP_400_BAD_REQUEST)
+    if not api_base_url:
+        return Response({'error': '请输入API基础URL'}, status=status.HTTP_400_BAD_REQUEST)
+    if not model_name:
+        return Response({'error': '请输入模型名称'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # 检查是否需要 API 密钥
+    if embedding_service in ['openai', 'azure_openai'] and not api_key:
+        service_name = 'OpenAI' if embedding_service == 'openai' else 'Azure OpenAI'
+        return Response({'error': f'{service_name} 服务需要API密钥'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    test_text = 'This is a test embedding request.'
+    
+    try:
+        if embedding_service == 'openai':
+            test_url = f'{api_base_url}/embeddings'
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+            request_body = {
+                'input': test_text,
+                'model': model_name
+            }
+            
+        elif embedding_service == 'azure_openai':
+            test_url = f'{api_base_url}/openai/deployments/{model_name}/embeddings?api-version=2024-02-15-preview'
+            headers = {
+                'Content-Type': 'application/json',
+                'api-key': api_key
+            }
+            request_body = {
+                'input': test_text
+            }
+            
+        elif embedding_service == 'ollama':
+            test_url = f'{api_base_url}/api/embeddings'
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            request_body = {
+                'model': model_name,
+                'prompt': test_text
+            }
+            
+        elif embedding_service == 'custom':
+            test_url = api_base_url
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            if api_key:
+                headers['Authorization'] = f'Bearer {api_key}'
+            request_body = {
+                'input': test_text,
+                'model': model_name
+            }
+        else:
+            return Response({'error': f'不支持的嵌入服务类型: {embedding_service}'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        print(f"[嵌入测试] 发送请求: URL={test_url}, body={request_body}")
+        
+        response = http_requests.post(
+            test_url,
+            json=request_body,
+            headers=headers,
+            timeout=30
+        )
+        
+        print(f"[嵌入测试] 响应状态: {response.status_code}")
+        
+        if response.ok:
+            data = response.json()
+            
+            # 验证返回的数据包含 embedding
+            has_embedding = False
+            if embedding_service == 'ollama':
+                has_embedding = data.get('embedding') and isinstance(data['embedding'], list)
+            else:
+                has_embedding = (
+                    data.get('data') and 
+                    isinstance(data['data'], list) and 
+                    len(data['data']) > 0 and 
+                    data['data'][0].get('embedding')
+                )
+            
+            if has_embedding:
+                print(f"[嵌入测试] 测试成功")
+                return Response({
+                    'success': True,
+                    'message': '嵌入模型测试成功！服务运行正常'
+                })
+            else:
+                print(f"[嵌入测试] 数据格式异常: {str(data)[:200]}")
+                return Response({
+                    'success': False,
+                    'message': '服务响应成功但数据格式异常，请检查配置'
+                })
+        else:
+            error_text = response.text[:500]
+            print(f"[嵌入测试] HTTP错误: {response.status_code} - {error_text}")
+            return Response({
+                'success': False,
+                'message': f'嵌入模型测试失败: HTTP {response.status_code} - {error_text}'
+            })
+            
+    except http_requests.Timeout:
+        print(f"[嵌入测试] 请求超时")
+        return Response({
+            'success': False,
+            'message': '请求超时，请检查服务是否正常运行'
+        })
+    except http_requests.ConnectionError as e:
+        print(f"[嵌入测试] 连接失败: {str(e)}")
+        return Response({
+            'success': False,
+            'message': f'无法连接到服务，请检查URL和网络: {str(e)}'
+        })
+    except Exception as e:
+        print(f"[嵌入测试] 未知错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return Response({
+            'success': False,
+            'message': f'嵌入模型测试失败: {str(e)}'
+        })

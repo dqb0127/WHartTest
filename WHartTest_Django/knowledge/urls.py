@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     KnowledgeBaseViewSet, DocumentViewSet, 
     DocumentChunkViewSet, QueryLogViewSet,
-    embedding_services, KnowledgeGlobalConfigView
+    embedding_services, KnowledgeGlobalConfigView, test_embedding_connection
 )
 
 router = DefaultRouter()
@@ -16,4 +16,5 @@ urlpatterns = [
     path('', include(router.urls)),
     path('embedding-services/', embedding_services, name='embedding-services'),
     path('global-config/', KnowledgeGlobalConfigView.as_view(), name='global-config'),
+    path('test-embedding-connection/', test_embedding_connection, name='test-embedding-connection'),
 ]

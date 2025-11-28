@@ -218,6 +218,28 @@ export class KnowledgeService {
   }
 
   /**
+   * 测试嵌入服务连接
+   */
+  static async testEmbeddingConnection(data: {
+    embedding_service: string;
+    api_base_url: string;
+    api_key?: string;
+    model_name: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const response = await request<{ success: boolean; message: string }>({
+      url: `${API_BASE_URL}/test-embedding-connection/`,
+      method: 'POST',
+      data
+    });
+
+    if (response.success) {
+      return response.data!;
+    } else {
+      throw new Error(response.error || 'Failed to test embedding connection');
+    }
+  }
+
+  /**
    * 获取系统状态
    */
   static async getSystemStatus(): Promise<SystemStatusResponse> {

@@ -29,6 +29,14 @@ class KnowledgeBaseSerializer(serializers.ModelSerializer):
     project_name = serializers.CharField(source='project.name', read_only=True)
     document_count = serializers.SerializerMethodField()
     chunk_count = serializers.SerializerMethodField()
+    # 显式定义 api_base_url，移除 URL 格式验证
+    api_base_url = serializers.CharField(
+        max_length=500, 
+        required=False, 
+        allow_blank=True, 
+        allow_null=True,
+        help_text='API服务的基础URL，支持任意格式如 http://localhost:11434'
+    )
 
     class Meta:
         model = KnowledgeBase
