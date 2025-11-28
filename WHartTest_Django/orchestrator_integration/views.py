@@ -228,7 +228,7 @@ class OrchestratorStreamAPIView(View):
                 step_count = 0
                 invoke_config = {
                     "configurable": {"thread_id": thread_id},
-                    "recursion_limit": 100
+                    "recursion_limit": 1000  # 支持约500次工具调用
                 }
                 
                 # 🔍 DEBUG: 检查checkpointer中的历史状态

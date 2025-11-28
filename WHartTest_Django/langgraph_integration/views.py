@@ -702,9 +702,9 @@ class ChatAPIView(APIView):
 
                 invoke_config = {
                     "configurable": {"thread_id": thread_id},
-                    "recursion_limit": 100  # 增加递归限制，支持生成更多测试用例
+                    "recursion_limit": 1000  # 支持约500次工具调用
                 }
-                logger.info(f"ChatAPIView: Set recursion_limit to 100 for thread_id: {thread_id}")
+                logger.info(f"ChatAPIView: Set recursion_limit to 1000 for thread_id: {thread_id}")
                 # Checkpointer is already configured in both agent and basic chatbot
 
                 final_state = await runnable_to_invoke.ainvoke(
@@ -1705,9 +1705,9 @@ class ChatStreamAPIView(View):
                 input_messages = {"messages": messages_list}
                 invoke_config = {
                     "configurable": {"thread_id": thread_id},
-                    "recursion_limit": 100  # 增加递归限制，支持生成更多测试用例
+                    "recursion_limit": 1000  # 支持约500次工具调用
                 }
-                logger.info(f"ChatStreamAPIView: Set recursion_limit to 100 for thread_id: {thread_id}")
+                logger.info(f"ChatStreamAPIView: Set recursion_limit to 1000 for thread_id: {thread_id}")
                 logger.info(f"ChatStreamAPIView: Input messages structure: {input_messages}")
 
                 # 详细记录每个消息的内容

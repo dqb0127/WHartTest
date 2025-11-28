@@ -36,7 +36,7 @@ pip install -r requirements.txt
 #### 测试用例工具 (testauto_tools.py)
 
 - **服务端口**: 8006
-- **API地址**: http://127.0.0.1:8000
+- **API地址**: 后端服务ip+端口
 - **API密钥**: 已内置在代码中
 
 ### 3. 启动服务

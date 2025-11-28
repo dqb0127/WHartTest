@@ -12,7 +12,8 @@ console.log('📁 base路径: /WHartTest/');
 
 try {
   // 执行VitePress构建
-  execSync('vitepress build docs', { stdio: 'inherit' });
+  // 使用 npx 确保使用本地安装的 vitepress
+  execSync('npx vitepress build docs', { stdio: 'inherit' });
   console.log('✅ GitHub Pages 构建完成！');
   console.log('📂 构建输出目录: docs/.vitepress/dist');
 } catch (error) {

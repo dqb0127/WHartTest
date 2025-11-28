@@ -61,7 +61,7 @@ docker-compose up -d
 - 提交 Issue
 - 项目讨论区
 
-<img src="./docs/developer-guide/wximage.png" alt="contact" width="400">
+<img width="400" alt="image" src="https://github.com/user-attachments/assets/074e7c56-39a6-40b5-a9c6-37232637dd09" />
 <img src="./docs/developer-guide/image.png" alt="contact" width="400">
 
 ---
