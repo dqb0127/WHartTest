@@ -28,9 +28,7 @@ from typing import TypedDict, Annotated, List
 from langchain_core.messages import AnyMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.chat_models.tongyi import ChatTongyi
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages # Correct import for add_messages
 from langgraph.checkpoint.sqlite import SqliteSaver # For sync operations in ChatHistoryAPIView
@@ -62,70 +60,40 @@ logger = logging.getLogger(__name__) # Initialize logger
 # --- Helper Functions ---
 def create_llm_instance(active_config, temperature=0.7):
     """
-    根据配置创建合适的LLM实例，支持多种供应商
+    根据配置创建合适的LLM实例，支持三种供应商：
+    - openai_compatible: OpenAI兼容格式（包括OpenAI、Qwen、Ollama、Deepseek等）
+    - anthropic: Anthropic/Claude
+    - gemini: Google Gemini
     """
     model_identifier = active_config.name or "gpt-3.5-turbo"
     provider = active_config.provider
     
     if provider == 'anthropic':
-        # Anthropic/Claude
         llm = ChatAnthropic(
             model=model_identifier,
             api_key=active_config.api_key,
             temperature=temperature
         )
         logger.info(f"Initialized ChatAnthropic with model: {model_identifier}")
-    elif provider == 'openai':
-        # OpenAI 官方
-        llm = ChatOpenAI(
-            model=model_identifier,
-            temperature=temperature,
-            api_key=active_config.api_key,
-        )
-        logger.info(f"Initialized ChatOpenAI with model: {model_identifier}")
-    elif provider == 'ollama':
-        # Ollama 本地部署
-        llm = ChatOllama(
-            model=model_identifier,
-            base_url=active_config.api_url,
-            temperature=temperature
-        )
-        logger.info(f"Initialized ChatOllama with model: {model_identifier}")
     elif provider == 'gemini':
-        # Google Gemini
         llm = ChatGoogleGenerativeAI(
             model=model_identifier,
             google_api_key=active_config.api_key,
             temperature=temperature
         )
         logger.info(f"Initialized ChatGoogleGenerativeAI with model: {model_identifier}")
-    elif provider == 'qwen':
-        # Alibaba Qwen (Tongyi)
-        llm = ChatTongyi(
-            model=model_identifier,
-            dashscope_api_key=active_config.api_key,
-            temperature=temperature
-        )
-        logger.info(f"Initialized ChatTongyi with model: {model_identifier}")
-    elif provider == 'openai_compatible':
-        # OpenAI 兼容服务
+    else:
+        # openai_compatible 或其他: 使用 OpenAI 兼容格式
         llm_kwargs = {
             "model": model_identifier,
             "temperature": temperature,
             "api_key": active_config.api_key,
             "base_url": active_config.api_url
         }
-        
         llm = ChatOpenAI(**llm_kwargs)
         logger.info(f"Initialized OpenAI-compatible LLM with model: {model_identifier}")
-    else:
-        # 默认使用OpenAI
-        llm = ChatOpenAI(
-            model=model_identifier,
-            temperature=temperature,
-            api_key=active_config.api_key,
-        )
-        logger.info(f"Initialized default ChatOpenAI with model: {model_identifier}")
+    
+    return llm
     
     return llm
 

@@ -9,12 +9,9 @@ class LLMConfig(models.Model):
     """
     
     PROVIDER_CHOICES = [
-        ('openai', 'OpenAI'),
+        ('openai_compatible', 'OpenAI 兼容'),
         ('anthropic', 'Anthropic/Claude'),
         ('gemini', 'Google Gemini'),
-        ('qwen', 'Alibaba Qwen'),
-        ('ollama', 'Ollama'),
-        ('openai_compatible', 'OpenAI Compatible'),
     ]
     
     # 配置标识字段（新增）
@@ -22,7 +19,7 @@ class LLMConfig(models.Model):
                                   help_text="用户自定义的配置名称，如'生产环境OpenAI'、'测试Claude配置'")
     
     # 供应商字段（新增）
-    provider = models.CharField(max_length=50, choices=PROVIDER_CHOICES, default='openai', verbose_name="供应商",
+    provider = models.CharField(max_length=50, choices=PROVIDER_CHOICES, default='openai_compatible', verbose_name="供应商",
                                help_text="LLM服务供应商")
     
     # 模型名称字段（原来的name字段，现在表示具体模型）

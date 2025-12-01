@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 from django.conf import settings
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langgraph_integration.models import LLMConfig
@@ -17,40 +18,40 @@ logger = logging.getLogger(__name__)
 
 def create_llm_instance(active_config, temperature=0.1):
     """
-    根据配置创建合适的LLM实例，支持多种供应商
+    根据配置创建合适的LLM实例，支持三种供应商：
+    - openai_compatible: OpenAI兼容格式（包括OpenAI、Qwen、Ollama、Deepseek等）
+    - anthropic: Anthropic/Claude
+    - gemini: Google Gemini
     """
     model_identifier = active_config.name or "gpt-3.5-turbo"
+    provider = active_config.provider
     
-    # 检测供应商类型
-    api_url = active_config.api_url.lower()
-    
-    if "anthropic.com" in api_url or "claude" in model_identifier.lower():
-        # Anthropic/Claude
+    if provider == 'anthropic':
         llm = ChatAnthropic(
             model=model_identifier,
             api_key=active_config.api_key,
             temperature=temperature
         )
         logger.info(f"Initialized ChatAnthropic with model: {model_identifier}")
+    elif provider == 'gemini':
+        llm = ChatGoogleGenerativeAI(
+            model=model_identifier,
+            google_api_key=active_config.api_key,
+            temperature=temperature
+        )
+        logger.info(f"Initialized ChatGoogleGenerativeAI with model: {model_identifier}")
     else:
-        # OpenAI 兼容 (包括 OpenAI, Ollama, 其他兼容服务)
+        # openai_compatible 或其他: 使用 OpenAI 兼容格式
         llm_kwargs = {
             "model": model_identifier,
             "temperature": temperature,
             "api_key": active_config.api_key,
-            "max_retries": 3,  # 添加重试机制，处理临时性API故障
-            "timeout": 120,    # 增加超时时间
+            "base_url": active_config.api_url,
+            "max_retries": 3,
+            "timeout": 120,
         }
-        
-        # 如果不是官方OpenAI，设置base_url
-        if "api.openai.com" not in api_url:
-            llm_kwargs["base_url"] = active_config.api_url
-            # Ollama通常不需要真实的API key
-            if "ollama" in api_url or not active_config.api_key:
-                llm_kwargs["api_key"] = "ollama"
-        
         llm = ChatOpenAI(**llm_kwargs)
-        logger.info(f"Initialized ChatOpenAI with model: {model_identifier}")
+        logger.info(f"Initialized OpenAI-compatible LLM with model: {model_identifier}")
     
     return llm
 

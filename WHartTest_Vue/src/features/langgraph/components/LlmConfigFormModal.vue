@@ -6,7 +6,7 @@
     @cancel="handleCancel"
     :confirm-loading="formLoading"
     :mask-closable="false"
-    width="600px"
+    width="700px"
   >
     <a-form
       ref="formRef"
@@ -15,96 +15,117 @@
       layout="vertical"
       @submit="handleSubmit"
     >
-      <a-form-item field="config_name" label="配置名称" required>
-        <a-input v-model="formData.config_name" placeholder="请输入配置名称" />
-      </a-form-item>
-      <a-form-item field="provider" label="供应商" required>
-        <a-select 
-          v-model="formData.provider" 
-          placeholder="请选择供应商"
-          :loading="loadingProviders"
-        >
-          <a-option 
-            v-for="option in providerOptions" 
-            :key="option.value" 
-            :value="option.value"
-          >
-            {{ option.label }}
-          </a-option>
-        </a-select>
-      </a-form-item>
-      <a-form-item field="name" label="模型名称" required>
-        <a-auto-complete
-          v-model="formData.name"
-          :data="modelOptions"
-          :loading="loadingModels"
-          placeholder="请输入或选择模型名称"
-          allow-clear
-          @focus="handleModelInputFocus"
-        >
-          <template #suffix>
-            <a-button
-              type="text"
-              size="mini"
-              :loading="loadingModels"
-              @click="fetchAvailableModels"
+      <a-row :gutter="24">
+        <!-- 第一行：配置名称 + 供应商 -->
+        <a-col :span="12">
+          <a-form-item field="config_name" label="配置名称" required>
+            <a-input v-model="formData.config_name" placeholder="例如: GPT-4 生产环境" />
+          </a-form-item>
+        </a-col>
+        <a-col :span="12">
+          <a-form-item field="provider" label="供应商" required>
+            <a-select 
+              v-model="formData.provider" 
+              placeholder="请选择供应商"
+              :loading="loadingProviders"
             >
-              <icon-refresh v-if="!loadingModels" />
-            </a-button>
-          </template>
-        </a-auto-complete>
-        <template #extra>
-          <div class="text-xs text-gray-500">
-            可直接输入或点击刷新按钮从 API 获取模型列表
-          </div>
-        </template>
-      </a-form-item>
-      <a-form-item field="api_url" label="API URL" required>
-        <a-input v-model="formData.api_url" placeholder="例如: https://api.openai.com/v1" />
-      </a-form-item>
-      <a-form-item field="api_key" label="API Key" :required="!isEditing">
-        <a-input-password
-          v-model="formData.api_key"
-          :placeholder="isEditing ? '如需修改请输入新的 API Key' : '请输入 API Key'"
-        />
-        <template #extra v-if="isEditing">
-          <div class="text-xs text-gray-500">留空表示不修改 API Key。</div>
-        </template>
-      </a-form-item>
-      <a-form-item>
-        <a-button 
-          @click="testLlmModel"
-          :loading="testingModel"
-          type="outline"
-        >
-          <template #icon><icon-refresh /></template>
-          测试模型
-        </a-button>
-      </a-form-item>
-      <a-form-item field="system_prompt" label="系统提示词">
-        <a-textarea
-          v-model="formData.system_prompt"
-          placeholder="请输入系统提示词（可选）"
-          :rows="4"
-          :max-length="2000"
-          show-word-limit
-        />
-        <template #extra>
-          <div class="text-xs text-gray-500">用于指导AI助手的行为和回答风格。</div>
-        </template>
-      </a-form-item>
-      <a-form-item field="supports_vision" label="支持图片输入">
-        <a-switch v-model="formData.supports_vision" />
-        <template #extra>
-          <div class="text-xs text-gray-500">模型是否支持图片/多模态输入（如GPT-4V、Qwen-VL、Gemini Vision等）。</div>
-        </template>
-      </a-form-item>
-      <a-form-item field="is_active" label="激活状态">
-        <a-switch v-model="formData.is_active" />
-        <template #extra>
-          <div class="text-xs text-gray-500">如果设为 true，其他已激活的配置会自动设为 false。</div>
-        </template>
-      </a-form-item>
+              <a-option 
+                v-for="option in providerOptions" 
+                :key="option.value" 
+                :value="option.value"
+              >
+                {{ option.label }}
+              </a-option>
+            </a-select>
+          </a-form-item>
+        </a-col>
+
+        <!-- 第二行：模型名称 (全宽 + 刷新按钮内联) -->
+        <a-col :span="24">
+          <a-form-item field="name" label="模型名称" required>
+            <div class="model-input-wrapper">
+              <a-auto-complete
+                v-model="formData.name"
+                :data="modelOptions"
+                :loading="loadingModels"
+                placeholder="输入或选择模型名称 (如: gpt-4-turbo)"
+                allow-clear
+                @focus="handleModelInputFocus"
+                class="model-input"
+              />
+              <a-tooltip content="从 API 刷新模型列表">
+                <a-button
+                  type="secondary"
+                  :loading="loadingModels"
+                  @click="fetchAvailableModels"
+                >
+                  <template #icon><icon-refresh /></template>
+                </a-button>
+              </a-tooltip>
+            </div>
+          </a-form-item>
+        </a-col>
+
+        <!-- 第三行：API URL + API Key -->
+        <a-col :span="12">
+          <a-form-item field="api_url" label="API URL" required>
+            <a-input v-model="formData.api_url" placeholder="https://api.openai.com/v1" />
+          </a-form-item>
+        </a-col>
+        <a-col :span="12">
+          <a-form-item field="api_key" label="API Key" :required="!isEditing">
+            <a-input-password
+              v-model="formData.api_key"
+              :placeholder="isEditing ? '留空不修改' : '请输入 API Key'"
+            />
+          </a-form-item>
+        </a-col>
+
+        <!-- 测试按钮：右对齐，紧凑 -->
+        <a-col :span="24" class="test-button-row">
+          <a-button 
+            type="outline"
+            status="success"
+            size="small"
+            :loading="testingModel"
+            @click="testLlmModel"
+          >
+            <template #icon><icon-thunderbolt /></template>
+            测试连接
+          </a-button>
+        </a-col>
+
+        <!-- 第四行：系统提示词 (全宽) -->
+        <a-col :span="24">
+          <a-form-item field="system_prompt" label="系统提示词">
+            <a-textarea
+              v-model="formData.system_prompt"
+              placeholder="设置模型的默认 System Prompt（可选）"
+              :auto-size="{ minRows: 3, maxRows: 6 }"
+              :max-length="2000"
+              show-word-limit
+            />
+          </a-form-item>
+        </a-col>
+
+        <!-- 第五行：开关区域 (并排) -->
+        <a-col :span="12">
+          <a-form-item field="supports_vision" label="能力支持">
+            <a-space>
+              <a-switch v-model="formData.supports_vision" />
+              <span class="switch-desc">支持图片输入 (Vision)</span>
+            </a-space>
+          </a-form-item>
+        </a-col>
+        <a-col :span="12">
+          <a-form-item field="is_active" label="配置状态">
+            <a-space>
+              <a-switch v-model="formData.is_active" checked-color="#00b42a" />
+              <span class="switch-desc">已激活</span>
+            </a-space>
+          </a-form-item>
+        </a-col>
+      </a-row>
     </a-form>
   </a-modal>
 </template>
@@ -123,11 +144,15 @@ import {
   Option as AOption,
   AutoComplete as AAutoComplete,
   Button as AButton,
+  Row as ARow,
+  Col as ACol,
+  Space as ASpace,
+  Tooltip as ATooltip,
   Message,
   type FormInstance,
   type FieldRule,
 } from '@arco-design/web-vue';
-import { IconRefresh } from '@arco-design/web-vue/es/icon';
+import { IconRefresh, IconThunderbolt } from '@arco-design/web-vue/es/icon';
 import axios from 'axios';
 import type { LlmConfig, CreateLlmConfigRequest, PartialUpdateLlmConfigRequest } from '@/features/langgraph/types/llmConfig';
 import { getProviders, type ProviderOption } from '@/features/langgraph/services/llmConfigService';
@@ -279,16 +304,7 @@ const loadProviders = async () => {
   try {
     const response = await getProviders();
     if (response.status === 'success' && response.data) {
-      // 对供应商列表排序,将 OpenAI Compatible 放在第一位
-      const providers = response.data.choices;
-      const compatibleIndex = providers.findIndex(p => p.value === 'openai_compatible');
-      
-      if (compatibleIndex > -1) {
-        const [compatible] = providers.splice(compatibleIndex, 1);
-        providerOptions.value = [compatible, ...providers];
-      } else {
-        providerOptions.value = providers;
-      }
+      providerOptions.value = response.data.choices;
     }
   } catch (error) {
     console.error('Failed to load providers:', error);
@@ -423,5 +439,27 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* 可以在这里添加特定于此组件的样式 */
+.model-input-wrapper {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  align-items: center;
+}
+
+.model-input {
+  flex: 1;
+}
+
+.test-button-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+  margin-top: -8px;
+}
+
+.switch-desc {
+  font-size: 13px;
+  color: var(--color-text-3);
+  cursor: pointer;
+}
 </style>
