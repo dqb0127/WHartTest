@@ -155,11 +155,12 @@ const messageClass = computed(() => {
 const agentStepLabel = computed(() => {
   const step = props.message.stepNumber;
   const max = props.message.maxSteps;
-  if (step !== undefined && max !== undefined) {
-    return `步骤 ${step}/${max}`;
-  }
+  
+  // 优先使用 maxSteps，如果没有则默认为 500 (与后端默认值一致)
+  const maxStepsDisplay = max !== undefined ? max : 500;
+  
   if (step !== undefined) {
-    return `步骤 ${step}`;
+    return `步骤 ${step}/${maxStepsDisplay}`;
   }
   return '步骤';
 });
