@@ -1212,8 +1212,8 @@ const handleSendMessage = async (data: { message: string; image?: string; imageD
   }
 
   if (isStreamMode.value) {
-    // 流式模式
-    await handleStreamMessage(requestData);
+    // 流式模式（传递用户消息用于立即创建会话标题）
+    await handleStreamMessage(requestData, message);
   } else {
     // 非流式模式
     await handleNormalMessage(requestData, message);
@@ -1315,7 +1315,7 @@ const displayedMessages = computed(() => {
 });
 
 // 处理流式消息
-const handleStreamMessage = async (requestData: ChatRequest) => {
+const handleStreamMessage = async (requestData: ChatRequest, userMessage: string) => {
   abortController = new AbortController();
   const isNewSession = !sessionId.value;
 
@@ -1327,8 +1327,8 @@ const handleStreamMessage = async (requestData: ChatRequest) => {
       sessionId.value = newSessionId;
       saveSessionId(newSessionId);
       console.log(`handleStart: New session created with id ${newSessionId}`);
-      // 🔧 修复：不在这里刷新会话列表，避免与后续的 updateSessionInList 冲突
-      // 会话信息会在流完成后通过 loadChatHistory -> updateSessionInList 来更新
+      // 🔧 修复：立即创建会话并设置标题，不等流完成
+      updateSessionInList(newSessionId, userMessage, true);
     }
   };
 
