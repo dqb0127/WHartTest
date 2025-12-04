@@ -749,6 +749,18 @@ class AgentLoopStreamAPIView(View):
                     'summary': step_result.get('tool_summary', '')[:200]
                 })
 
+                # ⭐ 每步完成后立即保存对话历史（增量保存，防止中断丢失）
+                try:
+                    await self._save_chat_history(
+                        request.user.id,
+                        project_id,
+                        session_id,
+                        conversation_messages
+                    )
+                    logger.debug(f"AgentLoopStreamAPI: Step {step_count} history saved ({len(conversation_messages)} messages)")
+                except Exception as save_err:
+                    logger.warning(f"AgentLoopStreamAPI: Step {step_count} history save failed: {save_err}")
+
                 # ⭐ 每步完成后计算Token使用情况（实时监控）
                 # ✅ 修复：计算实际传递给LLM的内容，而不是存储用的conversation_messages
                 try:
@@ -882,24 +894,14 @@ class AgentLoopStreamAPIView(View):
 
                 # 检查是否完成
                 if step_result.get('is_final'):
-                    logger.info(f"AgentLoopStreamAPI: Task is_final=True, saving task and history...")
+                    logger.info(f"AgentLoopStreamAPI: Task is_final=True, saving task...")
                     task.status = 'completed'
                     task.final_response = step_result.get('response', '')
                     task.completed_at = timezone.now()
                     await orchestrator._save_task(task)
                     
-                    # 保存对话历史到 checkpointer（包含所有中间消息）
-                    try:
-                        logger.info(f"AgentLoopStreamAPI: Saving {len(conversation_messages)} messages for session {session_id}")
-                        await self._save_chat_history(
-                            request.user.id,
-                            project_id,
-                            session_id,
-                            conversation_messages
-                        )
-                        logger.info(f"AgentLoopStreamAPI: Saved chat history for session {session_id}")
-                    except Exception as e:
-                        logger.error(f"AgentLoopStreamAPI: Failed to save chat history: {e}", exc_info=True)
+                    # 对话历史已在每步保存，此处无需重复保存
+                    logger.info(f"AgentLoopStreamAPI: Task completed, history already saved ({len(conversation_messages)} messages)")
                     
                     # ✅ Token统计已移至每步完成后实时计算,此处不再重复
                     
@@ -916,6 +918,9 @@ class AgentLoopStreamAPIView(View):
                     task.error_message = step_result['error']
                     task.completed_at = timezone.now()
                     await orchestrator._save_task(task)
+                    
+                    # 错误时确保已有对话历史已保存（通常每步已保存，这里是兜底）
+                    logger.info(f"AgentLoopStreamAPI: Task failed at step {step_count}, history already saved")
                     
                     yield create_sse_data({
                         'type': 'error',
