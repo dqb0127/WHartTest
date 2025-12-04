@@ -32,6 +32,7 @@ interface StreamState {
   contextLimit?: number; // 上下文Token限制
   currentStep?: number;  // Agent Loop 当前步骤
   maxSteps?: number;     // Agent Loop 最大步骤数
+  userMessage?: string;  // 用户发送的消息内容
 }
 
 // Agent Loop SSE 事件类型定义（供文档和类型参考）
@@ -359,7 +360,8 @@ export async function sendChatMessageStream(
                 contextTokenCount: prevTokenCount,
                 contextLimit: contextLimit,
                 currentStep: 0,
-                maxSteps: initialMaxSteps
+                maxSteps: initialMaxSteps,
+                userMessage: data.message // 保存用户消息
               };
               onStart(streamSessionId);
             }

@@ -1228,12 +1228,22 @@ const displayedMessages = computed(() => {
 
   // 如果当前会话有流（无论是否完成）
   if (stream) {
+    // 🆕 检查是否需要补充用户消息（针对从其他页面跳转过来的情况）
+    if (stream.userMessage && combined.length === 0) {
+      combined.push({
+        content: stream.userMessage,
+        isUser: true,
+        time: getCurrentTime(),
+        messageType: 'human'
+      });
+    }
+
     // 检查最后一条消息是否已经包含了流式内容
     // 如果流已完成且内容已固化到 messages.value，则不需要再添加
     const lastMsg = combined[combined.length - 1];
-    const contentAlreadyInMessages = lastMsg && 
-      !lastMsg.isUser && 
-      lastMsg.content === stream.content && 
+    const contentAlreadyInMessages = lastMsg &&
+      !lastMsg.isUser &&
+      lastMsg.content === stream.content &&
       !lastMsg.isLoading;
 
     // 只有在内容尚未固化时才添加流式内容
@@ -1642,7 +1652,7 @@ watch(
         const existingSession = chatSessions.value.find(s => s.id === currentSessionId);
         if (!existingSession) {
           // 获取用户第一条消息作为标题
-          const firstUserMsg = messages.value.find(m => m.role === 'user' || m.isUser);
+          const firstUserMsg = messages.value.find(m => m.isUser);
           if (firstUserMsg) {
             updateSessionInList(currentSessionId, firstUserMsg.content, true);
           }
