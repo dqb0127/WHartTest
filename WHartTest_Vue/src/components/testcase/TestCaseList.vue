@@ -570,6 +570,17 @@ defineExpose({
   flex: 1;
   overflow-y: auto !important;
   min-height: 0;
+  /* 增加底部内边距，防止最后一行阴影被遮挡 */
+  padding-bottom: 30px;
+}
+
+/* 给最后一行数据添加明显的底部阴影效果 */
+:deep(.test-case-table .arco-table-body tr:last-child td) {
+  border-bottom: none !important;
+  box-shadow: 0 15px 30px -5px rgba(0, 0, 0, 0.2) !important;
+  position: relative;
+  z-index: 9;
+  background-color: #fff;
 }
 
 :deep(.test-case-table .arco-pagination) {
@@ -584,6 +595,7 @@ defineExpose({
   bottom: 0;
   background-color: #fff;
   z-index: 1;
+  box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.05); /* 给分页器添加顶部阴影，增强层次感 */
 }
 
 /* 确保操作列按钮不会溢出 */
