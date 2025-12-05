@@ -34,6 +34,7 @@
             allow-clear
             @change="handlePromptChange"
             :loading="promptsLoading"
+            :fallback-option="false"
           >
             <a-option
               v-for="prompt in userPrompts"
@@ -197,6 +198,16 @@ const loadUserPrompts = async () => {
         return a.name.localeCompare(b.name);
       });
       console.log('📋 ChatHeader加载到的提示词列表:', userPrompts.value.map(p => ({ id: p.id, name: p.name, isDefault: p.is_default, type: p.prompt_type })));
+
+      // 🆕 检查当前选中的提示词是否在允许的列表中
+      if (selectedPromptId.value !== null) {
+        const selectedExists = userPrompts.value.some(p => p.id === selectedPromptId.value);
+        if (!selectedExists) {
+          console.log(`⚠️ 当前选中的提示词(ID:${selectedPromptId.value})不在允许列表中，重置选择`);
+          selectedPromptId.value = null;
+          emit('update:selected-prompt-id', null);
+        }
+      }
     }
 
     if (defaultResponse.status === 'success' && defaultResponse.data) {
