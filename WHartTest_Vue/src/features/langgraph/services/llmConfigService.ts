@@ -7,14 +7,6 @@ import type {
   PartialUpdateLlmConfigRequest,
 } from '@/features/langgraph/types/llmConfig';
 
-export interface ProviderOption {
-  value: string;
-  label: string;
-}
-
-export interface ProvidersResponse {
-  choices: ProviderOption[];
-}
 
 const API_BASE_URL = '/lg/llm-configs'; // 移除多余的/api前缀
 
@@ -203,30 +195,4 @@ export async function deleteLlmConfig(id: number): Promise<ApiResponse<null>> {
 /**
  * 获取所有可用的供应商选项
  */
-export async function getProviders(): Promise<ApiResponse<ProvidersResponse>> {
-  const response = await request<ProvidersResponse>({
-    url: '/lg/providers/',
-    method: 'GET',
-    params: {
-      _t: Date.now(),
-    }
-  });
-
-  if (response.success) {
-    return {
-      status: 'success',
-      code: 200,
-      message: response.message || 'success',
-      data: response.data!,
-      errors: null
-    };
-  } else {
-    return {
-      status: 'error',
-      code: 500,
-      message: response.error || 'Failed to get providers',
-      data: null,
-      errors: { detail: response.error }
-    };
-  }
-}
+// getProviders API 已废弃: 前端不再支持多供应商选择，仅保留 openai_compatible。如果需要恢复，可实现该函数并返回 provider 列表。

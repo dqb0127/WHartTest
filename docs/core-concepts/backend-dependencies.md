@@ -102,10 +102,12 @@ WHartTest 后端基于 Django REST Framework 构建，采用 Python 生态的现
 - **作用**: 语言模型应用编排框架
 - **开源协议**: MIT License
 
-### LangChain 相关组件
+-### LangChain 相关组件
 - **langchain-openai** (0.3.17): OpenAI 集成
-- **langchain-anthropic** (0.2.4): Anthropic/Claude 支持
-- **langchain-google-genai** (2.0.8): Google Generative AI 支持
+<!-- 已移除：以下 LangChain 伙伴集成不是强制依赖，项目当前仅默认支持 OpenAI 兼容格式
+-- **langchain-anthropic** (0.2.4): Anthropic/Claude 支持
+-- **langchain-google-genai** (2.0.8): Google Generative AI 支持
+-->
 - **langchain-ollama** (0.2.2): Ollama 本地模型支持
 - **langchain-mistralai** (0.2.4): Mistral AI 支持
 - **langchain-cohere** (0.3.5): Cohere AI 支持
@@ -116,14 +118,15 @@ WHartTest 后端基于 Django REST Framework 构建，采用 Python 生态的现
 - **开源协议**: MIT License
 
 ### AI 服务客户端
-- **anthropic** (0.48.0): Anthropic API 客户端
+<!-- 已移除：如下 Google/Gemini 和 Anthropic 客户端依赖非必要，若需支持这些云端服务，可在 requirements 中取消注释并安装 -->
+<!-- - **anthropic** (0.48.0): Anthropic API 客户端 -->
 - **cohere** (5.15.0): Cohere API 客户端
 - **fireworks-ai** (0.15.12): Fireworks AI 客户端
-- **google-ai-generativelanguage** (0.6.15): Google AI 生成语言 API
-- **google-api-core** (2.24.1): Google API 核心库
-- **google-api-python-client** (2.162.0): Google API 客户端
-- **google-auth** (2.38.0): Google 认证库
-- **google-generativeai** (0.8.4): Google 生成式 AI
+<!-- - **google-ai-generativelanguage** (0.6.15): Google AI 生成语言 API
+ - **google-api-core** (2.24.1): Google API 核心库
+ - **google-api-python-client** (2.162.0): Google API 客户端
+ - **google-auth** (2.38.0): Google 认证库
+ - **google-generativeai** (0.8.4): Google 生成式 AI -->
 - **ollama** (0.4.7): Ollama 客户端
 - **开源协议**: MIT/Apache 2.0 License
 

@@ -46,13 +46,10 @@ langchain==0.3.25
 # https://github.com/langchain-ai/langchain/blob/master/libs/partners/openai/LICENSE
 langchain-openai==0.3.17
 
-# LangChain Anthropic/Claude支持 - MIT许可证 (当前版本: 0.2.4)
-# https://github.com/langchain-ai/langchain/blob/master/libs/partners/anthropic/LICENSE
-langchain-anthropic==0.2.4
-
-# Anthropic API客户端 - MIT许可证 (当前版本: 0.48.0)
-# https://github.com/anthropics/anthropic-sdk-python/blob/main/LICENSE
-anthropic==0.48.0
+# LangChain Anthropic/Claude 支持（已移除 - 保留注释以便记录）
+# 如果将来需要使用 Anthropic/Claude，请取消注释以下依赖：
+# langchain-anthropic==0.2.4
+# anthropic==0.48.0
 
 # LangChain核心库 - MIT许可证 (当前版本: 0.3.60)
 # https://github.com/langchain-ai/langchain/blob/master/libs/core/LICENSE
@@ -147,29 +144,14 @@ fastembed>=0.7.0,<1.0
 # # https://github.com/fireworks-ai/fireworks-ai-python/blob/main/LICENSE
 # fireworks-ai==0.15.12
 
-# Google Gemini支持 - MIT许可证 (当前版本: 2.0.8)
-# https://github.com/langchain-ai/langchain/blob/master/libs/partners/google-genai/LICENSE
-langchain-google-genai==2.0.8
-
-# Google AI生成语言API - Apache 2.0许可证 (当前版本: 0.6.15)
-# https://github.com/googleapis/google-cloud-python/blob/main/LICENSE
-google-ai-generativelanguage==0.6.15
-
-# Google API核心库 - Apache 2.0许可证 (当前版本: 2.24.1)
-# https://github.com/googleapis/python-api-core/blob/main/LICENSE
-google-api-core==2.24.1
-
-# Google API客户端 - Apache 2.0许可证 (当前版本: 2.162.0)
-# https://github.com/googleapis/google-api-python-client/blob/main/LICENSE
-google-api-python-client==2.162.0
-
-# Google认证库 - Apache 2.0许可证 (当前版本: 2.38.0)
-# https://github.com/googleapis/google-auth-library-python/blob/main/LICENSE
-google-auth==2.38.0
-
-# Google生成式AI - Apache 2.0许可证 (当前版本: 0.8.4)
-# https://github.com/google/generative-ai-python/blob/main/LICENSE
-google-generativeai==0.8.4
+# Google Gemini 及相关 Google AI 依赖（已移除 - 保留注释以便记录）
+# 如果将来需要使用 Google Gemini 或 Google 生成式 API，请取消注释以下依赖：
+# langchain-google-genai==2.0.8
+# google-ai-generativelanguage==0.6.15
+# google-api-core==2.24.1
+# google-api-python-client==2.162.0
+# google-auth==2.38.0
+# google-generativeai==0.8.4
 
 # Mistral AI 支持（未使用，如需要请取消注释）
 # # Mistral AI支持 - MIT许可证 (当前版本: 0.2.4)

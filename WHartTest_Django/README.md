@@ -8,7 +8,7 @@ WhartTest 是一个基于 Django REST Framework 构建的AI驱动测试自动化
 
 ### 🤖 AI智能测试用例生成
 - 基于大语言模型的智能测试用例自动生成
-- 支持多种 LLM 供应商（OpenAI、Anthropic、Claude 等），可灵活配置
+ - 支持 OpenAI 兼容的 LLM 供应商（如 OpenAI、部分自建代理等），可灵活配置
 - 通过 MCP 工具调用，实现测试用例的智能分析和生成，支持自定义工具集
 - 自然语言描述转换为结构化测试用例，结合知识库提升准确性
 - 支持测试步骤、预期结果的自动生成，并可进行AI辅助优化
@@ -274,7 +274,7 @@ python manage.py runserver
 | `USER_AGENT` | 否 | 默认值 | `WhartTest-Django/1.0 (AI Test Case Generation Platform)` | HTTP 请求的用户代理标识 |
 | `DATABASE_URL` | 否 | SQLite | `postgresql://user:pass@localhost/dbname` | 数据库连接 URL（生产环境推荐 PostgreSQL） |
 | `OPENAI_API_KEY` | 否 | - | `sk-...` | OpenAI API 密钥（如果使用 OpenAI 模型） |
-| `ANTHROPIC_API_KEY` | 否 | - | `sk-ant-...` | Anthropic API 密钥（如果使用 Claude 模型） |
+| `ANTHROPIC_API_KEY` | 否 | - | `sk-ant-...` | Anthropic API 密钥（注：项目当前默认只支持 OpenAI 兼容格式，如需启用 Anthropic/Claude，请按需安装依赖并修改配置） |
 
 #### LLM 配置
 在管理后台或通过 API 配置 LLM 供应商和 API 密钥。
@@ -453,7 +453,7 @@ DATABASE_URL=postgresql://user:password@localhost/dbname
 
 # LLM API Keys (根据实际使用的模型配置)
 OPENAI_API_KEY=your_openai_api_key_here
-# ANTHROPIC_API_KEY=your_anthropic_api_key_here
+# ANTHROPIC_API_KEY=your_anthropic_api_key_here (注：默认未启用 / 如需 Anthropic 支持，请取消注释并安装对应依赖)
 # ... 其他 LLM API Keys
 
 # CORS配置
