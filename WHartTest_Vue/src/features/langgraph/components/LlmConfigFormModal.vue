@@ -329,7 +329,7 @@ const loadProviders = async () => {
   }
 };
 
-// 从 API 获取可用模型列表
+// 从 API 获取可用模型列表（根据供应商类型）
 const fetchAvailableModels = async () => {
   if (!formData.value.api_url) {
     Message.warning('请先填写 API URL');
@@ -341,32 +341,68 @@ const fetchAvailableModels = async () => {
     return;
   }
 
+  const provider = formData.value.provider;
   loadingModels.value = true;
+  
   try {
-    // 构造 models API 端点
-    const apiUrl = formData.value.api_url.replace(/\/$/, ''); // 移除末尾斜杠
-    const modelsEndpoint = `${apiUrl}/models`;
-
-    const response = await axios.get(modelsEndpoint, {
-      headers: {
-        'Authorization': `Bearer ${formData.value.api_key}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 10000, // 10秒超时
-    });
-
-    // OpenAI API 格式: { data: [{ id: 'model-name' }] }
-    if (response.data && response.data.data) {
-      const models = response.data.data.map((model: any) => model.id);
-      modelOptions.value = models;
-      if (models.length > 0) {
-        Message.success(`成功获取 ${models.length} 个模型`);
+    const apiUrl = formData.value.api_url.replace(/\/$/, '');
+    
+    if (provider === 'anthropic') {
+      // Anthropic 没有标准的模型列表API，提供常用模型列表
+      modelOptions.value = [
+        'claude-3-5-sonnet-20241022',
+        'claude-3-5-haiku-20241022',
+        'claude-3-opus-20240229',
+        'claude-3-sonnet-20240229',
+        'claude-3-haiku-20240307',
+        'claude-2.1',
+        'claude-2.0',
+      ];
+      Message.success(`已加载 ${modelOptions.value.length} 个 Anthropic 常用模型`);
+    } else if (provider === 'gemini') {
+      // Gemini API 获取模型列表
+      const modelsEndpoint = `${apiUrl}/models?key=${formData.value.api_key}`;
+      const response = await axios.get(modelsEndpoint, {
+        timeout: 10000,
+      });
+      
+      if (response.data && response.data.models) {
+        const models = response.data.models
+          .filter((model: any) => model.supportedGenerationMethods?.includes('generateContent'))
+          .map((model: any) => model.name.replace('models/', ''));
+        modelOptions.value = models;
+        if (models.length > 0) {
+          Message.success(`成功获取 ${models.length} 个 Gemini 模型`);
+        } else {
+          Message.warning('未找到可用的 Gemini 模型');
+        }
       } else {
-        Message.warning('未找到可用模型');
+        Message.warning('Gemini API 返回格式不符合预期');
+        modelOptions.value = [];
       }
     } else {
-      Message.warning('API 返回格式不符合预期');
-      modelOptions.value = [];
+      // OpenAI 兼容格式（包括 openai_compatible）
+      const modelsEndpoint = `${apiUrl}/models`;
+      const response = await axios.get(modelsEndpoint, {
+        headers: {
+          'Authorization': `Bearer ${formData.value.api_key}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      });
+
+      if (response.data && response.data.data) {
+        const models = response.data.data.map((model: any) => model.id);
+        modelOptions.value = models;
+        if (models.length > 0) {
+          Message.success(`成功获取 ${models.length} 个模型`);
+        } else {
+          Message.warning('未找到可用模型');
+        }
+      } else {
+        Message.warning('API 返回格式不符合预期');
+        modelOptions.value = [];
+      }
     }
   } catch (error: any) {
     console.error('获取模型列表失败:', error);
@@ -381,7 +417,7 @@ const fetchAvailableModels = async () => {
   }
 };
 
-// 测试 LLM 模型真实可用性
+// 测试 LLM 模型真实可用性（根据供应商类型）
 const testLlmModel = async () => {
   // 验证必要字段
   if (!formData.value.api_url) {
@@ -397,41 +433,96 @@ const testLlmModel = async () => {
     return;
   }
 
+  const provider = formData.value.provider;
   testingModel.value = true;
+  
   try {
-    // 构造 chat completions API 端点
     const apiUrl = formData.value.api_url.replace(/\/$/, '');
-    const chatEndpoint = `${apiUrl}/chat/completions`;
+    
+    if (provider === 'anthropic') {
+      // Anthropic API 格式
+      const chatEndpoint = `${apiUrl}/messages`;
+      const response = await axios.post(chatEndpoint, {
+        model: formData.value.name,
+        messages: [
+          { role: 'user', content: 'Hi, this is a test message.' }
+        ],
+        max_tokens: 10
+      }, {
+        headers: {
+          'x-api-key': formData.value.api_key,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+      });
 
-    // 发送测试请求
-    const response = await axios.post(chatEndpoint, {
-      model: formData.value.name,
-      messages: [
-        { role: 'user', content: 'Hi, this is a test message.' }
-      ],
-      max_tokens: 10
-    }, {
-      headers: {
-        'Authorization': `Bearer ${formData.value.api_key}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 30000, // 30秒超时
-    });
-
-    // 验证返回数据包含有效响应
-    if (response.data && response.data.choices && response.data.choices.length > 0) {
-      const content = response.data.choices[0].message?.content;
-      if (content !== undefined) {
-        Message.success('模型测试成功！服务运行正常');
+      if (response.data && response.data.content && response.data.content.length > 0) {
+        Message.success('Anthropic 模型测试成功！服务运行正常');
       } else {
-        Message.warning('模型响应成功但数据格式异常');
+        Message.warning('模型响应成功但未返回有效数据');
+      }
+    } else if (provider === 'gemini') {
+      // Gemini API 格式
+      const modelName = formData.value.name.startsWith('models/') 
+        ? formData.value.name 
+        : `models/${formData.value.name}`;
+      const chatEndpoint = `${apiUrl}/${modelName}:generateContent?key=${formData.value.api_key}`;
+      
+      const response = await axios.post(chatEndpoint, {
+        contents: [
+          { 
+            role: 'user',
+            parts: [{ text: 'Hi, this is a test message.' }]
+          }
+        ],
+        generationConfig: {
+          maxOutputTokens: 10
+        }
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+      });
+
+      if (response.data && response.data.candidates && response.data.candidates.length > 0) {
+        Message.success('Gemini 模型测试成功！服务运行正常');
+      } else {
+        Message.warning('模型响应成功但未返回有效数据');
       }
     } else {
-      Message.warning('模型响应成功但未返回有效数据');
+      // OpenAI 兼容格式（包括 openai_compatible）
+      const chatEndpoint = `${apiUrl}/chat/completions`;
+      const response = await axios.post(chatEndpoint, {
+        model: formData.value.name,
+        messages: [
+          { role: 'user', content: 'Hi, this is a test message.' }
+        ],
+        max_tokens: 10
+      }, {
+        headers: {
+          'Authorization': `Bearer ${formData.value.api_key}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+      });
+
+      if (response.data && response.data.choices && response.data.choices.length > 0) {
+        const content = response.data.choices[0].message?.content;
+        if (content !== undefined) {
+          Message.success('模型测试成功！服务运行正常');
+        } else {
+          Message.warning('模型响应成功但数据格式异常');
+        }
+      } else {
+        Message.warning('模型响应成功但未返回有效数据');
+      }
     }
   } catch (error: any) {
     console.error('模型测试失败:', error);
     const errorMsg = error.response?.data?.error?.message 
+      || error.response?.data?.message
       || error.response?.statusText 
       || error.message 
       || '模型测试失败';
