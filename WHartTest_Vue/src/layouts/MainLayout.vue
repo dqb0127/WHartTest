@@ -80,6 +80,11 @@
             <a href="#" @click="checkProjectAndNavigate($event, '/requirements')">需求管理</a>
           </a-menu-item>
 
+          <a-menu-item key="ai-diagram" v-if="hasLangGraphChatPermission">
+            <template #icon><icon-mind-mapping /></template>
+            <a href="#" @click="checkProjectAndNavigate($event, '/ai-diagram')">智能图表</a>
+          </a-menu-item>
+
           <!-- 测试管理子菜单 -->
           <a-sub-menu key="test-management" v-if="hasTestManagementMenuItems">
             <template #icon><icon-experiment /></template>
@@ -103,11 +108,6 @@
           <a-menu-item key="langgraph-chat" v-if="hasLangGraphChatPermission">
             <template #icon><icon-message /></template>
             <a href="#" @click="checkProjectAndNavigate($event, '/langgraph-chat')">LLM对话</a>
-          </a-menu-item>
-
-          <a-menu-item key="ai-diagram" v-if="hasLangGraphChatPermission">
-            <template #icon><icon-mind-mapping /></template>
-            <a href="#" @click="checkProjectAndNavigate($event, '/ai-diagram')">AI图表</a>
           </a-menu-item>
 
           <a-menu-item key="knowledge-management" v-if="hasKnowledgePermission">
