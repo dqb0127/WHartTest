@@ -228,7 +228,8 @@ const drawioUrl = computed(() => {
     proto: 'json',
     ui: 'kennedy',
     noExitBtn: '1',  // 隐藏退出按钮
-    autosave: '1'    // 启用自动保存
+    autosave: '1',   // 启用自动保存
+    math: '0'        // 禁用数学公式插件（避免 404 错误）
   });
   return `${DRAWIO_BASE_URL}/?${params.toString()}`;
 });

@@ -554,7 +554,19 @@ class AgentOrchestrator:
                     await asyncio.sleep(wait_time)
                 else:
                     logger.error(f"LLM 流式连接失败，已达最大重试次数 ({max_retries}): {e}")
+            except openai.APIError as e:
+                # API 错误（如 Bad request），打印详细信息便于排查
+                logger.error(f"OpenAI API 错误: {type(e).__name__}: {e}")
+                if hasattr(e, 'response') and e.response:
+                    try:
+                        logger.error(f"API 响应详情: status={e.response.status_code}, body={e.response.text[:500]}")
+                    except Exception:
+                        pass
+                if hasattr(e, 'body'):
+                    logger.error(f"API 错误 body: {e.body}")
+                raise
             except Exception as e:
+                logger.error(f"LLM 调用异常: {type(e).__name__}: {e}")
                 raise
         
         raise last_error
@@ -654,6 +666,22 @@ class AgentOrchestrator:
         """
         统一处理同步与异步工具
         """
+        # 处理 MCP 工具的参数类型问题
+        # 某些 MCP 工具期望字符串参数，但 LLM 返回的是解析后的对象
+        tool_name = getattr(tool, 'name', str(tool))
+        
+        # edit_diagram 的 operations 参数需要是 JSON 字符串
+        if tool_name == 'edit_diagram' and 'operations' in tool_args:
+            ops = tool_args['operations']
+            if not isinstance(ops, str):
+                tool_args['operations'] = json.dumps(ops, ensure_ascii=False)
+        
+        # display_diagram 的 pages 参数需要是 JSON 字符串
+        if tool_name == 'display_diagram' and 'pages' in tool_args:
+            pages = tool_args['pages']
+            if not isinstance(pages, str):
+                tool_args['pages'] = json.dumps(pages, ensure_ascii=False)
+        
         # 优先使用异步方法
         if hasattr(tool, 'ainvoke'):
             return await tool.ainvoke(tool_args)
