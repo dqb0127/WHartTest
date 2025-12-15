@@ -28,8 +28,8 @@
             <span class="checkbox-label">
               <icon-code class="checkbox-icon" />
               <span class="checkbox-text">
-                <span class="checkbox-title">执行完成后自动生成 Playwright 脚本</span>
-                <span class="checkbox-desc">开启后，AI 执行过程中的浏览器操作将被转换为可重复执行的自动化用例</span>
+                <span class="checkbox-title">是否自动生成 Playwright 脚本</span>
+                <span class="checkbox-desc">注意！！！断言失败或对话异常时，不生成脚本</span>
               </span>
             </span>
           </a-checkbox>
