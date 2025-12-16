@@ -1113,7 +1113,7 @@ const displayedMessages = computed(() => {
       combined.push({
         content: stream.userMessage,
         isUser: true,
-        time: getCurrentTime(),
+        time: stream.userMessageTime || getCurrentTime(), // 使用会话创建时间
         messageType: 'human'
       });
     }

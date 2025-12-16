@@ -33,6 +33,7 @@ interface StreamState {
   currentStep?: number;  // Agent Loop 当前步骤
   maxSteps?: number;     // Agent Loop 最大步骤数
   userMessage?: string;  // 用户发送的消息内容
+  userMessageTime?: string;  // 用户消息时间（会话创建时间）
   taskId?: number;       // Agent Task ID
   // ⭐ 脚本生成信息
   scriptGeneration?: {
@@ -59,6 +60,18 @@ export interface AgentLoopSseEvent {
 const formatStreamTime = (): string => {
   const now = new Date();
   return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+};
+
+// 格式化 ISO 时间字符串为显示格式
+const formatIsoTime = (isoString: string | null | undefined): string => {
+  if (!isoString) return formatStreamTime();
+  try {
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return formatStreamTime();
+    return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+  } catch {
+    return formatStreamTime();
+  }
 };
 
 // 数字字段归一化（处理字符串或数字类型）
@@ -358,7 +371,7 @@ export async function sendChatMessageStream(
               const prevTokenCount = cachedUsage?.tokenCount || 0;
               const contextLimit = parsed.context_limit || cachedUsage?.limit || 128000;
               const initialMaxSteps = normalizeNumericField(parsed.max_steps);
-              
+
               // 初始化或重置此会话的流状态，保留之前的token信息
               activeStreams.value[streamSessionId] = {
                 content: '',
@@ -368,7 +381,8 @@ export async function sendChatMessageStream(
                 contextLimit: contextLimit,
                 currentStep: 0,
                 maxSteps: initialMaxSteps,
-                userMessage: data.message // 保存用户消息
+                userMessage: data.message, // 保存用户消息
+                userMessageTime: formatIsoTime(parsed.created_at) // 使用会话创建时间
               };
               onStart(streamSessionId);
             }

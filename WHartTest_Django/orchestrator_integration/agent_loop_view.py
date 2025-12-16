@@ -810,7 +810,8 @@ page.get_by_placeholder("用户名").fill("admin")
                 'type': 'start',
                 'session_id': session_id,
                 'project_id': project_id,
-                'mode': 'agent_loop'
+                'mode': 'agent_loop',
+                'created_at': chat_session.created_at.isoformat() if chat_session and chat_session.created_at else None
             })
 
             # 12. 创建 AgentOrchestrator 并执行
