@@ -942,33 +942,31 @@ class AutomationScriptViewSet(viewsets.ModelViewSet):
     def execute(self, request, pk=None):
         """
         执行自动化用例
-        
+
         POST /api/automation-scripts/{id}/execute/
         {
-            "headless": true,
             "record_video": false
         }
         """
         script = self.get_object()
-        
+
         # 权限检查：验证用户有该项目的访问权限
         if not self._check_project_access(script.test_case.project_id):
             return Response(
                 {'error': '无权访问该项目'},
                 status=status.HTTP_403_FORBIDDEN
             )
-        
+
         serializer = ExecuteScriptSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
-        headless = serializer.validated_data.get('headless', script.headless)
+
         record_video = serializer.validated_data.get('record_video', False)
-        
+
         try:
             execution = execute_automation_script(
                 script=script,
                 executor=request.user,
-                headless=headless,
+                headless=True,  # 服务器环境始终使用无头模式
                 record_video=record_video
             )
             
@@ -1036,7 +1034,7 @@ class AutomationScriptViewSet(viewsets.ModelViewSet):
                 test_case_name=script.test_case.name,
                 target_url=script.target_url or '',
                 timeout_seconds=script.timeout_seconds,
-                headless=script.headless,
+                headless=True,  # 服务器环境始终使用无头模式
                 description=script.description or ''
             )
             

@@ -556,14 +556,14 @@ class AutomationScriptSerializer(serializers.ModelSerializer):
     project_id = serializers.IntegerField(source='test_case.project_id', read_only=True)
     latest_execution = serializers.SerializerMethodField()
     execution_count = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = AutomationScript
         fields = [
             'id', 'test_case', 'test_case_name', 'source_task', 'name',
             'description', 'script_type', 'source', 'status',
             'script_content', 'recorded_steps', 'target_url',
-            'timeout_seconds', 'headless', 'version',
+            'timeout_seconds', 'version',
             'creator', 'creator_detail', 'project_id',
             'created_at', 'updated_at',
             'latest_execution', 'execution_count'
@@ -614,5 +614,4 @@ class AutomationScriptListSerializer(serializers.ModelSerializer):
 
 class ExecuteScriptSerializer(serializers.Serializer):
     """执行脚本的请求序列化器"""
-    headless = serializers.BooleanField(default=True, required=False, help_text="是否无头模式")
     record_video = serializers.BooleanField(default=False, required=False, help_text="是否录屏")

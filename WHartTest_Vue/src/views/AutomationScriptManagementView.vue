@@ -106,7 +106,7 @@
                   type="text"
                   size="small"
                   :loading="executingId === record.id"
-                  @click="executeScript(record, true, false)"
+                  @click="executeScript(record, false)"
                   title="快速执行（无头模式）"
                 >
                   <icon-play-arrow />
@@ -327,18 +327,9 @@
               <a-input v-model="scriptForm.target_url" placeholder="测试的目标网址" />
             </a-form-item>
 
-            <a-row :gutter="12">
-              <a-col :span="12">
-                <a-form-item label="超时时间（秒）" field="timeout_seconds">
-                  <a-input-number v-model="scriptForm.timeout_seconds" :min="10" :max="600" style="width: 100%;" />
-                </a-form-item>
-              </a-col>
-              <a-col :span="12">
-                <a-form-item label="运行模式">
-                  <a-checkbox v-model="scriptForm.headless">无头模式</a-checkbox>
-                </a-form-item>
-              </a-col>
-            </a-row>
+            <a-form-item label="超时时间（秒）" field="timeout_seconds">
+              <a-input-number v-model="scriptForm.timeout_seconds" :min="10" :max="600" style="width: 100%;" />
+            </a-form-item>
 
             <a-form-item label="描述" field="description">
               <a-textarea v-model="scriptForm.description" placeholder="脚本描述" :auto-size="{ minRows: 2, maxRows: 4 }" />
@@ -475,7 +466,6 @@ interface AutomationScript {
   description: string;
   script_content: string;
   timeout_seconds: number;
-  headless: boolean;
   created_at: string;
   latest_status: string | null;
   executions?: any[];
@@ -496,7 +486,6 @@ interface ScriptForm {
   description: string;
   script_content: string;
   timeout_seconds: number;
-  headless: boolean;
 }
 
 const projectStore = useProjectStore();
@@ -532,7 +521,6 @@ const getDefaultForm = (): ScriptForm => ({
   description: '',
   script_content: '',
   timeout_seconds: 60,
-  headless: true,
 });
 
 const scriptForm = reactive<ScriptForm>(getDefaultForm());
@@ -641,7 +629,6 @@ const buildScriptPayload = () => ({
   description: scriptForm.description,
   script_content: scriptForm.script_content,
   timeout_seconds: scriptForm.timeout_seconds,
-  headless: scriptForm.headless,
 });
 
 // 静默保存脚本（不关闭弹窗，用于调试执行前自动保存）
@@ -884,12 +871,11 @@ const showDetail = async (script: AutomationScript) => {
 };
 
 // 执行脚本
-const executeScript = async (script: AutomationScript, headless: boolean = true, recordVideo: boolean = false) => {
+const executeScript = async (script: AutomationScript, recordVideo: boolean = false) => {
   executingId.value = script.id;
   const modeText = recordVideo ? '录屏模式' : '快速模式';
   try {
     await request.post(`/automation-scripts/${script.id}/execute/`, {
-      headless: headless,
       record_video: recordVideo
     });
     Message.success(`脚本执行已启动（${modeText}）`);
@@ -991,7 +977,6 @@ const openEditModal = async (script: AutomationScript) => {
       description: data.description || '',
       script_content: data.script_content || '',
       timeout_seconds: data.timeout_seconds || 60,
-      headless: data.headless !== false,
     });
     
     await loadInitialTestCases(data.test_case);
