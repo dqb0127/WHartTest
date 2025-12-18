@@ -232,7 +232,7 @@ openai # OpenAI官方SDK
 
 1. **克隆项目**
 ```bash
-git clone <repository-url>
+git clone https://github.com/MGdaasLab/WHartTest.git
 cd WhartTest_django
 ```
 
@@ -359,7 +359,7 @@ services:
 #### 开发环境部署
 ```bash
 # 1. 克隆项目
-git clone http://code.mgdaas-int.com/MGdaas-Lab/wharttest-django.git
+git clone https://github.com/MGdaasLab/WHartTest.git
 cd wharttest-django
 
 # 2. 创建虚拟环境
@@ -390,7 +390,7 @@ sudo apt update
 sudo apt install python3-pip python3-venv git
 
 # 2. 克隆项目
-git clone http://code.mgdaas-int.com/MGdaas-Lab/wharttest-django.git
+git clone https://github.com/MGdaasLab/WHartTest.git
 cd wharttest-django
 
 # 3. 创建虚拟环境

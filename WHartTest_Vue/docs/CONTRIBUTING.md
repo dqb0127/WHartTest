@@ -88,7 +88,7 @@ docs(readme): update installation instructions
 
 1. **Clone the repository**
    ```bash
-   git clone http://code.mgdaas-int.com/MGdaas-Lab/wheatsmarttest-vue.git
+   git clone https://github.com/MGdaasLab/WHartTest.git
    cd wheatsmarttest-vue
    ```
 

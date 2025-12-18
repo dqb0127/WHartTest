@@ -34,7 +34,7 @@ A modern test automation management system built with Vue 3, TypeScript, and Vit
 
 ```bash
 # Clone the repository
-git clone http://code.mgdaas-int.com/MGdaas-Lab/wheatsmarttest-vue.git
+git clone https://github.com/MGdaasLab/WHartTest.git
 
 # Navigate to project directory
 cd WHartTest_vue
