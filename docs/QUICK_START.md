@@ -19,7 +19,6 @@ docker-compose up -d
 ### 3. 访问系统
 
 - **前端界面**: http://localhost:8913
-- **后端管理**: http://localhost:8912/admin
   - 默认账号：`admin`
   - 默认密码：`admin123456`
 
@@ -45,7 +44,7 @@ docker-compose up -d
 
 ### 步骤1：登录后台
 
-访问 http://localhost:8912/admin 并登录
+访问 http://localhost:8913 并登录
 
 ### 步骤2：创建新的API Key
 
@@ -76,7 +75,6 @@ docker-compose restart mcp
 |------|------|------|
 | 前端界面 | http://localhost:8913 | Vue前端应用 |
 | 后端API | http://localhost:8912 | Django REST API |
-| 后端管理 | http://localhost:8912/admin | Django Admin |
 | Redis | localhost:8911 | 缓存和消息队列 |
 | MCP服务 | http://localhost:8914 | WHartTest MCP工具 |
 | MS MCP | http://localhost:8915 | MS测试平台集成 |

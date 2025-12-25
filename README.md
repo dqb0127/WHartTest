@@ -24,8 +24,7 @@ cp .env.example .env
 docker-compose up -d
 
 # 4. 访问系统
-# 前端：http://localhost:8913
-# 后台：http://localhost:8912/admin (admin/admin123456)
+# http://localhost:8913 (admin/admin123456)
 ```
 
 **就这么简单！** 系统会自动创建默认API Key，MCP服务开箱即用。
