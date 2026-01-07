@@ -377,6 +377,7 @@
     <SplitOptionsModal
       :visible="showSplitModal"
       :default-level="splitDefaultLevel"
+      :document-type="document?.document_type"
       @confirm="handleSplitConfirm"
       @cancel="showSplitModal = false"
       @update:visible="showSplitModal = $event"

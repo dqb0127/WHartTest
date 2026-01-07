@@ -10,61 +10,40 @@
       <!-- 拆分级别选择 -->
       <div class="option-group">
         <h4>拆分级别</h4>
-        <a-radio-group v-model="splitConfig.split_level" direction="vertical">
-          <a-radio value="h1">
-            <div class="radio-content">
-              <strong>H1级别拆分</strong>
-              <div class="radio-desc">按一级标题（# 标题）拆分 - 适合大章节拆分</div>
-            </div>
-          </a-radio>
-          <a-radio value="h2">
-            <div class="radio-content">
-              <strong>H2级别拆分</strong>
-              <div class="radio-desc">按二级标题（## 标题）拆分 - 适合功能模块拆分</div>
-            </div>
-          </a-radio>
-          <a-radio value="h3">
-            <div class="radio-content">
-              <strong>H3级别拆分</strong>
-              <div class="radio-desc">按三级标题（### 标题）拆分 - 适合子功能拆分</div>
-            </div>
-          </a-radio>
-          <a-radio value="h4">
-            <div class="radio-content">
-              <strong>H4级别拆分</strong>
-              <div class="radio-desc">按四级标题（#### 标题）拆分 - 适合细分功能拆分</div>
-            </div>
-          </a-radio>
-          <a-radio value="h5">
-            <div class="radio-content">
-              <strong>H5级别拆分</strong>
-              <div class="radio-desc">按五级标题（##### 标题）拆分 - 适合详细条目拆分</div>
-            </div>
-          </a-radio>
-          <a-radio value="h6">
-            <div class="radio-content">
-              <strong>H6级别拆分</strong>
-              <div class="radio-desc">按六级标题（###### 标题）拆分 - 适合最细粒度拆分</div>
-            </div>
-          </a-radio>
-          <a-radio value="auto">
-            <div class="radio-content">
-              <strong>智能拆分</strong>
-              <div class="radio-desc">智能按字数拆分 - 适合没有明确标题结构的文档</div>
-            </div>
-          </a-radio>
-        </a-radio-group>
+        <template v-if="supportsHeadingSplit">
+          <a-radio-group v-model="splitConfig.split_level" class="level-radio-group">
+            <a-radio value="h1">H1</a-radio>
+            <a-radio value="h2">H2</a-radio>
+            <a-radio value="h3">H3</a-radio>
+            <a-radio value="h4">H4</a-radio>
+            <a-radio value="h5">H5</a-radio>
+            <a-radio value="h6">H6</a-radio>
+            <a-radio value="auto">字数拆分</a-radio>
+          </a-radio-group>
+          <div class="level-desc">{{ levelDescription }}</div>
+        </template>
+        <template v-else>
+          <a-radio-group v-model="splitConfig.split_level">
+            <a-radio value="auto">字数拆分</a-radio>
+          </a-radio-group>
+          <div class="level-desc">按字数拆分 - 适合没有明确标题结构的文档</div>
+          <div class="doc-type-hint">
+            <a-alert type="info" :show-icon="false">
+              {{ documentType?.toUpperCase() }} 格式文档建议使用字数拆分
+            </a-alert>
+          </div>
+        </template>
       </div>
 
       <!-- 其他配置选项 -->
-      <div class="option-group">
+      <div v-if="supportsHeadingSplit" class="option-group">
         <h4>拆分配置</h4>
         <a-checkbox v-model="splitConfig.include_context">
           包含上下文（包含上级标题作为上下文）
         </a-checkbox>
       </div>
 
-      <!-- 智能拆分的分块大小 -->
+      <!-- 字数拆分的分块大小 -->
       <div v-if="splitConfig.split_level === 'auto'" class="option-group">
         <h4>分块大小</h4>
         <a-input-number
@@ -78,7 +57,7 @@
       </div>
 
       <!-- 文档结构分析结果 -->
-      <div v-if="structureAnalysis" class="option-group">
+      <div v-if="structureAnalysis && supportsHeadingSplit" class="option-group">
         <h4>文档结构分析</h4>
         <div class="structure-info">
           <div class="structure-item">
@@ -130,13 +109,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch } from 'vue';
-import type { SplitModulesRequest, DocumentStructureResponse } from '../types';
+import { reactive, watch, computed } from 'vue';
+import type { SplitModulesRequest, DocumentStructureResponse, DocumentType } from '../types';
 
 interface Props {
   visible: boolean;
   structureAnalysis?: DocumentStructureResponse | null;
   defaultLevel?: string;
+  documentType?: DocumentType;
 }
 
 interface Emits {
@@ -153,6 +133,52 @@ const splitConfig = reactive<SplitModulesRequest>({
   include_context: true,
   chunk_size: 2000
 });
+
+// 支持标题拆分的文档类型
+const supportsHeadingSplit = computed(() => {
+  const headingTypes: DocumentType[] = ['md', 'doc', 'docx'];
+  return !props.documentType || headingTypes.includes(props.documentType);
+});
+
+// 推荐的拆分级别
+const recommendedLevel = computed(() => {
+  if (!props.documentType) return 'h2';
+
+  switch (props.documentType) {
+    case 'md':
+    case 'docx':
+      return 'h2';
+    case 'doc':
+      return 'h2'; // 有LibreOffice支持
+    case 'txt':
+    case 'pdf':
+      return 'auto';
+    default:
+      return 'h2';
+  }
+});
+
+// 当前选中级别的描述
+const levelDescription = computed(() => {
+  const level = splitConfig.split_level;
+  const descriptions: Record<string, string> = {
+    h1: '按一级标题拆分 - 生成较大的模块',
+    h2: '按二级标题拆分 - 适合大多数文档',
+    h3: '按三级标题拆分 - 生成较细的模块',
+    h4: '按四级标题拆分 - 适合层级较深的文档',
+    h5: '按五级标题拆分 - 生成更细粒度的模块',
+    h6: '按六级标题拆分 - 最细粒度的拆分',
+    auto: '按字数拆分 - 适合没有明确标题结构的文档'
+  };
+  return descriptions[level] || '';
+});
+
+// 监听文档类型变化，自动设置推荐级别
+watch(() => props.documentType, (newType) => {
+  if (newType) {
+    splitConfig.split_level = recommendedLevel.value as any;
+  }
+}, { immediate: true });
 
 // 监听默认级别变化
 watch(() => props.defaultLevel, (newLevel) => {
@@ -203,6 +229,19 @@ const handleCancel = () => {
   color: #86909c;
   font-size: 12px;
   margin-top: 2px;
+}
+
+.recommend-tag {
+  background: #00b42a;
+  color: white;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  margin-left: 8px;
+}
+
+.doc-type-hint {
+  margin-top: 12px;
 }
 
 .input-desc {
@@ -276,5 +315,17 @@ const handleCancel = () => {
 .rec-desc {
   color: #4e5969;
   font-size: 12px;
+}
+
+.level-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.level-desc {
+  color: #86909c;
+  font-size: 12px;
+  margin-top: 8px;
 }
 </style>
