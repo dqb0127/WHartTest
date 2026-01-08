@@ -193,12 +193,13 @@ class CustomAPIEmbeddings(Embeddings):
 
 
 class DocumentProcessor:
-    """文档处理器"""
+    """文档处理器 - 支持结构化解析"""
 
     def __init__(self):
         self.loaders = {
             'pdf': PyPDFLoader,
-            'docx': Docx2txtLoader,
+            'docx': self._load_docx_structured,  # 使用自定义结构化解析
+            'doc': self._load_doc_structured,    # 支持旧版 .doc 格式
             'pptx': UnstructuredPowerPointLoader,
             'txt': TextLoader,
             'md': UnstructuredMarkdownLoader,
@@ -271,18 +272,22 @@ class DocumentProcessor:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"文件不存在: {file_path}")
 
-        loader_class = self.loaders.get(document.document_type)
-        if not loader_class:
+        loader = self.loaders.get(document.document_type)
+        if not loader:
             raise ValueError(f"不支持的文档类型: {document.document_type}")
 
         try:
-            # 对于文本文件，使用UTF-8编码
-            if document.document_type == 'txt':
-                loader = loader_class(file_path, encoding='utf-8')
+            # 检查是否为自定义方法（docx/doc 结构化解析）
+            if callable(loader) and hasattr(loader, '__self__'):
+                docs = loader(file_path, document)
+            elif document.document_type == 'txt':
+                # 对于文本文件，使用UTF-8编码
+                loader_instance = loader(file_path, encoding='utf-8')
+                docs = loader_instance.load()
             else:
-                loader = loader_class(file_path)
-
-            docs = loader.load()
+                # 其他类型使用标准 LangChain loader
+                loader_instance = loader(file_path)
+                docs = loader_instance.load()
 
             # 检查是否成功加载内容
             if not docs:
@@ -329,6 +334,312 @@ class DocumentProcessor:
                     raise
             else:
                 raise
+
+    def _load_docx_structured(self, file_path: str, document: Document) -> List[LangChainDocument]:
+        """结构化解析 .docx 文件，保留标题层级和表格结构"""
+        try:
+            from docx import Document as DocxDocument
+
+            doc = DocxDocument(file_path)
+            logger.info(f"开始结构化解析 Word 文档，段落数: {len(doc.paragraphs)}, 表格数: {len(doc.tables)}")
+
+            # 创建元素到对象的映射
+            paragraph_map = {p._element: p for p in doc.paragraphs}
+            table_map = {t._element: t for t in doc.tables}
+
+            content_parts = []
+            extracted_paragraphs = 0
+            extracted_tables = 0
+
+            # 按文档顺序遍历所有元素
+            for element in doc.element.body:
+                if element.tag.endswith('p'):  # 段落
+                    paragraph = paragraph_map.get(element)
+                    if paragraph:
+                        text = paragraph.text.strip()
+                        if text:
+                            markdown_text = self._convert_paragraph_to_markdown(paragraph)
+                            content_parts.append(markdown_text)
+                            extracted_paragraphs += 1
+
+                elif element.tag.endswith('tbl'):  # 表格
+                    table = table_map.get(element)
+                    if table:
+                        table_content = self._extract_table_content(table)
+                        if table_content:
+                            content_parts.append(table_content)
+                            extracted_tables += 1
+
+            content = '\n\n'.join(content_parts)
+            logger.info(f"Word 结构化解析完成 - 段落: {extracted_paragraphs}, 表格: {extracted_tables}, 内容长度: {len(content)}")
+
+            return [LangChainDocument(
+                page_content=content,
+                metadata={
+                    "source": document.title,
+                    "document_id": str(document.id),
+                    "document_type": document.document_type,
+                    "title": document.title,
+                    "file_path": file_path,
+                    "structured_parsing": True,
+                    "paragraph_count": extracted_paragraphs,
+                    "table_count": extracted_tables,
+                }
+            )]
+
+        except Exception as e:
+            logger.warning(f"结构化解析失败，降级为纯文本解析: {e}")
+            # 降级为 Docx2txtLoader
+            loader = Docx2txtLoader(file_path)
+            docs = loader.load()
+            for doc in docs:
+                doc.metadata.update({
+                    "source": document.title,
+                    "document_id": str(document.id),
+                    "document_type": document.document_type,
+                    "title": document.title,
+                    "file_path": file_path,
+                    "structured_parsing": False,
+                })
+            return docs
+
+    def _load_doc_structured(self, file_path: str, document: Document) -> List[LangChainDocument]:
+        """解析旧版 .doc 文件，优先转换为 docx 以保留结构"""
+        import tempfile
+        import subprocess
+
+        # 检测文件真实格式
+        with open(file_path, 'rb') as f:
+            header = f.read(8)
+
+        # ZIP 魔数表示实际是 .docx
+        if header[:4] == b'PK\x03\x04':
+            logger.info("检测到 .doc 文件实际为 .docx 格式，使用 docx 解析器")
+            return self._load_docx_structured(file_path, document)
+
+        try:
+            # 方法1: LibreOffice 转换为 docx
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                result = subprocess.run(
+                    ['libreoffice', '--headless', '--convert-to', 'docx',
+                     '--outdir', tmp_dir, file_path],
+                    capture_output=True, text=True, timeout=120
+                )
+                if result.returncode == 0:
+                    import os
+                    docx_file = os.path.join(tmp_dir,
+                        os.path.basename(file_path).rsplit('.', 1)[0] + '.docx')
+                    if os.path.exists(docx_file):
+                        docs = self._load_docx_structured(docx_file, document)
+                        logger.info(f"成功通过 LibreOffice 转换并解析 .doc 文件")
+                        return docs
+        except FileNotFoundError:
+            logger.debug("LibreOffice 未安装")
+        except Exception as e:
+            logger.debug(f"LibreOffice 转换失败: {e}")
+
+        # 方法2: antiword 提取纯文本并推断标题
+        try:
+            result = subprocess.run(
+                ['antiword', '-w', '0', file_path],
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                content = self._infer_headings_from_plain_text(result.stdout.strip())
+                logger.info(f"成功通过 antiword 解析 .doc 文件，内容长度: {len(content)}")
+                return [LangChainDocument(
+                    page_content=content,
+                    metadata={
+                        "source": document.title,
+                        "document_id": str(document.id),
+                        "document_type": document.document_type,
+                        "title": document.title,
+                        "file_path": file_path,
+                        "structured_parsing": False,
+                        "parse_method": "antiword",
+                    }
+                )]
+        except FileNotFoundError:
+            logger.debug("antiword 未安装")
+        except Exception as e:
+            logger.debug(f"antiword 失败: {e}")
+
+        raise ValueError(
+            "无法解析 .doc 文件。请安装 LibreOffice 以获得最佳效果：\n"
+            "Ubuntu/Debian: apt-get install libreoffice\n"
+            "或者将文件另存为 .docx 格式后重新上传"
+        )
+
+    def _convert_paragraph_to_markdown(self, paragraph) -> str:
+        """将 Word 段落转换为 Markdown 格式"""
+        text = paragraph.text.strip()
+        if not text:
+            return ""
+
+        style_name = paragraph.style.name if paragraph.style else ""
+
+        # 根据样式转换为 Markdown 标题
+        heading_map = {
+            'heading 1': '# ', 'heading 2': '## ', 'heading 3': '### ',
+            'heading 4': '#### ', 'heading 5': '##### ', 'heading 6': '###### ',
+        }
+
+        for style_key, prefix in heading_map.items():
+            if style_key in style_name.lower():
+                return f"{prefix}{text}"
+
+        return text
+
+    def _extract_table_content(self, table, depth=0) -> str:
+        """提取表格内容为 Markdown 格式，支持合并单元格"""
+        try:
+            # 获取表格的实际行列数
+            row_count = len(table.rows)
+            if row_count == 0:
+                return ""
+
+            # 优先用 table.columns 获取列数（更稳定），失败时回退到行 cells 的最大长度
+            try:
+                max_cols = len(table.columns)
+            except Exception:
+                max_cols = max((len(row.cells) for row in table.rows), default=0)
+            if max_cols == 0:
+                return ""
+
+            # 构建单元格网格，用于处理合并单元格
+            # grid[row][col] = (cell_text, is_merged_continuation)
+            grid = [[("", False) for _ in range(max_cols)] for _ in range(row_count)]
+
+            def _sanitize_cell_text(text: str) -> str:
+                """清理单元格文本，转义 Markdown 特殊字符"""
+                text = (text or "").replace("\r", " ").replace("\n", " ").replace("\t", " ")
+                text = " ".join(text.split())  # 合并多个空格
+                return text.replace("|", "\\|")  # 转义管道符
+
+            for row_idx, row in enumerate(table.rows):
+                # 记录当前行已处理的单元格（用于检测水平合并：同一行中重复引用同一 tc）
+                processed_cells_in_row = set()
+
+                for col_idx, cell in enumerate(row.cells):
+                    if col_idx >= max_cols:
+                        break
+
+                    # 获取单元格的唯一标识
+                    cell_id = id(cell._tc)
+
+                    # 检测垂直合并
+                    # Word 中 <w:vMerge/> 无 val 属性时通常表示"继续合并"
+                    try:
+                        tcPr = cell._tc.tcPr
+                        v_merge = tcPr.vMerge if tcPr is not None else None
+                        v_merge_val = getattr(v_merge, "val", None) if v_merge is not None else None
+
+                        if v_merge is None:
+                            is_v_merge_continue = False
+                        elif v_merge_val == "restart":
+                            is_v_merge_continue = False
+                        elif v_merge_val == "continue":
+                            is_v_merge_continue = True
+                        else:
+                            # val 为 None 时，通过检查上一行是否有 vMerge 来判断
+                            if row_idx == 0:
+                                is_v_merge_continue = False
+                            else:
+                                try:
+                                    prev_cell = table.rows[row_idx - 1].cells[col_idx]
+                                    prev_tcPr = prev_cell._tc.tcPr
+                                    prev_v_merge = prev_tcPr.vMerge if prev_tcPr is not None else None
+                                    is_v_merge_continue = prev_v_merge is not None
+                                except Exception:
+                                    is_v_merge_continue = False
+                    except Exception:
+                        is_v_merge_continue = False
+
+                    # 垂直合并继续：标记为已合并
+                    if is_v_merge_continue:
+                        grid[row_idx][col_idx] = ("", True)
+                        continue
+
+                    # 水平合并继续：同一行中重复引用同一 tc
+                    if cell_id in processed_cells_in_row:
+                        grid[row_idx][col_idx] = ("", True)
+                        continue
+
+                    # 提取单元格内容
+                    nested_tables = cell.tables
+                    if nested_tables and depth < 3:
+                        cell_text_parts = [p.text.strip() for p in cell.paragraphs if p.text.strip()]
+                        for nested_table in nested_tables:
+                            nested_content = self._extract_table_content(nested_table, depth + 1)
+                            if nested_content:
+                                cell_text_parts.append(f"[嵌套表格] {nested_content}")
+                        cell_text = _sanitize_cell_text(" ".join(cell_text_parts))
+                    else:
+                        cell_text = _sanitize_cell_text(cell.text.strip())
+
+                    # 填充网格
+                    grid[row_idx][col_idx] = (cell_text, False)
+                    processed_cells_in_row.add(cell_id)
+
+            # 生成 Markdown 表格
+            table_rows = []
+            for row_idx in range(row_count):
+                row_cells = [grid[row_idx][col_idx][0] for col_idx in range(max_cols)]
+
+                # 跳过全空行
+                if not any(cell.strip() for cell in row_cells):
+                    continue
+
+                table_rows.append(" | ".join(row_cells))
+
+                # 第一行后添加分隔符
+                if len(table_rows) == 1:
+                    separator = " | ".join(["---"] * max_cols)
+                    table_rows.append(separator)
+
+            if table_rows:
+                return "\n".join(table_rows)
+            return ""
+
+        except Exception as e:
+            logger.warning(f"表格提取失败: {e}")
+            return ""
+
+    def _infer_headings_from_plain_text(self, content: str) -> str:
+        """从纯文本推断标题结构"""
+        import re
+
+        lines = content.split('\n')
+        result_lines = []
+
+        # 常见标题模式
+        patterns = [
+            (r'^第[一二三四五六七八九十百]+[章节部分]\s*', 1),
+            (r'^[一二三四五六七八九十]+[、.．]\s*', 2),
+            (r'^[（\(][一二三四五六七八九十]+[）\)]\s*', 3),
+            (r'^(\d+)\s*[、.．]\s*', 2),
+            (r'^(\d+\.\d+)\s+', 3),
+            (r'^(\d+\.\d+\.\d+)\s+', 4),
+        ]
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                result_lines.append('')
+                continue
+
+            matched = False
+            for pattern, level in patterns:
+                if re.match(pattern, stripped) and len(stripped) <= 80:
+                    prefix = '#' * level + ' '
+                    result_lines.append(prefix + stripped)
+                    matched = True
+                    break
+
+            if not matched:
+                result_lines.append(line)
+
+        return '\n'.join(result_lines)
 
 
 class VectorStoreManager:
