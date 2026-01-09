@@ -731,18 +731,23 @@ class DocumentProcessor:
 
 
 class VectorStoreManager:
-    """向量存储管理器 - 支持稠密+稀疏混合检索"""
+    """向量存储管理器 - 支持稠密+稀疏混合检索 + Reranker精排"""
 
     # 向量名称常量
     DENSE_VECTOR_NAME = "dense"
     SPARSE_VECTOR_NAME = "bm25"
     # RRF 融合参数
     RRF_K = 60
+    # Reranker 配置
+    RERANKER_MODEL = "bge-reranker-v2-m3"
+    RERANKER_ENABLED = True  # 可通过环境变量控制
 
     # 类级别的缓存
     _vector_store_cache = {}
     _embeddings_cache = {}
     _sparse_encoder_cache = {}
+    _reranker_config_cache = None
+    _reranker_config_cache_time = 0
     _global_config_cache = None
     _global_config_cache_time = 0
 
@@ -788,6 +793,8 @@ class VectorStoreManager:
                     self._embeddings_cache[cache_key] = self._create_azure_embeddings(config)
                 elif embedding_service == 'ollama':
                     self._embeddings_cache[cache_key] = self._create_ollama_embeddings(config)
+                elif embedding_service == 'xinference':
+                    self._embeddings_cache[cache_key] = self._create_xinference_embeddings(config)
                 elif embedding_service == 'custom':
                     self._embeddings_cache[cache_key] = self._create_custom_api_embeddings(config)
                 else:
@@ -859,26 +866,134 @@ class VectorStoreManager:
             
         logger.info(f"🚀 初始化Azure OpenAI嵌入模型: {kwargs['model']}")
         return AzureOpenAIEmbeddings(**kwargs)
-    
+
     def _create_ollama_embeddings(self, config):
         """创建Ollama Embeddings实例"""
         try:
             from langchain_ollama import OllamaEmbeddings
         except ImportError:
             raise ImportError("需要安装langchain-ollama: pip install langchain-ollama")
-        
+
         kwargs = {
-            'model': config.model_name or 'nomic-embed-text',
+            'model': config.model_name or 'bge-m3',
         }
-        
+
         if config.api_base_url:
             kwargs['base_url'] = config.api_base_url
         else:
             kwargs['base_url'] = 'http://localhost:11434'
-            
+
         logger.info(f"🚀 初始化Ollama嵌入模型: {kwargs['model']}")
         return OllamaEmbeddings(**kwargs)
-    
+
+    def _create_xinference_embeddings(self, config):
+        """创建Xinference Embeddings实例"""
+        if not config.api_base_url:
+            base_url = 'http://localhost:9997'
+        else:
+            base_url = config.api_base_url.rstrip('/')
+
+        logger.info(f"🚀 初始化Xinference嵌入模型: {config.model_name or 'bge-m3'}")
+        return CustomAPIEmbeddings(
+            api_base_url=f"{base_url}/v1/embeddings",
+            api_key=config.api_key or '',
+            custom_headers={},
+            model_name=config.model_name or 'bge-m3'
+        )
+
+    def _get_reranker_config(self) -> tuple:
+        """获取 Reranker 配置（独立于 Embedding）"""
+        config = self.global_config
+
+        # 检查是否启用 Reranker
+        reranker_service = getattr(config, 'reranker_service', 'none')
+        if reranker_service == 'none':
+            return None, None
+
+        # 获取 Reranker API 地址
+        reranker_api_url = getattr(config, 'reranker_api_url', None)
+        if not reranker_api_url:
+            # 如果未配置独立地址，尝试使用 Embedding 服务地址（仅限 Xinference）
+            if config.embedding_service == 'xinference' and config.api_base_url:
+                reranker_api_url = config.api_base_url
+            elif reranker_service == 'xinference':
+                reranker_api_url = 'http://localhost:9997'
+            else:
+                return None, None
+
+        # 获取模型名称
+        reranker_model = getattr(config, 'reranker_model_name', 'bge-reranker-v2-m3')
+
+        base_url = reranker_api_url.rstrip('/')
+        return f"{base_url}/v1/rerank", reranker_model
+
+    def _get_reranker_url(self) -> Optional[str]:
+        """获取 Reranker 服务地址（带缓存，跟随全局配置缓存过期）"""
+        url, _ = self._get_reranker_config()
+        return url
+
+    def _get_reranker_model(self) -> str:
+        """获取 Reranker 模型名称"""
+        _, model = self._get_reranker_config()
+        return model or self.RERANKER_MODEL
+
+    def _rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
+        """使用 Reranker 对候选结果进行精排"""
+        reranker_url = self._get_reranker_url()
+        reranker_model = self._get_reranker_model()
+        if not reranker_url or not candidates:
+            return candidates[:top_k]
+
+        try:
+            import requests as http_requests
+
+            # 准备文档列表
+            documents = [c.get("payload", {}).get("page_content", "") for c in candidates]
+            if not any(documents):
+                return candidates[:top_k]
+
+            # 调用 Reranker API
+            logger.info(f"🔄 Reranker 请求: URL={reranker_url}, model={reranker_model}, docs={len(documents)}")
+            response = http_requests.post(
+                reranker_url,
+                json={
+                    "model": reranker_model,
+                    "query": query,
+                    "documents": documents,
+                    "top_n": top_k
+                },
+                timeout=30
+            )
+
+            if not response.ok:
+                logger.warning(f"⚠️ Reranker 调用失败: HTTP {response.status_code} - {response.text[:200]}, 降级为 RRF 排序")
+                return candidates[:top_k]
+
+            rerank_result = response.json()
+            results = rerank_result.get("results", [])
+            logger.info(f"🔄 Reranker 原始返回: {len(results)} 条, 分数范围: {[r.get('relevance_score', 0) for r in results[:3]]}")
+
+            if not results:
+                logger.warning("⚠️ Reranker 返回空结果，降级为 RRF 排序")
+                return candidates[:top_k]
+
+            # 根据 rerank 结果重新排序
+            reranked = []
+            for item in results:
+                idx = item.get("index", 0)
+                rerank_score = item.get("relevance_score", 0.0)
+                if 0 <= idx < len(candidates):
+                    candidate = candidates[idx].copy()
+                    candidate["rerank_score"] = rerank_score
+                    reranked.append(candidate)
+
+            logger.info(f"🎯 Reranker 精排完成: {len(reranked)} 条结果")
+            return reranked
+
+        except Exception as e:
+            logger.warning(f"⚠️ Reranker 调用异常: {e}, 降级为 RRF 排序")
+            return candidates[:top_k]
+
     def _create_custom_api_embeddings(self, config):
         """创建自定义API Embeddings实例"""
         if not config.api_base_url:
@@ -907,7 +1022,10 @@ class VectorStoreManager:
         elif embedding_type == "OllamaEmbeddings":
             logger.info(f"   🎉 说明: 使用Ollama本地API嵌入服务")
         elif embedding_type == "CustomAPIEmbeddings":
-            logger.info(f"   🎉 说明: 使用自定义HTTP API嵌入服务")
+            if config.embedding_service == 'xinference':
+                logger.info(f"   🎉 说明: 使用Xinference嵌入服务（支持Reranker）")
+            else:
+                logger.info(f"   🎉 说明: 使用自定义HTTP API嵌入服务")
 
         self._vector_store = None
         self._qdrant_client = None
@@ -1195,17 +1313,19 @@ class VectorStoreManager:
             raise
 
     def _hybrid_similarity_search(self, query: str, k: int, score_threshold: float) -> List[Dict[str, Any]]:
-        """混合检索（RRF 融合稠密+稀疏）"""
+        """混合检索（RRF 融合稠密+稀疏 + Reranker 精排）"""
         try:
             collection_name = self._get_collection_name()
-            per_source_limit = max(k * 3, 10)  # 每种检索方式多取一些候选
-            
+            # Reranker 需要更多候选，增加召回量
+            reranker_enabled = self._get_reranker_url() is not None
+            per_source_limit = max(k * 5, 20) if reranker_enabled else max(k * 3, 10)
+
             # 计算稠密向量
             dense_vector = self.embeddings.embed_query(query)
-            
+
             # 计算稀疏向量
             sparse_query = self.sparse_encoder.encode_query(query)
-            
+
             # 稠密向量检索
             dense_results = self.qdrant_client.search(
                 collection_name=collection_name,
@@ -1216,7 +1336,7 @@ class VectorStoreManager:
                 limit=per_source_limit,
                 with_payload=True,
             )
-            
+
             # 稀疏向量检索
             sparse_results = []
             if sparse_query:
@@ -1232,12 +1352,18 @@ class VectorStoreManager:
                     limit=per_source_limit,
                     with_payload=True,
                 )
-            
+
             logger.info(f"🔍 稠密候选: {len(dense_results)}, 稀疏候选: {len(sparse_results)}")
-            
-            # RRF 融合
-            fused_results = self._rrf_fusion(dense_results, sparse_results, k)
-            
+
+            # RRF 融合（取更多候选用于 Reranker）
+            fusion_limit = k * 3 if reranker_enabled else k
+            fused_results = self._rrf_fusion(dense_results, sparse_results, fusion_limit)
+
+            # Reranker 精排（仅 Xinference 支持）
+            if reranker_enabled and fused_results:
+                logger.info(f"🎯 启用 Reranker 精排...")
+                fused_results = self._rerank(query, fused_results, k)
+
             return self._format_fused_results(fused_results, score_threshold)
             
         except Exception as e:
@@ -1326,21 +1452,24 @@ class VectorStoreManager:
         return formatted_results
 
     def _format_fused_results(self, fused_results: List[Dict], score_threshold: float) -> List[Dict[str, Any]]:
-        """格式化 RRF 融合结果"""
+        """格式化 RRF 融合结果（支持 Reranker 分数）"""
         formatted_results = []
-        
+
         for i, entry in enumerate(fused_results):
-            score = entry["score"]
+            # 优先使用 rerank_score，否则使用 RRF score
+            rerank_score = entry.get("rerank_score")
+            score = rerank_score if rerank_score is not None else entry.get("score", 0)
+
             if score < score_threshold:
                 continue
-            
+
             payload = entry.get("payload", {})
             content = payload.get("page_content", "")
-            
+
             # 添加融合来源信息
             labels = entry.get("labels", {})
             original_scores = entry.get("original_scores", {})
-            
+
             result = {
                 'content': content,
                 'metadata': payload,
@@ -1349,24 +1478,30 @@ class VectorStoreManager:
                     'sources': list(labels.keys()),
                     'dense_score': original_scores.get("dense"),
                     'sparse_score': original_scores.get("sparse"),
+                    'rerank_score': rerank_score,
                 }
             }
             formatted_results.append(result)
-            
+
             source = payload.get('source', '未知来源')
             sources_str = "+".join(labels.keys())
-            logger.info(f"   📄 结果{i+1}: 融合分={score:.4f} ({score*100:.1f}%), 来源={source}, 检索源=[{sources_str}]")
-        
+            if rerank_score is not None:
+                logger.info(f"   📄 结果{i+1}: Rerank分={rerank_score:.4f}, 来源={source}")
+            else:
+                logger.info(f"   📄 结果{i+1}: 融合分={score:.4f} ({score*100:.1f}%), 来源={source}, 检索源=[{sources_str}]")
+
         # 如果没有满足阈值的结果，返回最佳结果
         if not formatted_results and fused_results:
             best = fused_results[0]
             payload = best.get("payload", {})
+            rerank_score = best.get("rerank_score")
+            score = rerank_score if rerank_score is not None else best.get("score", 0)
             formatted_results.append({
                 'content': payload.get("page_content", ""),
                 'metadata': payload,
-                'similarity_score': float(best["score"]),
+                'similarity_score': float(score),
             })
-        
+
         logger.info(f"📊 过滤后结果数量: {len(formatted_results)}")
         return formatted_results
 

@@ -240,6 +240,28 @@ export class KnowledgeService {
   }
 
   /**
+   * 测试 Reranker 服务连接
+   */
+  static async testRerankerConnection(data: {
+    reranker_service: string;
+    reranker_api_url: string;
+    reranker_api_key?: string;
+    reranker_model_name: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const response = await request<{ success: boolean; message: string }>({
+      url: `${API_BASE_URL}/test-reranker-connection/`,
+      method: 'POST',
+      data
+    });
+
+    if (response.success) {
+      return response.data!;
+    } else {
+      throw new Error(response.error || 'Failed to test reranker connection');
+    }
+  }
+
+  /**
    * 获取系统状态
    */
   static async getSystemStatus(): Promise<SystemStatusResponse> {

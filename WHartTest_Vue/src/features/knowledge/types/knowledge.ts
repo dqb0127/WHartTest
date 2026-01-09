@@ -1,12 +1,25 @@
 /**
  * 嵌入服务类型
  */
-export type EmbeddingServiceType = 'openai' | 'azure_openai' | 'ollama' | 'custom';
+export type EmbeddingServiceType = 'openai' | 'azure_openai' | 'ollama' | 'xinference' | 'custom';
+
+/**
+ * Reranker 服务类型
+ */
+export type RerankerServiceType = 'none' | 'xinference' | 'custom';
 
 /**
  * 嵌入服务选项接口
  */
 export interface EmbeddingServiceOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Reranker 服务选项接口
+ */
+export interface RerankerServiceOption {
   value: string;
   label: string;
 }
@@ -19,13 +32,11 @@ export interface EmbeddingServicesResponse {
 }
 
 /**
- * 需要API配置的服务类型
+ * 需要API密钥的服务类型
  */
-export const SERVICES_REQUIRING_API_CONFIG: EmbeddingServiceType[] = [
+export const SERVICES_REQUIRING_API_KEY: EmbeddingServiceType[] = [
   'openai',
   'azure_openai',
-  'ollama',
-  'custom'
 ];
 
 /**
@@ -33,11 +44,11 @@ export const SERVICES_REQUIRING_API_CONFIG: EmbeddingServiceType[] = [
  */
 export const getRequiredFieldsForEmbeddingService = (embedding_service: string): string[] => {
   const required: string[] = ['api_base_url', 'model_name'];
-  
+
   if (embedding_service === 'openai' || embedding_service === 'azure_openai') {
     required.push('api_key');
   }
-  
+
   return required;
 };
 
@@ -50,6 +61,13 @@ export interface KnowledgeGlobalConfig {
   api_base_url?: string;
   api_key?: string;
   model_name: string;
+  // Reranker 独立配置
+  reranker_service: RerankerServiceType;
+  reranker_service_display?: string;
+  reranker_api_url?: string;
+  reranker_api_key?: string;
+  reranker_model_name?: string;
+  // 分块配置
   chunk_size: number;
   chunk_overlap: number;
   updated_at?: string;

@@ -208,49 +208,41 @@ services:
         limits:
           memory: 2G
 
-  # BGE 嵌入模型服务 (使用 Ollama)
-  bge-m3:
-    image: ollama/ollama:latest
-    container_name: wharttest-bge-m3
+  # Xinference 模型推理服务（Embedding + Reranker）
+  xinference:
+    image: xprobe/xinference:latest-cpu
+    container_name: wharttest-xinference
     ports:
-      - "8917:11434"
+      - "8917:9997"
     volumes:
-      - bge-m3-data:/root/.ollama
+      - xinference-data:/root/.xinference
+      - xinference-cache:/root/.cache/huggingface
+    environment:
+      - HF_ENDPOINT=https://hf-mirror.com
     networks:
       - wharttest-network
     restart: unless-stopped
+    command: xinference-local -H 0.0.0.0
     healthcheck:
-      test: [ "CMD", "ollama", "list" ]
+      test: ["CMD", "curl", "-f", "http://localhost:9997/"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
-    # 启动后运行: docker exec wharttest-bge-m3 ollama pull bge-m3
-    # API 兼容 OpenAI，访问: http://localhost:8917/api/embeddings
+      start_period: 60s
     deploy:
       resources:
         limits:
           memory: 4G
+    # 启动后需要部署模型:
+    # Embedding 模型
+# curl -X POST "http://localhost:8917/v1/models" \
+#   -H "Content-Type: application/json" \
+#   -d '{"model_name": "bge-m3", "model_type": "embedding", "model_uid": "bge-m3"}'
 
-  # BGE-M3 模型自动拉取服务（一次性任务）
-  bge-m3-init:
-    image: curlimages/curl
-    container_name: wharttest-bge-m3-init
-    restart: "no" # 任务完成后不重启
-    depends_on:
-      bge-m3:
-        condition: service_started # 只要容器启动就开始尝试，脚本内部有重试机制
-    networks:
-      - wharttest-network
-    # 发送拉取请求，Ollama 会自动处理（如果已存在会跳过）
-    command: >
-      sh -c "
-        echo 'Checking Ollama status...';
-        curl -f http://bge-m3:11434/ && \
-        echo 'Starting bge-m3 model pull (this may take a while)...' && \
-        curl -X POST http://bge-m3:11434/api/pull -d '{\"name\": \"bge-m3\"}' && \
-        echo 'Model pull completed!'
-      "
+# # Reranker 模型
+# curl -X POST "http://localhost:8917/v1/models" \
+#   -H "Content-Type: application/json" \
+#   -d '{"model_name": "bge-reranker-v2-m3", "model_type": "rerank", "model_uid": "bge-reranker-v2-m3"}'
 
   # Draw.io 自托管服务（图表编辑器）
   drawio:
@@ -280,7 +272,8 @@ volumes:
   backend-static:
   redis-data:
   celery-beat-schedule:
-  bge-m3-data:
+  xinference-data:
+  xinference-cache:
   qdrant-data:
   postgres-data:  # PostgreSQL 数据存储（启用 postgres 服务时使用）
     # db.sqlite3 和 media 改用本地目录挂载，不再需要 named volume

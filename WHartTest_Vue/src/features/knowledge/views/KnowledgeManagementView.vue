@@ -414,7 +414,8 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   padding: 20px;
-  overflow-x: hidden;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .page-header {

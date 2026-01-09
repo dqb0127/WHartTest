@@ -60,7 +60,7 @@
             <a-form-item label="API密钥" field="api_key">
               <a-input-password
                 v-model="formData.api_key"
-                placeholder="OpenAI/Azure必填，Ollama/自定义可选"
+                placeholder="OpenAI/Azure必填，其他服务可选"
               />
             </a-form-item>
           </a-col>
@@ -74,6 +74,77 @@
               >
                 <template #icon><icon-refresh /></template>
                 测试连接
+              </a-button>
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-divider>Reranker 精排服务（可选）</a-divider>
+
+        <a-row :gutter="16">
+          <a-col :xs="24" :sm="12">
+            <a-form-item field="reranker_service">
+              <template #label>
+                Reranker 服务
+                <a-tooltip content="Reranker用于对检索结果进行精排，可显著提升检索精度。可独立于嵌入服务配置。">
+                  <icon-question-circle class="label-tip-icon" />
+                </a-tooltip>
+              </template>
+              <a-select
+                v-model="formData.reranker_service"
+                placeholder="请选择Reranker服务"
+                @change="handleRerankerServiceChange"
+              >
+                <a-option
+                  v-for="service in rerankerServices"
+                  :key="service.value"
+                  :value="service.value"
+                  :label="service.label"
+                />
+              </a-select>
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :sm="12">
+            <a-form-item label="Reranker 模型" field="reranker_model_name">
+              <a-input
+                v-model="formData.reranker_model_name"
+                placeholder="bge-reranker-v2-m3"
+                :disabled="formData.reranker_service === 'none'"
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
+
+        <a-form-item
+          v-if="formData.reranker_service !== 'none'"
+          label="Reranker API地址"
+          field="reranker_api_url"
+        >
+          <a-input
+            v-model="formData.reranker_api_url"
+            placeholder="http://xinference:9997（不填则使用嵌入服务地址）"
+          />
+        </a-form-item>
+
+        <a-row v-if="formData.reranker_service !== 'none'" :gutter="16" align="end">
+          <a-col :xs="24" :sm="16">
+            <a-form-item label="Reranker API密钥" field="reranker_api_key">
+              <a-input-password
+                v-model="formData.reranker_api_key"
+                placeholder="OpenAI/Azure必填，其他服务可选"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :sm="8">
+            <a-form-item>
+              <a-button
+                @click="testRerankerService"
+                :loading="testingReranker"
+                type="outline"
+                long
+              >
+                <template #icon><icon-refresh /></template>
+                测试
               </a-button>
             </a-form-item>
           </a-col>
@@ -139,7 +210,9 @@ import { KnowledgeService } from '../services/knowledgeService';
 import type {
   KnowledgeGlobalConfig,
   EmbeddingServiceType,
-  EmbeddingServiceOption
+  EmbeddingServiceOption,
+  RerankerServiceType,
+  RerankerServiceOption
 } from '../types/knowledge';
 import { getRequiredFieldsForEmbeddingService } from '../types/knowledge';
 
@@ -157,6 +230,7 @@ const formRef = ref();
 const loading = ref(false);
 const fetchLoading = ref(false);
 const testingConnection = ref(false);
+const testingReranker = ref(false);
 
 // 窗口宽度响应式
 const windowWidth = ref(window.innerWidth);
@@ -172,6 +246,10 @@ const formData = reactive<KnowledgeGlobalConfig>({
   api_base_url: '',
   api_key: '',
   model_name: '',
+  reranker_service: 'none',
+  reranker_api_url: '',
+  reranker_api_key: '',
+  reranker_model_name: 'bge-reranker-v2-m3',
   chunk_size: 1000,
   chunk_overlap: 200,
   updated_at: '',
@@ -180,6 +258,13 @@ const formData = reactive<KnowledgeGlobalConfig>({
 
 // 嵌入服务选项
 const embeddingServices = ref<EmbeddingServiceOption[]>([]);
+
+// Reranker 服务选项
+const rerankerServices = ref<RerankerServiceOption[]>([
+  { value: 'none', label: '不启用' },
+  { value: 'xinference', label: 'Xinference' },
+  { value: 'custom', label: '自定义API' },
+]);
 
 // 动态表单验证规则
 const rules = computed(() => {
@@ -249,13 +334,39 @@ const handleEmbeddingServiceChange = (value: EmbeddingServiceType) => {
       formData.model_name = 'text-embedding-ada-002';
       break;
     case 'ollama':
-      formData.api_base_url = 'http://localhost:8917';
+      formData.api_base_url = 'http://localhost:11434';
+      formData.model_name = 'bge-m3';
+      formData.api_key = '';
+      break;
+    case 'xinference':
+      formData.api_base_url = 'http://localhost:9997';
       formData.model_name = 'bge-m3';
       formData.api_key = '';
       break;
     case 'custom':
       formData.api_base_url = 'http://your-embedding-service:8080/v1/embeddings';
       formData.model_name = 'bge-m3';
+      break;
+  }
+};
+
+// 处理 Reranker 服务变化
+const handleRerankerServiceChange = (value: RerankerServiceType) => {
+  switch (value) {
+    case 'none':
+      formData.reranker_api_url = '';
+      // 保留默认模型名，不清空
+      if (!formData.reranker_model_name) {
+        formData.reranker_model_name = 'bge-reranker-v2-m3';
+      }
+      break;
+    case 'xinference':
+      formData.reranker_api_url = '';
+      formData.reranker_model_name = 'bge-reranker-v2-m3';
+      break;
+    case 'custom':
+      formData.reranker_api_url = 'http://your-reranker-service:8080/v1/rerank';
+      formData.reranker_model_name = 'bge-reranker-v2-m3';
       break;
   }
 };
@@ -295,6 +406,39 @@ const testEmbeddingService = async () => {
   }
 };
 
+// 测试 Reranker 服务连接
+const testRerankerService = async () => {
+  if (formData.reranker_service === 'none') {
+    Message.warning('请先启用 Reranker 服务');
+    return;
+  }
+
+  if (!formData.reranker_model_name) {
+    Message.warning('请输入 Reranker 模型名称');
+    return;
+  }
+
+  testingReranker.value = true;
+  try {
+    const result = await KnowledgeService.testRerankerConnection({
+      reranker_service: formData.reranker_service,
+      reranker_api_url: formData.reranker_api_url || formData.api_base_url || '',
+      reranker_api_key: formData.reranker_api_key || '',
+      reranker_model_name: formData.reranker_model_name,
+    });
+
+    if (result.success) {
+      Message.success(result.message || 'Reranker 服务测试成功！');
+    } else {
+      Message.error(result.message || 'Reranker 测试失败');
+    }
+  } catch (error: any) {
+    Message.error(error?.message || '无法连接到 Reranker 服务');
+  } finally {
+    testingReranker.value = false;
+  }
+};
+
 const formatDate = (dateStr?: string) => {
   if (!dateStr) return '';
   return new Date(dateStr).toLocaleString('zh-CN');
@@ -310,6 +454,10 @@ const handleSubmit = async () => {
       api_base_url: formData.api_base_url,
       api_key: formData.api_key,
       model_name: formData.model_name,
+      reranker_service: formData.reranker_service,
+      reranker_api_url: formData.reranker_api_url,
+      reranker_api_key: formData.reranker_api_key,
+      reranker_model_name: formData.reranker_model_name,
       chunk_size: formData.chunk_size,
       chunk_overlap: formData.chunk_overlap,
     });

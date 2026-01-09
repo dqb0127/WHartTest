@@ -8,12 +8,15 @@ class KnowledgeGlobalConfigSerializer(serializers.ModelSerializer):
     """知识库全局配置序列化器"""
     updated_by_name = serializers.CharField(source='updated_by.username', read_only=True)
     embedding_service_display = serializers.CharField(source='get_embedding_service_display', read_only=True)
+    reranker_service_display = serializers.CharField(source='get_reranker_service_display', read_only=True)
 
     class Meta:
         model = KnowledgeGlobalConfig
         fields = [
             'embedding_service', 'embedding_service_display',
             'api_base_url', 'api_key', 'model_name',
+            'reranker_service', 'reranker_service_display',
+            'reranker_api_url', 'reranker_api_key', 'reranker_model_name',
             'chunk_size', 'chunk_overlap',
             'updated_at', 'updated_by', 'updated_by_name'
         ]

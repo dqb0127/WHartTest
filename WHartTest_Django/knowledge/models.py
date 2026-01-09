@@ -15,9 +15,17 @@ class KnowledgeGlobalConfig(models.Model):
         ('openai', 'OpenAI'),
         ('azure_openai', 'Azure OpenAI'),
         ('ollama', 'Ollama'),
+        ('xinference', 'Xinference'),
         ('custom', '自定义API'),
     ]
-    
+
+    RERANKER_SERVICE_CHOICES = [
+        ('none', '不启用'),
+        ('xinference', 'Xinference'),
+        ('custom', '自定义API'),
+    ]
+
+    # Embedding 配置
     embedding_service = models.CharField(
         _('嵌入服务'),
         max_length=50,
@@ -30,7 +38,7 @@ class KnowledgeGlobalConfig(models.Model):
         max_length=500,
         blank=True,
         null=True,
-        help_text=_('API服务的基础URL，如：https://api.openai.com/v1 或 http://bge-m3:11434')
+        help_text=_('API服务的基础URL，如：https://api.openai.com/v1 或 http://xinference:9997')
     )
     api_key = models.CharField(
         _('API密钥'),
@@ -45,6 +53,37 @@ class KnowledgeGlobalConfig(models.Model):
         default='text-embedding-ada-002',
         help_text=_('具体的嵌入模型名称')
     )
+
+    # Reranker 配置（独立）
+    reranker_service = models.CharField(
+        _('Reranker服务'),
+        max_length=50,
+        choices=RERANKER_SERVICE_CHOICES,
+        default='none',
+        help_text=_('选择Reranker精排服务，可独立于嵌入服务配置')
+    )
+    reranker_api_url = models.CharField(
+        _('Reranker API地址'),
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text=_('Reranker服务的API地址，如：http://xinference:9997')
+    )
+    reranker_api_key = models.CharField(
+        _('Reranker API密钥'),
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text=_('Reranker服务的API密钥（自定义API可能需要）')
+    )
+    reranker_model_name = models.CharField(
+        _('Reranker模型名称'),
+        max_length=100,
+        default='bge-reranker-v2-m3',
+        blank=True,
+        help_text=_('Reranker模型名称')
+    )
+
     chunk_size = models.PositiveIntegerField(_('默认分块大小'), default=1000)
     chunk_overlap = models.PositiveIntegerField(_('默认分块重叠'), default=200)
     

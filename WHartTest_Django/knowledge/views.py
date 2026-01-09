@@ -737,7 +737,17 @@ def test_embedding_connection(request):
                 'model': model_name,
                 'prompt': test_text
             }
-            
+
+        elif embedding_service == 'xinference':
+            test_url = f'{api_base_url}/v1/embeddings'
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            request_body = {
+                'input': test_text,
+                'model': model_name
+            }
+
         elif embedding_service == 'custom':
             test_url = api_base_url
             headers = {
@@ -765,16 +775,18 @@ def test_embedding_connection(request):
         
         if response.ok:
             data = response.json()
-            
+
             # 验证返回的数据包含 embedding
             has_embedding = False
             if embedding_service == 'ollama':
+                # Ollama 返回格式: {"embedding": [...]}
                 has_embedding = data.get('embedding') and isinstance(data['embedding'], list)
             else:
+                # OpenAI 兼容格式 (Xinference, OpenAI, Azure, Custom)
                 has_embedding = (
-                    data.get('data') and 
-                    isinstance(data['data'], list) and 
-                    len(data['data']) > 0 and 
+                    data.get('data') and
+                    isinstance(data['data'], list) and
+                    len(data['data']) > 0 and
                     data['data'][0].get('embedding')
                 )
             
@@ -817,4 +829,109 @@ def test_embedding_connection(request):
         return Response({
             'success': False,
             'message': f'嵌入模型测试失败: {str(e)}'
+        })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def test_reranker_connection(request):
+    """
+    测试 Reranker 服务连接
+    """
+    import requests as http_requests
+
+    reranker_service = request.data.get('reranker_service')
+    reranker_api_url = request.data.get('reranker_api_url', '').rstrip('/')
+    reranker_api_key = request.data.get('reranker_api_key', '')
+    reranker_model_name = request.data.get('reranker_model_name', '')
+
+    print(f"[Reranker测试] 收到请求: service={reranker_service}, url={reranker_api_url}, model={reranker_model_name}")
+
+    if not reranker_service or reranker_service == 'none':
+        return Response({'error': '请选择 Reranker 服务'}, status=status.HTTP_400_BAD_REQUEST)
+    if not reranker_api_url:
+        return Response({'error': '请输入 Reranker API 地址'}, status=status.HTTP_400_BAD_REQUEST)
+    if not reranker_model_name:
+        return Response({'error': '请输入 Reranker 模型名称'}, status=status.HTTP_400_BAD_REQUEST)
+
+    test_query = 'What is machine learning?'
+    test_documents = ['Machine learning is a subset of AI.', 'The weather is nice today.']
+
+    try:
+        if reranker_service == 'xinference':
+            test_url = f'{reranker_api_url}/v1/rerank'
+            headers = {'Content-Type': 'application/json'}
+            request_body = {
+                'model': reranker_model_name,
+                'query': test_query,
+                'documents': test_documents
+            }
+        elif reranker_service == 'custom':
+            test_url = reranker_api_url
+            headers = {'Content-Type': 'application/json'}
+            if reranker_api_key:
+                headers['Authorization'] = f'Bearer {reranker_api_key}'
+            request_body = {
+                'model': reranker_model_name,
+                'query': test_query,
+                'documents': test_documents
+            }
+        else:
+            return Response({'error': f'不支持的 Reranker 服务类型: {reranker_service}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        print(f"[Reranker测试] 发送请求: URL={test_url}, body={request_body}")
+
+        response = http_requests.post(
+            test_url,
+            json=request_body,
+            headers=headers,
+            timeout=30
+        )
+
+        print(f"[Reranker测试] 响应状态: {response.status_code}")
+
+        if response.ok:
+            data = response.json()
+            # Xinference rerank 返回格式: {"results": [{"index": 0, "relevance_score": 0.9}, ...]}
+            has_results = data.get('results') and isinstance(data['results'], list) and len(data['results']) > 0
+
+            if has_results:
+                print(f"[Reranker测试] 测试成功")
+                return Response({
+                    'success': True,
+                    'message': 'Reranker 服务测试成功！服务运行正常'
+                })
+            else:
+                print(f"[Reranker测试] 数据格式异常: {str(data)[:200]}")
+                return Response({
+                    'success': False,
+                    'message': '服务响应成功但数据格式异常，请检查配置'
+                })
+        else:
+            error_text = response.text[:500]
+            print(f"[Reranker测试] HTTP错误: {response.status_code} - {error_text}")
+            return Response({
+                'success': False,
+                'message': f'Reranker 测试失败: HTTP {response.status_code} - {error_text}'
+            })
+
+    except http_requests.Timeout:
+        print(f"[Reranker测试] 请求超时")
+        return Response({
+            'success': False,
+            'message': '请求超时，请检查服务是否正常运行'
+        })
+    except http_requests.ConnectionError as e:
+        print(f"[Reranker测试] 连接失败: {str(e)}")
+        return Response({
+            'success': False,
+            'message': f'无法连接到 Reranker 服务，请检查URL和网络: {str(e)}'
+        })
+    except Exception as e:
+        print(f"[Reranker测试] 未知错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return Response({
+            'success': False,
+            'message': f'Reranker 测试失败: {str(e)}'
         })
