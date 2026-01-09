@@ -24,6 +24,7 @@
           @execute-test-case="handleExecuteTestCase"
           @test-case-deleted="handleTestCaseDeleted"
           @module-filter-change="handleModuleSelected"
+          @request-optimization="handleRequestOptimization"
           ref="testCaseListRef"
         />
 
@@ -63,6 +64,12 @@
       :test-case="pendingExecuteTestCase"
       @confirm="handleExecuteConfirm"
     />
+
+    <OptimizationSuggestionModal
+      v-model="isOptimizationModalVisible"
+      :test-case="pendingOptimizationTestCase"
+      @submit="handleOptimizationSubmit"
+    />
   </div>
 </template>
 
@@ -82,10 +89,12 @@ import TestCaseForm from '@/components/testcase/TestCaseForm.vue';
 import TestCaseDetail from '@/components/testcase/TestCaseDetail.vue';
 import GenerateCasesModal from '@/components/testcase/GenerateCasesModal.vue';
 import ExecuteTestCaseModal from '@/components/testcase/ExecuteTestCaseModal.vue';
+import OptimizationSuggestionModal from '@/components/testcase/OptimizationSuggestionModal.vue';
 import {
   sendChatMessageStream
 } from '@/features/langgraph/services/chatService';
 import type { ChatRequest } from '@/features/langgraph/types/chat';
+import { updateTestCaseReviewStatus } from '@/services/testcaseService';
 
 const router = useRouter();
 const projectStore = useProjectStore();
@@ -97,7 +106,9 @@ const currentEditingTestCaseId = ref<number | null>(null);
 const currentViewingTestCaseId = ref<number | null>(null);
 const isGenerateCasesModalVisible = ref(false);
 const isExecuteModalVisible = ref(false);
+const isOptimizationModalVisible = ref(false);
 const pendingExecuteTestCase = ref<TestCase | null>(null);
+const pendingOptimizationTestCase = ref<TestCase | null>(null);
 
 const modulePanelRef = ref<InstanceType<typeof ModuleManagementPanel> | null>(null);
 const testCaseListRef = ref<InstanceType<typeof TestCaseList> | null>(null);
@@ -373,6 +384,78 @@ const handleExecuteConfirm = (options: { generatePlaywrightScript: boolean }) =>
   );
   
   pendingExecuteTestCase.value = null;
+};
+
+const handleRequestOptimization = (testCase: TestCase) => {
+  pendingOptimizationTestCase.value = testCase;
+  isOptimizationModalVisible.value = true;
+};
+
+const handleOptimizationSubmit = async (data: { testCase: TestCase; suggestion: string }) => {
+  if (!currentProjectId.value) {
+    Message.error('没有有效的项目ID');
+    return;
+  }
+
+  // 先更新用例状态为 needs_optimization
+  try {
+    await updateTestCaseReviewStatus(
+      currentProjectId.value,
+      data.testCase.id,
+      'needs_optimization'
+    );
+  } catch (error) {
+    console.error('更新状态失败:', error);
+  }
+
+  // 构建步骤信息
+  let stepsText = '无';
+  if (data.testCase.steps && data.testCase.steps.length > 0) {
+    stepsText = data.testCase.steps.map(step =>
+      `  步骤${step.step_number}: ${step.description} → 预期结果: ${step.expected_result}`
+    ).join('\n');
+  }
+
+  // 构建优化消息
+  const message = `
+优化以下测试用例。
+
+【重要约束】
+- 调用编辑用例工具时必须带上 is_optimization 参数
+- 工具返回成功后即表示任务完成，无需再次编辑。
+
+【用例信息】
+- 用例ID: ${data.testCase.id}
+- 项目ID: ${currentProjectId.value}
+- 名称: ${data.testCase.name}
+- 优先级: ${data.testCase.level}
+- 前置条件: ${data.testCase.precondition || '无'}
+- 模块ID: ${data.testCase.module_id || '未分配'}
+- 步骤:
+${stepsText}
+- 备注: ${data.testCase.notes || '无'}
+
+【用户优化建议】
+${data.suggestion || '请根据测试最佳实践进行全面优化'}
+  `.trim();
+
+  const requestData: ChatRequest = {
+    message,
+    project_id: String(currentProjectId.value),
+    use_knowledge_base: false,
+  };
+
+  startAutomationTask(
+    requestData,
+    '优化已开始',
+    '用例优化任务已在后台开始处理。',
+    'optimize-case',
+    '点此查看优化过程'
+  );
+
+  // 刷新列表以显示状态变化
+  testCaseListRef.value?.refreshTestCases();
+  pendingOptimizationTestCase.value = null;
 };
 
 watch(currentProjectId, (newVal) => {

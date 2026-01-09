@@ -1,5 +1,12 @@
 import django_filters
+from django_filters import BaseInFilter, CharFilter
 from .models import TestCase, TestCaseModule
+
+
+class CharInFilter(BaseInFilter, CharFilter):
+    """支持逗号分隔的多值过滤器"""
+    pass
+
 
 class TestCaseFilter(django_filters.FilterSet):
     """
@@ -16,11 +23,23 @@ class TestCaseFilter(django_filters.FilterSet):
         lookup_expr='exact'
     )
 
+    # 单个审核状态过滤（保留向后兼容）
+    review_status = django_filters.CharFilter(
+        field_name='review_status',
+        lookup_expr='exact'
+    )
+
+    # 多个审核状态过滤，支持逗号分隔，如 ?review_status_in=pending_review,approved
+    review_status_in = CharInFilter(
+        field_name='review_status',
+        lookup_expr='in'
+    )
+
     class Meta:
         model = TestCase
         # fields 列表包含了我们希望 FilterSet 处理的字段。
         # DjangoFilterBackend 会查找与这些字段名匹配的 URL 参数。
-        fields = ['module_id', 'level'] # 包含自定义的 module_id 和 level 过滤器
+        fields = ['module_id', 'level', 'review_status', 'review_status_in']
 
     def filter_by_module_and_descendants(self, queryset, name, value):
         """

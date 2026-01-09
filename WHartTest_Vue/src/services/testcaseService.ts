@@ -11,6 +11,14 @@ export interface TestCaseStep {
   expected_result: string;
 }
 
+// 审核状态类型
+export type ReviewStatus =
+  | 'pending_review'
+  | 'approved'
+  | 'needs_optimization'
+  | 'optimization_pending_review'
+  | 'unavailable';
+
 // 截图接口
 export interface TestCaseScreenshot {
   id: number;
@@ -53,6 +61,7 @@ export interface TestCase {
   notes?: string; // 备注字段
   screenshot?: string; // 兼容旧的单个截图字段
   screenshots?: TestCaseScreenshot[]; // 新的多截图字段
+  review_status?: ReviewStatus; // 审核状态
   creator: number;
   creator_detail: {
     id: number;
@@ -86,6 +95,7 @@ export interface UpdateTestCaseRequest {
   module_id?: number | null; // 所属模块ID
   steps?: TestCaseStep[];
   notes?: string; // 新增备注字段
+  review_status?: ReviewStatus; // 审核状态
 }
 
 // 分页参数接口
@@ -95,6 +105,8 @@ export interface PaginationParams {
   search?: string;
   module_id?: number; // 添加可选的模块ID用于筛选
   level?: string; // 添加可选的优先级用于筛选
+  review_status?: ReviewStatus; // 添加可选的审核状态用于筛选（单个）
+  review_status_in?: ReviewStatus[]; // 多个审核状态筛选
 }
 
 // 测试用例列表响应接口
@@ -168,6 +180,9 @@ export const getTestCaseList = async (projectId: number, params?: PaginationPara
         search: params.search || '',
         module_id: params.module_id, // 传递 module_id
         level: params.level, // 传递 level
+        review_status: params.review_status, // 传递 review_status（单个）
+        // 多个审核状态筛选，用逗号连接
+        review_status_in: params.review_status_in?.join(','),
       } : undefined,
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -1025,4 +1040,19 @@ export const batchDeleteTestCaseScreenshots = async (
       statusCode: error.response?.status,
     };
   }
+};
+
+/**
+ * 更新测试用例审核状态
+ * @param projectId 项目ID
+ * @param testCaseId 测试用例ID
+ * @param reviewStatus 审核状态
+ * @returns 返回一个Promise，解析为更新结果
+ */
+export const updateTestCaseReviewStatus = async (
+  projectId: number,
+  testCaseId: number,
+  reviewStatus: ReviewStatus
+): Promise<TestCaseResponse> => {
+  return updateTestCase(projectId, testCaseId, { review_status: reviewStatus });
 };

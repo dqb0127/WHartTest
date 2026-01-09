@@ -7,39 +7,48 @@
           allow-clear
           class="search-input"
           @search="onSearch"
+          :style="{ width: isSmallScreen ? '90px' : '130px' }"
           v-model="localSearchKeyword"
-        />
-        <a-tree-select
-          v-model="localSelectedModuleId"
-          :data="moduleTree"
-          placeholder="筛选模块"
-          allow-clear
-          class="module-filter"
-          @change="onModuleChange"
         />
         <a-select
           v-model="selectedLevel"
-          placeholder="筛选优先级"
+          :placeholder="isSmallScreen ? '优先级' : '筛选优先级'"
           allow-clear
           class="level-filter"
+          :style="{ width: isSmallScreen ? '90px' : '130px' }"
           @change="onLevelChange"
         >
-          <a-option value="P0">P0 - 最高</a-option>
-          <a-option value="P1">P1 - 高</a-option>
-          <a-option value="P2">P2 - 中</a-option>
-          <a-option value="P3">P3 - 低</a-option>
+          <a-option value="P0">{{ isSmallScreen ? 'P0' : 'P0 - 最高' }}</a-option>
+          <a-option value="P1">{{ isSmallScreen ? 'P1' : 'P1 - 高' }}</a-option>
+          <a-option value="P2">{{ isSmallScreen ? 'P2' : 'P2 - 中' }}</a-option>
+          <a-option value="P3">{{ isSmallScreen ? 'P3' : 'P3 - 低' }}</a-option>
         </a-select>
-        <a-button type="outline" @click="handleExport">
+        <a-select
+          v-model="selectedReviewStatuses"
+          placeholder="筛选审核状态"
+          multiple
+          allow-clear
+          :max-tag-count="1"
+          tag-nowrap
+          class="review-status-filter"
+          :style="{ width: '180px' }"
+          @change="onReviewStatusChange"
+        >
+          <a-option v-for="option in REVIEW_STATUS_OPTIONS" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </a-option>
+        </a-select>
+        <a-button type="outline" class="io-btn" @click="handleExport">
           <template #icon>
             <icon-download />
           </template>
-          导出
+          <span class="io-btn-text">导出</span>
         </a-button>
-        <a-button type="outline" @click="handleImport">
+        <a-button type="outline" class="io-btn" @click="handleImport">
           <template #icon>
             <icon-upload />
           </template>
-          导入
+          <span class="io-btn-text">导入</span>
         </a-button>
         <a-button
           v-if="selectedTestCaseIds.length > 0"
@@ -107,6 +116,22 @@
       <template #level="{ record }">
         <a-tag :color="getLevelColor(record.level)">{{ record.level }}</a-tag>
       </template>
+      <template #reviewStatus="{ record }">
+        <a-dropdown trigger="click" @select="(value: string) => handleReviewStatusChange(record, value)">
+          <a-tag
+            :color="getReviewStatusColor(record.review_status)"
+            style="cursor: pointer;"
+          >
+            {{ getReviewStatusLabel(record.review_status) }}
+            <icon-down style="margin-left: 4px; font-size: 10px;" />
+          </a-tag>
+          <template #content>
+            <a-doption v-for="option in REVIEW_STATUS_OPTIONS" :key="option.value" :value="option.value">
+              <a-tag :color="option.color" size="small">{{ option.label }}</a-tag>
+            </a-doption>
+          </template>
+        </a-dropdown>
+      </template>
       <template #module="{ record }">
         <span v-if="record.module_detail">{{ record.module_detail }}</span>
         <span v-else class="text-gray">未分配</span>
@@ -138,18 +163,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed, watch, toRefs } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, computed, watch, toRefs } from 'vue';
 import { Message, Modal } from '@arco-design/web-vue';
-import { IconFolder, IconDownload, IconUpload } from '@arco-design/web-vue/es/icon';
+import { IconFolder, IconDownload, IconUpload, IconDown } from '@arco-design/web-vue/es/icon';
 import ImportModal from '@/features/testcase-templates/components/ImportModal.vue';
 import ExportModal from '@/features/testcase-templates/components/ExportModal.vue';
 import {
   getTestCaseList,
   deleteTestCase as deleteTestCaseService,
   batchDeleteTestCases,
+  updateTestCaseReviewStatus,
   type TestCase,
+  type ReviewStatus,
 } from '@/services/testcaseService';
-import { formatDate, getLevelColor } from '@/utils/formatters'; // 假设工具函数已移至此处
+import { formatDate, getLevelColor, getReviewStatusLabel, getReviewStatusColor, REVIEW_STATUS_OPTIONS } from '@/utils/formatters';
 import type { TreeNodeData } from '@arco-design/web-vue';
 
 const props = defineProps<{
@@ -166,10 +193,10 @@ const emit = defineEmits<{
   (e: 'testCaseDeleted'): void;
   (e: 'executeTestCase', testCase: TestCase): void;
   (e: 'module-filter-change', moduleId: number | null): void;
+  (e: 'requestOptimization', testCase: TestCase): void;
 }>();
 
 const { currentProjectId, selectedModuleId } = toRefs(props);
-const moduleTree = computed(() => props.moduleTree || []);
 
 // 本地模块选择（与外部 selectedModuleId 同步）
 const localSelectedModuleId = ref<number | null>(props.selectedModuleId || null);
@@ -177,10 +204,19 @@ const localSelectedModuleId = ref<number | null>(props.selectedModuleId || null)
 const loading = ref(false);
 const localSearchKeyword = ref('');
 const selectedLevel = ref<string>('');
+// 默认选中除"不可用"之外的所有状态
+const DEFAULT_REVIEW_STATUSES: ReviewStatus[] = ['pending_review', 'approved', 'needs_optimization', 'optimization_pending_review'];
+const selectedReviewStatuses = ref<ReviewStatus[]>([...DEFAULT_REVIEW_STATUSES]);
 const testCaseData = ref<TestCase[]>([]);
 const selectedTestCaseIds = ref<number[]>([]);
 const importModalRef = ref<InstanceType<typeof ImportModal> | null>(null);
 const exportModalRef = ref<InstanceType<typeof ExportModal> | null>(null);
+
+// 响应式屏幕宽度检测
+const isSmallScreen = ref(window.innerWidth < 1222);
+const handleResize = () => {
+  isSmallScreen.value = window.innerWidth < 1222;
+};
 
 const paginationConfig = reactive({
   total: 0,
@@ -268,6 +304,7 @@ const columns = [
   { title: '用例名称', dataIndex: 'name', slotName: 'name', width: 180, ellipsis: true, tooltip: false, align: 'center' },
   { title: '前置条件', dataIndex: 'precondition', width: 120, ellipsis: true, tooltip: true, align: 'center' },
   { title: '优先级', dataIndex: 'level', slotName: 'level', width: 80, align: 'center' },
+  { title: '审核状态', dataIndex: 'review_status', slotName: 'reviewStatus', width: 120, align: 'center' },
   { title: '所属模块', dataIndex: 'module_detail', slotName: 'module', width: 100, ellipsis: true, tooltip: true, align: 'center' },
   {
     title: '创建者',
@@ -301,6 +338,8 @@ const fetchTestCases = async () => {
       search: localSearchKeyword.value,
       module_id: localSelectedModuleId.value || undefined, // 使用本地模块筛选
       level: selectedLevel.value || undefined, // 添加优先级筛选
+      // 多选审核状态筛选：有选中项则传递，否则不限制（显示全部）
+      review_status_in: selectedReviewStatuses.value.length > 0 ? selectedReviewStatuses.value : undefined,
     });
     if (response.success && response.data) {
       testCaseData.value = response.data;
@@ -330,17 +369,47 @@ const onSearch = (value: string) => {
   fetchTestCases();
 };
 
-const onModuleChange = (value: number | null) => {
-  localSelectedModuleId.value = value;
-  paginationConfig.current = 1;
-  emit('module-filter-change', value);
-  fetchTestCases();
-};
-
 const onLevelChange = (value: string) => {
   selectedLevel.value = value;
   paginationConfig.current = 1;
   fetchTestCases();
+};
+
+const onReviewStatusChange = (value: ReviewStatus[]) => {
+  selectedReviewStatuses.value = value;
+  paginationConfig.current = 1;
+  fetchTestCases();
+};
+
+const handleReviewStatusChange = async (record: TestCase, newStatus: string) => {
+  if (!currentProjectId.value) return;
+
+  // 如果选择"优化"，触发优化弹窗
+  if (newStatus === 'needs_optimization') {
+    emit('requestOptimization', record);
+    return;
+  }
+
+  // 其他状态直接更新
+  try {
+    const response = await updateTestCaseReviewStatus(
+      currentProjectId.value,
+      record.id,
+      newStatus as ReviewStatus
+    );
+    if (response.success) {
+      Message.success('状态更新成功');
+      // 更新本地数据
+      const index = testCaseData.value.findIndex(tc => tc.id === record.id);
+      if (index !== -1) {
+        testCaseData.value[index].review_status = newStatus as ReviewStatus;
+      }
+    } else {
+      Message.error(response.error || '状态更新失败');
+    }
+  } catch (error) {
+    Message.error('状态更新时发生错误');
+  }
 };
 
 const onPageChange = (page: number) => {
@@ -482,12 +551,18 @@ const onImportSuccess = () => {
 
 onMounted(() => {
   fetchTestCases();
+  window.addEventListener('resize', handleResize);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize);
 });
 
 watch(currentProjectId, () => {
   paginationConfig.current = 1;
   localSearchKeyword.value = '';
   selectedLevel.value = ''; // 项目切换时清空优先级筛选
+  selectedReviewStatuses.value = [...DEFAULT_REVIEW_STATUSES]; // 项目切换时重置审核状态筛选
   fetchTestCases();
 });
 
@@ -565,16 +640,36 @@ defineExpose({
   flex-shrink: 1;
 }
 
-.module-filter {
-  width: 140px;
-  min-width: 100px;
+.level-filter {
   flex-shrink: 1;
 }
 
-.level-filter {
-  width: 120px;
-  min-width: 90px;
-  flex-shrink: 1;
+.review-status-filter {
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.review-status-filter :deep(.arco-select-view-multiple) {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+/* 导入导出按钮响应式 */
+.io-btn {
+  flex-shrink: 0;
+}
+
+@media (max-width: 1200px) {
+  .io-btn-text {
+    display: none;
+  }
+  .io-btn {
+    width: 32px;
+    padding: 0;
+  }
+  .io-btn :deep(.arco-btn-icon) {
+    margin-right: 0;
+  }
 }
 
 .no-project-selected {
@@ -645,7 +740,7 @@ defineExpose({
   align-items: center;
   gap: 6px;
   position: sticky;
-  bottom: 0;
+  bottom: 16px;
   background-color: #fff;
   z-index: 1;
   padding: 8px 0;

@@ -32,8 +32,8 @@ python whart_tools.py --action <action_name> [--参数名 参数值]
 | `get_levels` | 获取用例等级列表 | 无 |
 | `get_testcases` | 获取模块下的用例列表 | `--project_id`, `--module_id` |
 | `get_testcase_detail` | 获取用例详情 | `--project_id`, `--case_id` |
-| `add_testcase` | 新增测试用例 | `--project_id`, `--module_id`, `--name`, `--level`, `--precondition`, `--steps`, `--notes` |
-| `edit_testcase` | 编辑测试用例 | `--project_id`, `--case_id`, `--name`, `--level`, `--module_id`, `--precondition`, `--steps`, `--notes` |
+| `add_testcase` | 新增测试用例 | `--project_id`, `--module_id`, `--name`, `--level`, `--precondition`, `--steps`, `--notes`, `--review_status` |
+| `edit_testcase` | 编辑测试用例 | `--project_id`, `--case_id`, `--name`, `--level`, `--module_id`, `--precondition`, `--steps`, `--notes`, `--review_status`, `--is_optimization` |
 
 ### 截图管理
 
@@ -53,6 +53,19 @@ python whart_tools.py --action <action_name> [--参数名 参数值]
 |--------|------|------|
 | `create_diagram` | 创建drawio图表 | `--xml`, `--page_name` |
 | `edit_diagram` | 编辑drawio图表 | `--operations` (JSON格式) |
+
+### 审核状态
+
+`--review_status` 可选值：
+- `pending_review` - 待审核（默认）
+- `approved` - 通过
+- `needs_optimization` - 优化
+- `optimization_pending_review` - 优化待审核
+- `unavailable` - 不可用
+
+`--is_optimization` 标志（布尔型，无需传值）：在 edit_testcase 时带上此标志，会自动将状态设为 `optimization_pending_review`（优化待审核），用于AI优化后的用例提交。**一次调用即可完成编辑+状态更新。**
+- ✅ 正确用法：`python whart_tools.py --action edit_testcase --project_id 1 --case_id 51 ... --is_optimization`
+- ❌ 错误用法：`--is_optimization true`（不要传值）
 
 ## 使用示例
 

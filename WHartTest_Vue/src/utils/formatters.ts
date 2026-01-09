@@ -42,3 +42,24 @@ export const formatDuration = (seconds?: number): string => {
   }
   return `${minutes}分${remainingSeconds}秒`;
 };
+
+// 审核状态选项
+export const REVIEW_STATUS_OPTIONS = [
+  { value: 'pending_review', label: '待审核', color: 'orange' },
+  { value: 'approved', label: '通过', color: 'green' },
+  { value: 'needs_optimization', label: '优化', color: 'blue' },
+  { value: 'optimization_pending_review', label: '优化待审核', color: 'purple' },
+  { value: 'unavailable', label: '不可用', color: 'red' },
+] as const;
+
+export const getReviewStatusLabel = (status?: string): string => {
+  if (!status) return '待审核';
+  const option = REVIEW_STATUS_OPTIONS.find(o => o.value === status);
+  return option?.label || status;
+};
+
+export const getReviewStatusColor = (status?: string): string => {
+  if (!status) return 'orange';
+  const option = REVIEW_STATUS_OPTIONS.find(o => o.value === status);
+  return option?.color || 'gray';
+};

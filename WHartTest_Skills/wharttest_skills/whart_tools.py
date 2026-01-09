@@ -96,7 +96,8 @@ def get_testcase_detail(project_id: int, case_id: int):
 
 
 def add_testcase(project_id: int, module_id: int, name: str, level: str,
-                 precondition: str = "", steps: list = None, notes: str = ""):
+                 precondition: str = "", steps: list = None, notes: str = "",
+                 review_status: str = "pending_review"):
     """新增测试用例"""
     url = f"{BASE_URL}/api/projects/{project_id}/testcases/"
     data = {
@@ -105,7 +106,8 @@ def add_testcase(project_id: int, module_id: int, name: str, level: str,
         "level": level,
         "module_id": module_id,
         "steps": steps or [],
-        "notes": notes
+        "notes": notes,
+        "review_status": review_status
     }
     try:
         resp = requests.post(url, headers=HEADERS, json=data)
@@ -119,7 +121,8 @@ def add_testcase(project_id: int, module_id: int, name: str, level: str,
 
 
 def edit_testcase(project_id: int, case_id: int, name: str = None, level: str = None,
-                  module_id: int = None, precondition: str = None, steps: list = None, notes: str = None):
+                  module_id: int = None, precondition: str = None, steps: list = None, notes: str = None,
+                  review_status: str = None, is_optimization: bool = False):
     """编辑测试用例"""
     url = f"{BASE_URL}/api/projects/{project_id}/testcases/{case_id}/"
     data = {}
@@ -130,15 +133,29 @@ def edit_testcase(project_id: int, case_id: int, name: str = None, level: str = 
     if steps is not None: data["steps"] = steps
     if notes is not None: data["notes"] = notes
 
+    # 处理优化工作流
+    if is_optimization:
+        data["review_status"] = "optimization_pending_review"
+    elif review_status is not None:
+        data["review_status"] = review_status
+
     try:
         resp = requests.patch(url, headers=HEADERS, json=data)
         resp.raise_for_status()
         result = resp.json()
         if result.get("code") == 200:
-            return {"message": f"用例 {name} 编辑成功"}
-        return {"message": "编辑失败", "response": result}
+            status_msg = ""
+            if is_optimization:
+                status_msg = "，状态已自动设为「优化待审核」"
+            elif review_status:
+                status_msg = f"，状态已设为「{review_status}」"
+            return {
+                "success": True,
+                "message": f"用例ID {case_id} 编辑成功{status_msg}。任务已完成，无需再次编辑或查询。"
+            }
+        return {"success": False, "message": "编辑失败", "response": result}
     except Exception as e:
-        return {"error": str(e)}
+        return {"success": False, "error": str(e)}
 
 
 def upload_screenshot(project_id: int, case_id: int, file_path: str, title: str,
@@ -271,14 +288,16 @@ ACTIONS = {
         _parse_steps(args.steps) if isinstance(_parse_steps(args.steps), dict) else
         add_testcase(
             args.project_id, args.module_id, args.name, args.level,
-            args.precondition or "", _parse_steps(args.steps), args.notes or ""
+            args.precondition or "", _parse_steps(args.steps), args.notes or "",
+            args.review_status or "pending_review"
         )
     ),
     "edit_testcase": lambda args: (
         _parse_steps(args.steps) if args.steps and isinstance(_parse_steps(args.steps), dict) else
         edit_testcase(
             args.project_id, args.case_id, args.name, args.level, args.module_id,
-            args.precondition, _parse_steps(args.steps) if args.steps else None, args.notes
+            args.precondition, _parse_steps(args.steps) if args.steps else None, args.notes,
+            args.review_status, args.is_optimization
         )
     ),
     "upload_screenshot": lambda args: upload_screenshot(
@@ -309,6 +328,8 @@ def main():
     parser.add_argument("--description", help="描述")
     parser.add_argument("--step_number", type=int, help="步骤编号")
     parser.add_argument("--page_url", help="页面URL")
+    parser.add_argument("--review_status", help="审核状态 (pending_review/approved/needs_optimization/optimization_pending_review/unavailable)")
+    parser.add_argument("--is_optimization", action="store_true", help="是否为优化操作（自动设置状态为optimization_pending_review）")
 
     args = parser.parse_args()
     result = ACTIONS[args.action](args)

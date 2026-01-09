@@ -24,6 +24,14 @@ class TestCase(models.Model):
         ('P3', _('P3')),
     ]
 
+    REVIEW_STATUS_CHOICES = [
+        ('pending_review', _('待审核')),
+        ('approved', _('通过')),
+        ('needs_optimization', _('优化')),
+        ('optimization_pending_review', _('优化待审核')),
+        ('unavailable', _('不可用')),
+    ]
+
     project = models.ForeignKey(
         Project,
         on_delete=models.CASCADE,
@@ -62,6 +70,14 @@ class TestCase(models.Model):
         blank=True,
         null=True,
         help_text=_('测试用例的截屏图片')
+    )
+    review_status = models.CharField(
+        _('审核状态'),
+        max_length=30,
+        choices=REVIEW_STATUS_CHOICES,
+        default='pending_review',
+        blank=True,
+        null=True,
     )
 
     class Meta:
