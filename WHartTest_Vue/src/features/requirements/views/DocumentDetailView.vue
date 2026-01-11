@@ -11,6 +11,15 @@
         <a-tag :color="getStatusColor(document?.status)" class="status-tag">
           {{ getStatusText(document?.status) }}
         </a-tag>
+        <!-- 评审进度展示 -->
+        <div v-if="document?.status === 'reviewing' && reviewProgress" class="review-progress">
+          <a-progress
+            :percent="reviewProgress.progress"
+            :stroke-width="8"
+            :style="{ width: '180px' }"
+          />
+          <span class="progress-step">{{ reviewProgress.current_step }}</span>
+        </div>
       </div>
       <div class="header-actions">
         <!-- 上传状态优先拆分 -->
@@ -415,7 +424,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, h } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, h } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Message, Modal, Input as AInput } from '@arco-design/web-vue';
 import {
@@ -483,6 +492,16 @@ const reviewAction = ref<'start' | 'restart' | 'retry'>('start');
 const reviewConfig = ref({
   max_workers: 3
 });
+
+// 评审进度跟踪
+const reviewProgress = ref<{
+  progress: number;
+  current_step: string;
+  completed_steps: string[];
+} | null>(null);
+
+// 轮询控制标志
+let isPollingActive = false;
 
 // 计算属性
 const sortedModules = computed(() => {
@@ -579,9 +598,15 @@ const loadDocument = async () => {
   loading.value = true;
   try {
     const response = await RequirementDocumentService.getDocumentDetail(documentId);
-    
+
     if (response.status === 'success') {
       document.value = response.data;
+
+      // 如果文档正在评审中且没有正在进行的轮询，自动开始轮询进度
+      if (document.value?.status === 'reviewing' && !isPollingActive) {
+        reviewLoading.value = true;
+        pollDocumentStatus();
+      }
     } else {
       Message.error(response.message || '加载文档详情失败');
     }
@@ -727,46 +752,72 @@ const confirmReview = async () => {
 const pollDocumentStatus = async () => {
   const maxAttempts = 60; // 最多轮询60次（5分钟）
   let attempts = 0;
-  
+  isPollingActive = true;
+
   const poll = async () => {
+    // 如果组件已卸载或轮询被停止，则退出
+    if (!isPollingActive) {
+      return;
+    }
+
     attempts++;
-    
+
     try {
       await loadDocument();
-      
+
+      // 更新进度信息（从最新的评审报告获取）
+      if (document.value?.status === 'reviewing' && document.value?.latest_review) {
+        const latestReview = document.value.latest_review;
+        reviewProgress.value = {
+          progress: latestReview.progress ?? 0,
+          current_step: latestReview.current_step || '处理中...',
+          completed_steps: latestReview.completed_steps || []
+        };
+      }
+
       if (document.value?.status === 'review_completed') {
         // 评审完成
+        isPollingActive = false;
         reviewLoading.value = false;
+        reviewProgress.value = null;
         Message.success('需求评审已完成！');
         return;
       } else if (document.value?.status === 'failed') {
         // 评审失败
+        isPollingActive = false;
         reviewLoading.value = false;
+        reviewProgress.value = null;
         Message.error('需求评审失败，请重试');
         return;
       } else if (attempts >= maxAttempts) {
         // 超时
+        isPollingActive = false;
         reviewLoading.value = false;
+        reviewProgress.value = null;
         Message.warning('评审时间较长，请稍后刷新页面查看结果');
         return;
       }
-      
-      // 继续轮询，每5秒一次
-      setTimeout(poll, 5000);
+
+      // 继续轮询，每3秒一次（更频繁地更新进度）
+      if (isPollingActive) {
+        setTimeout(poll, 3000);
+      }
     } catch (error) {
       console.error('轮询文档状态失败:', error);
       attempts++;
-      if (attempts < maxAttempts) {
-        setTimeout(poll, 5000);
+      if (attempts < maxAttempts && isPollingActive) {
+        setTimeout(poll, 3000);
       } else {
+        isPollingActive = false;
         reviewLoading.value = false;
+        reviewProgress.value = null;
         Message.error('获取评审状态失败');
       }
     }
   };
-  
-  // 首次轮询延迟3秒
-  setTimeout(poll, 3000);
+
+  // 首次轮询延迟2秒
+  setTimeout(poll, 2000);
 };
 
 // 模块展开/收起
@@ -1113,6 +1164,11 @@ const clearSelection = () => {
 onMounted(() => {
   loadDocument();
 });
+
+// 组件卸载时停止轮询
+onBeforeUnmount(() => {
+  isPollingActive = false;
+});
 </script>
 
 <style scoped>
@@ -1139,6 +1195,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 16px; /* 元素之间的间距 */
+  min-width: 0; /* 允许flex子元素收缩到小于内容宽度 */
+  overflow: hidden;
 }
 
 .back-button {
@@ -1151,6 +1209,7 @@ onMounted(() => {
   font-weight: 600;
   color: #1d2129;
   flex: 1; /* 标题占据剩余空间 */
+  min-width: 0; /* 允许标题收缩 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis; /* 长标题显示省略号 */
@@ -1159,6 +1218,23 @@ onMounted(() => {
 .status-tag {
   flex-shrink: 0; /* 防止标签被压缩 */
   margin-right: 8px; /* 增加状态标签右侧额外间距 */
+}
+
+.review-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #e8f4ff 0%, #f0f5ff 100%);
+  border-radius: 8px;
+  border: 1px solid #b8daff;
+}
+
+.progress-step {
+  font-size: 13px;
+  color: #1890ff;
+  white-space: nowrap;
+  font-weight: 500;
 }
 
 .header-actions {

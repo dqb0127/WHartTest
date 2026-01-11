@@ -370,39 +370,54 @@ onMounted(() => {
 .specialized-report-view {
   padding: 24px;
   background: transparent;
-  height: calc(100vh - 100px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 /* 页面头部 */
 .page-header {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid #e5e6eb;
+  padding: 24px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  gap: 24px;
 }
 
 .header-left {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 16px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .back-button {
-  color: #86909c;
+  flex-shrink: 0;
 }
 
 .page-title {
   margin: 0;
-  color: #1d2129;
   font-size: 24px;
   font-weight: 600;
+  color: #1d2129;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-tag {
-  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .header-actions {
@@ -422,7 +437,8 @@ onMounted(() => {
 .report-content {
   display: flex;
   gap: 24px;
-  height: calc(100% - 80px);
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -507,7 +523,7 @@ onMounted(() => {
 .analysis-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
 }
 
 .analysis-item {
@@ -685,6 +701,7 @@ onMounted(() => {
 /* 问题部分 */
 .issues-section {
   margin-top: 24px;
+  margin-bottom: 12px;
 }
 
 .issues-header {

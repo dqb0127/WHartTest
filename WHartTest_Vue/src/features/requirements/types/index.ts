@@ -290,6 +290,10 @@ export interface ReviewReport {
   recommendations: string;
   issues: ReviewIssue[];
   module_results: ModuleReviewResult[];
+  // 进度跟踪字段
+  progress?: number;
+  current_step?: string;
+  completed_steps?: string[];
 }
 
 // 文档详情（包含模块和评审报告）

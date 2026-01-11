@@ -103,6 +103,15 @@
               评审
             </a-button>
             <a-button
+              v-if="record.status === 'reviewing'"
+              type="text"
+              size="small"
+              status="warning"
+              @click="viewDocument(record)"
+            >
+              查看进度
+            </a-button>
+            <a-button
               v-if="record.status === 'review_completed'"
               type="text"
               size="small"

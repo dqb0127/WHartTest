@@ -2656,13 +2656,18 @@ class RequirementReviewEngine:
 
         Args:
             document: 要分析的文档
-            analysis_options: 分析选项，可包含max_workers控制并发数
+            analysis_options: 分析选项，可包含max_workers控制并发数和progress_callback
         """
         analysis_options = analysis_options or {}
         max_workers = analysis_options.get('max_workers', 3)  # 从选项中获取，默认3
+        progress_callback = analysis_options.get('progress_callback')  # 进度回调函数
 
         try:
             logger.info(f"开始全面分析文档: {document.title}, 内容长度: {len(document.content)}, 并发数: {max_workers}")
+
+            # 更新进度：开始分析
+            if progress_callback:
+                progress_callback(0.05, '准备分析', [])
 
             # 检查多模态支持
             if document.has_images:
@@ -2673,8 +2678,13 @@ class RequirementReviewEngine:
 
             # 使用线程池并发执行6个专项分析（每个都处理完整文档，充分利用200k上下文）
             from concurrent.futures import ThreadPoolExecutor, as_completed
+            import threading
 
             logger.info("开始并发执行6个专项分析...")
+
+            # 更新进度：开始并发分析
+            if progress_callback:
+                progress_callback(0.10, '开始专项分析', [])
 
             # 定义6个分析任务 - 传递 document 对象以支持多模态
             analysis_tasks = {
@@ -2689,6 +2699,10 @@ class RequirementReviewEngine:
             # 并发执行所有分析
             results = {}
             image_warning = None
+            completed_steps = []
+            completed_count = 0
+            progress_lock = threading.Lock()
+
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # 提交所有任务 - 传递 document 而非 content
                 future_to_analysis = {
@@ -2706,12 +2720,34 @@ class RequirementReviewEngine:
                         if result.get('image_warning') and not image_warning:
                             image_warning = result.get('image_warning')
                         logger.info(f"{display_name}分析完成，评分: {result.get('overall_score', 0)}")
+
+                        # 更新进度
+                        with progress_lock:
+                            completed_count += 1
+                            completed_steps.append(display_name)
+                            # 进度从0.10到0.85，每个分析占0.125
+                            progress = 0.10 + completed_count * 0.125
+                            if progress_callback:
+                                progress_callback(progress, f'{display_name}分析完成', completed_steps.copy())
+
                     except Exception as e:
                         logger.error(f"{display_name}分析失败: {e}")
                         # 使用默认结果
                         results[analysis_name] = self._get_default_analysis_result(f'{analysis_name}_analysis')
 
+                        # 即使失败也更新进度
+                        with progress_lock:
+                            completed_count += 1
+                            completed_steps.append(f'{display_name}(失败)')
+                            progress = 0.10 + completed_count * 0.125
+                            if progress_callback:
+                                progress_callback(progress, f'{display_name}分析失败', completed_steps.copy())
+
             logger.info("所有专项分析并发执行完成")
+
+            # 更新进度：生成报告
+            if progress_callback:
+                progress_callback(0.90, '生成综合报告', completed_steps)
 
             # 生成综合报告（新版本）
             logger.info("生成综合分析报告...")
@@ -2727,6 +2763,11 @@ class RequirementReviewEngine:
             })
 
             logger.info(f"文档分析完成，总体评分: {comprehensive_report.get('overall_score', 0)}")
+
+            # 更新进度：完成
+            if progress_callback:
+                progress_callback(1.0, '评审完成', completed_steps)
+
             return comprehensive_report
 
         except Exception as e:
@@ -3274,7 +3315,9 @@ class RequirementReviewService:
                 document=document,
                 status='in_progress',
                 reviewer='AI需求评审助手',
-                review_type='comprehensive'  # 标记为全面评审
+                review_type='comprehensive',  # 标记为全面评审
+                progress=0,
+                current_step='初始化'
             )
 
             # 确保文档状态为 reviewing
@@ -3284,8 +3327,27 @@ class RequirementReviewService:
 
             logger.info(f"开始评审文档: {document.title}")
 
+            # 定义进度回调函数
+            def progress_callback(progress: float, current_step: str, completed_steps: list):
+                """更新评审进度"""
+                try:
+                    review_report.progress = progress
+                    review_report.current_step = current_step
+                    review_report.completed_steps = completed_steps
+                    review_report.save(update_fields=['progress', 'current_step', 'completed_steps', 'updated_at'])
+                    logger.debug(f"进度更新: {progress} - {current_step}")
+                except Exception as e:
+                    logger.warning(f"进度更新失败: {e}")
+
+            # 创建新的分析选项字典（避免修改原始参数）
+            local_analysis_options = dict(analysis_options or {})
+            local_analysis_options['progress_callback'] = progress_callback
+
             # 执行AI分析
-            analysis_result = self.review_engine.analyze_document_comprehensive(document, analysis_options)
+            analysis_result = self.review_engine.analyze_document_comprehensive(document, local_analysis_options)
+
+            # 清理回调引用，避免序列化问题
+            del local_analysis_options['progress_callback']
 
             # 更新评审报告
             self._update_review_report(review_report, analysis_result)

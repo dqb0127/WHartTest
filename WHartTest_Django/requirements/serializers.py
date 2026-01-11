@@ -131,6 +131,7 @@ class ReviewReportSerializer(serializers.ModelSerializer):
             'medium_priority_issues', 'low_priority_issues',
             'summary', 'recommendations', 'issues', 'module_results',
             'specialized_analyses', 'scores',  # 新增字段
+            'progress', 'current_step', 'completed_steps',  # 进度跟踪字段
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'review_date', 'created_at', 'updated_at']

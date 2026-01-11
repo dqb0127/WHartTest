@@ -589,7 +589,7 @@ onMounted(async () => {
   margin: 0 0 10px 10px;
   border-radius: 8px;
   box-shadow: -4px 0 10px rgba(0, 0, 0, 0.2), 0 4px 10px rgba(0, 0, 0, 0.2), 0 0 10px rgba(0, 0, 0, 0.15);
-  height: calc(100vh - 86px);
+  height: auto; /* 让 flex 自动撑开 */
 }
 
 .menu {
@@ -735,18 +735,19 @@ onMounted(async () => {
 }
 
 .main-layout {
-  min-height: 100vh;
+  height: 100vh;
   background-color: #f8f9fc;
+  overflow: hidden;
 }
 
 .inner-layout {
-  height: calc(100vh - 86px);
+  height: calc(100vh - 76px); /* Header(56px) + margin(10px*2) = 76px */
 }
 
 .content {
   padding: 0;
   background-color: #f8f9fc;
-  height: calc(100vh - 86px);
+  height: calc(100vh - 86px); /* 保持 86px 是因为底部还有 10px 的 margin */
   margin: 0 10px 10px 10px;
   overflow-y: auto; /* 允许垂直滚动 */
   border-radius: 8px;

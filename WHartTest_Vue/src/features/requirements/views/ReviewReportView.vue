@@ -508,35 +508,33 @@ onMounted(() => {
 <style scoped>
 .review-report {
   padding: 24px;
-  background: transparent; /* 使用主布局的背景 */
-  min-height: 100%; /* 适应父容器 */
+  background: transparent;
+  min-height: 100%;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
-  align-items: center; /* 改为居中对齐 */
+  align-items: center;
   margin-bottom: 24px;
   padding: 24px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: white !important;
+  border-radius: 8px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+  gap: 24px;
 }
 
 .header-left {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 16px; /* 元素之间的间距 */
-}
-
-.version-selector {
-  margin-left: auto; /* 将版本选择器推到右侧 */
-  margin-right: 16px;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .back-button {
-  flex-shrink: 0; /* 防止按钮被压缩 */
+  flex-shrink: 0;
 }
 
 .page-title {
@@ -544,10 +542,11 @@ onMounted(() => {
   font-size: 24px;
   font-weight: 600;
   color: #1d2129;
-  flex: 1; /* 标题占据剩余空间 */
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis; /* 长标题显示省略号 */
+  text-overflow: ellipsis;
 }
 
 .status-tag {
@@ -557,6 +556,10 @@ onMounted(() => {
 .version-indicator {
   flex-shrink: 0;
   font-size: 12px;
+}
+
+.version-selector {
+  flex-shrink: 0;
 }
 
 .header-actions {

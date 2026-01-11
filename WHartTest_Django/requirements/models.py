@@ -269,6 +269,11 @@ class ReviewReport(models.Model):
         default='pending'
     )
 
+    # 进度跟踪字段
+    progress = models.FloatField(_('评审进度'), default=0, help_text='0-1小数')
+    current_step = models.CharField(_('当前步骤'), max_length=50, blank=True, default='')
+    completed_steps = models.JSONField(_('已完成步骤'), default=list, blank=True)
+
     # 评审结果
     overall_rating = models.CharField(
         _('总体评价'),
