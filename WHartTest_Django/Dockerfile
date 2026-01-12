@@ -132,6 +132,8 @@ COPY orchestrator_integration/ /app/orchestrator_integration/
 COPY projects/ /app/projects/
 COPY prompts/ /app/prompts/
 COPY requirements/ /app/requirements/
+COPY skills/ /app/skills/
+COPY testcase_templates/ /app/testcase_templates/
 COPY testcases/ /app/testcases/
 COPY wharttest_django/ /app/wharttest_django/
 

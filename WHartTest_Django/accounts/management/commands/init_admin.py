@@ -96,8 +96,7 @@ class Command(BaseCommand):
         created_configs = []
         for config in mcp_configs:
             existing_config = RemoteMCPConfig.objects.filter(
-                name=config['name'],
-                owner=admin_user
+                name=config['name']
             ).first()
             
             if existing_config:
@@ -109,8 +108,7 @@ class Command(BaseCommand):
                     name=config['name'],
                     url=config['url'],
                     transport=config['transport'],
-                    is_active=True,
-                    owner=admin_user
+                    is_active=True
                 )
                 created_configs.append(config['name'])
                 self.stdout.write(

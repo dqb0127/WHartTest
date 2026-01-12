@@ -159,7 +159,7 @@ const handleLogin = async () => {
     }
     
     // 使用 nextTick 确保状态更新后再跳转
-    await router.push('/projects');
+    await router.push({ name: 'Dashboard' });
   }
 };
 
@@ -167,7 +167,7 @@ onMounted(() => {
   // 检查用户是否已登录
   authStore.checkAuthStatus();
   if (authStore.isLoggedIn) {
-    router.push('/projects');
+    router.push({ name: 'Dashboard' });
   }
 
   // 检查是否有记住的用户名
