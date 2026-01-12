@@ -21,7 +21,7 @@ except ImportError:
     pass
 
 # 配置
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "http://backend:8000"
 API_KEY = "wharttest-default-mcp-key-2025"
 HEADERS = {
     "accept": "application/json, text/plain,*/*",
