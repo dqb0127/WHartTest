@@ -244,12 +244,27 @@ const shouldCollapse = computed(() => {
   return lines > 4;
 });
 
+const REQUIREMENT_DOC_ID_RE = /需求文档ID[:：]\s*([0-9a-fA-F-]{36})/;
+
+const replaceDocImgPlaceholders = (content: string): string => {
+  if (!content || !content.includes('docimg://')) return content;
+  const match = content.match(REQUIREMENT_DOC_ID_RE);
+  if (!match) return content;
+  const documentId = match[1];
+  return content.replace(/!\[(.*?)\]\(docimg:\/\/([^)]+)\)/g, (_m, alt, imageId) => {
+    return `![${alt}](/api/requirements/documents/${documentId}/images/${imageId}/)`;
+  });
+};
+
 
 
 // 格式化消息内容
 const formattedContent = computed(() => {
   try {
     let processedContent = props.message.content;
+
+    // 将需求文档图片占位符转换为可访问的图片URL（用于Markdown渲染）
+    processedContent = replaceDocImgPlaceholders(processedContent);
 
     // 如果是工具消息，尝试格式化JSON
     if (props.message.messageType === 'tool') {
@@ -268,7 +283,10 @@ const formattedContent = computed(() => {
     const htmlContent = marked(processedContent) as string;
 
     // 使用DOMPurify净化HTML防止XSS攻击
-    return DOMPurify.sanitize(htmlContent);
+    return DOMPurify.sanitize(htmlContent, {
+      ADD_TAGS: ['img'],
+      ADD_ATTR: ['src', 'alt', 'title'],
+    });
   } catch (error) {
     console.error('Error parsing markdown:', error);
     return props.message.content;

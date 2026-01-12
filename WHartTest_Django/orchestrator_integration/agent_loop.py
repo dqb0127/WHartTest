@@ -50,7 +50,10 @@ class AgentOrchestrator:
 2. 如果任务已完成，直接给出最终回答
 3. 如果遇到问题无法继续，说明原因
 
-注意：每次只执行一个操作，执行后会收到结果再决定下一步。
+注意：
+- 每次只执行一个操作，执行后会收到结果再决定下一步。
+- 如果用户目标里已经明确给出了 `项目ID` / `测试用例模块ID`（例如：测试用例模块ID "1"），优先直接使用它，不要为了“确认”而反复调用 `get_modules`。
+- 严禁在没有任何新信息的情况下重复调用同一工具（同名同参数）。如果上一步工具返回已经包含所需信息，请直接进入下一步（如生成用例标题并调用保存工具），或给出无法继续的原因。
 """
 
     def __init__(self, llm, tools=None, max_steps: int = None):
@@ -293,11 +296,23 @@ class AgentOrchestrator:
         if image_base64:
             # 多模态消息格式
             human_content = [
-                {"type": "text", "text": "请根据图片内容执行下一步操作。"},
+                {
+                    "type": "text",
+                    "text": (
+                        "请基于系统提示中的【任务目标/最近对话上下文/当前任务步骤记录/当前状态】做决策，只能二选一：\n"
+                        "A) 如果已完成目标：直接输出最终结果（不要再调用任何工具），并在末尾写“[任务完成]”。\n"
+                        "B) 如果信息不足：调用工具来获取缺失信息（同名同参工具严禁重复调用），不要输出最终结果。\n\n"
+                        "你会收到这张图片，请结合图片内容做判断。"
+                    )
+                },
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
             ]
         else:
-            human_content = "请执行下一步操作。"
+            human_content = (
+                "请基于系统提示中的【任务目标/最近对话上下文/当前任务步骤记录/当前状态】做决策，只能二选一：\n"
+                "A) 如果已完成目标：直接输出最终结果（不要再调用任何工具），并在末尾写“[任务完成]”。\n"
+                "B) 如果信息不足：调用工具来获取缺失信息（同名同参工具严禁重复调用），不要输出最终结果。"
+            )
 
         messages = [
             SystemMessage(content=system_prompt),
@@ -640,6 +655,32 @@ class AgentOrchestrator:
                     logger.error(f"LLM 流式连接失败，已达最大重试次数 ({max_retries}): {e}")
             except openai.APIError as e:
                 # API 错误（如 Bad request），打印详细信息便于排查
+                status_code = getattr(e, "status_code", None)
+                if status_code is None and hasattr(e, "response") and e.response is not None:
+                    try:
+                        status_code = getattr(e.response, "status_code", None)
+                    except Exception:
+                        status_code = None
+
+                # 某些 OpenAI 兼容服务不支持 stream=true（尤其是在启用 tools 时），会返回 406。
+                # 这类情况下可降级为非流式调用（仍保留 tool_calls 能力），避免任务直接失败。
+                if status_code == 406:
+                    logger.warning(
+                        "LLM 流式调用被服务端拒绝(406)，降级为非流式调用以继续执行: %s",
+                        getattr(e, "body", None) or str(e),
+                    )
+                    try:
+                        fallback_response = await asyncio.to_thread(self.llm_with_tools.invoke, messages)
+                        # 如果有文本内容，作为单个 chunk 输出（保证前端能看到回复）
+                        if on_chunk and hasattr(fallback_response, "content") and fallback_response.content:
+                            content = fallback_response.content
+                            if isinstance(content, str) and content.strip():
+                                await on_chunk(content)
+                        return fallback_response
+                    except Exception as fallback_err:
+                        logger.error("LLM 406 降级非流式调用也失败: %s", fallback_err, exc_info=True)
+                        raise
+
                 logger.error(f"OpenAI API 错误: {type(e).__name__}: {e}")
                 if hasattr(e, 'response') and e.response:
                     try:
@@ -681,12 +722,36 @@ class AgentOrchestrator:
         if hasattr(response, 'content') and response.content:
             result['response'] = response.content
         
+        def _has_done_marker(content) -> bool:
+            """只有明确输出 [任务完成] 才允许收口，避免模型过早结束导致闭环中断。"""
+            marker = "[任务完成]"
+            if not content:
+                return False
+            if isinstance(content, str):
+                return marker in content
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, str) and marker in item:
+                        return True
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text = item.get("text") or ""
+                        if isinstance(text, str) and marker in text:
+                            return True
+                return False
+            if isinstance(content, dict):
+                try:
+                    return marker in json.dumps(content, ensure_ascii=False)
+                except Exception:
+                    return marker in str(content)
+            return marker in str(content)
+
         # 检查工具调用
         if hasattr(response, 'tool_calls') and response.tool_calls:
             result['tool_calls'] = response.tool_calls
+            result['is_final'] = False
         else:
-            # 没有工具调用，说明是最终响应
-            result['is_final'] = True
+            # 没有工具调用：只有带 [任务完成] 的回复才算最终响应
+            result['is_final'] = _has_done_marker(result.get('response'))
         
         return result
     

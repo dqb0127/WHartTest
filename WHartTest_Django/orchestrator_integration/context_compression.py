@@ -213,7 +213,11 @@ class ConversationCompressor:
             
             return response.content.strip() if hasattr(response, 'content') else str(response).strip()
         except Exception as e:
-            logger.error("摘要重压缩失败: %s", e)
+            # 某些 OpenAI 兼容服务会返回非标准响应，导致 langchain_openai 在解析 choices 时抛 TypeError
+            if isinstance(e, TypeError) and "NoneType" in str(e) and "iterable" in str(e):
+                logger.warning("摘要重压缩失败（服务端响应异常，已降级处理）: %s", e)
+            else:
+                logger.error("摘要重压缩失败: %s", e)
             # 回退：截取前半部分
             return long_summary[:len(long_summary)//2] + "\n[历史摘要已截断]"
 
@@ -254,7 +258,11 @@ class ConversationCompressor:
             return response.content.strip() if hasattr(response, 'content') else str(response).strip()
             
         except Exception as e:
-            logger.error("摘要生成失败: %s", e, exc_info=True)
+            # 某些 OpenAI 兼容服务会返回非标准响应，导致 langchain_openai 在解析 choices 时抛 TypeError
+            if isinstance(e, TypeError) and "NoneType" in str(e) and "iterable" in str(e):
+                logger.warning("摘要生成失败（服务端响应异常，已降级处理）: %s", e)
+            else:
+                logger.error("摘要生成失败: %s", e, exc_info=True)
             # 回退：简单截断
             combined = "\n".join([self._message_to_text(msg) for msg in block[:3]])
             return f"[摘要生成失败，保留前3条消息概要]\n{combined[:500]}..."
