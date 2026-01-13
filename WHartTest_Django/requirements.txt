@@ -104,6 +104,14 @@ langchain-mcp-adapters==0.1.9
 # https://github.com/theorchard/openpyxl/blob/master/LICENCE.rst
 openpyxl==3.1.5
 
+# 数据分析库(用于Excel表格解析) - BSD 3-Clause许可证
+# https://github.com/pandas-dev/pandas/blob/main/LICENSE
+pandas==2.2.3
+
+# Excel旧版(.xls)读取支持 - BSD许可证
+# https://github.com/python-excel/xlrd/blob/master/LICENSE
+xlrd==2.0.1
+
 # 知识库依赖
 # LangChain社区库 - MIT许可证 (当前版本: 0.3.24)
 # https://github.com/langchain-ai/langchain/blob/master/libs/community/LICENSE
