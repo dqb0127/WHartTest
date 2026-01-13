@@ -169,11 +169,11 @@ import {
   getTestSuiteDetail,
   type CreateTestSuiteRequest,
   type AutomationScriptBrief,
-} from '@/services/testSuiteService';
-import { getTestCaseDetail, type TestCase } from '@/services/testcaseService';
-import TestCaseSelectorTable from './TestCaseSelectorTable.vue';
-import ScriptSelectorTable from './ScriptSelectorTable.vue';
-import request from '@/utils/request';
+	} from '@/services/testSuiteService';
+	import { getTestCaseDetail, type TestCase } from '@/services/testcaseService';
+	import { getAutomationScript } from '@/services/automationScriptService';
+	import TestCaseSelectorTable from './TestCaseSelectorTable.vue';
+	import ScriptSelectorTable from './ScriptSelectorTable.vue';
 
 interface Props {
   visible: boolean;
@@ -247,19 +247,19 @@ const loadSelectedTestCases = async () => {
 };
 
 // 加载已选择的脚本详情
-const loadSelectedScripts = async () => {
-  if (!props.currentProjectId || selectedScriptIds.value.length === 0) {
-    selectedScripts.value = [];
-    return;
-  }
-  try {
-    const promises = selectedScriptIds.value.map((id) =>
-      request.get(`/automation-scripts/${id}/`)
-    );
-    const responses = await Promise.all(promises);
-    selectedScripts.value = responses
-      .filter((r) => r.data?.success && r.data?.data)
-      .map((r) => r.data.data);
+	const loadSelectedScripts = async () => {
+	  if (!props.currentProjectId || selectedScriptIds.value.length === 0) {
+	    selectedScripts.value = [];
+	    return;
+	  }
+	  try {
+	    const promises = selectedScriptIds.value.map((id) =>
+	      getAutomationScript(props.currentProjectId!, id)
+	    );
+	    const responses = await Promise.all(promises);
+	    selectedScripts.value = responses
+	      .filter((r) => r.data?.success && r.data?.data)
+	      .map((r) => r.data.data);
   } catch (error) {
     console.error('加载脚本详情失败:', error);
   }

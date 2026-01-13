@@ -85,7 +85,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { Message } from '@arco-design/web-vue';
-import request from '@/utils/request';
+import { listAutomationScripts } from '@/services/automationScriptService';
 import { formatDate } from '@/utils/formatters';
 
 interface AutomationScript {
@@ -247,7 +247,7 @@ const fetchScripts = async () => {
     if (selectedStatus.value) params.status = selectedStatus.value;
     if (selectedSource.value) params.source = selectedSource.value;
 
-    const response = await request.get(`/automation-scripts/`, { params });
+    const response = await listAutomationScripts(params as any);
 
     if (response.data?.success) {
       // 处理分页响应格式: { data: { count, next, previous, results } }
