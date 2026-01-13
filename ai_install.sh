@@ -112,6 +112,18 @@ $sys_info
 - 如果有 Docker，推荐 Docker 安装
 - 如果没有 Docker，指导手动安装依赖
 - 提供友好的中文指导
+- **Docker 加速镜像**：如果用户在中国大陆且遇到 Docker 拉取镜像缓慢或失败的问题，请推荐配置以下加速器（daemon.json）：
+  - https://docker.1ms.run
+  - https://k-docker.asia
+  - https://docker.1panel.live
+  - https://dockerproxy.cn
+  - https://docker.nastool.de
+  - https://docker.agsv.top
+  - https://docker.agsvpt.work
+  - https://docker.m.daocloud.io
+  - https://dockerhub.anzu.vip
+  - https://docker.chenby.cn
+  - https://docker.jijiai.cn
 
 示例 1（只读操作）：
 用户问：\"帮我检查环境\"
