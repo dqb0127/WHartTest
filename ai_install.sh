@@ -119,54 +119,68 @@ get_system_info() {
 # 构建系统提示词
 build_system_prompt() {
     local sys_info=$(get_system_info)
-    
+
     SYSTEM_PROMPT="你是一个专业的项目安装助手。你正在帮助用户安装项目。
 
 当前环境信息：
 $sys_info
 
-
 你的职责：
 1. 理解用户的安装需求和环境
 2. 提供清晰的安装步骤指导
-3. 当需要执行命令时，使用特殊格式：【执行命令：命令内容】
+3. 当需要执行命令时，把命令放在回复的**最后一行**
 4. 解释每个步骤的作用
 5. 处理可能出现的错误
 
-重要规则：
-- 当你需要执行命令时，必须使用格式：【执行命令：命令内容】
-- 一次只执行一个命令，等待结果后再继续
-- **安全第一**：对于只读命令（如检查版本、查看文件），可以直接执行。
-- **必须询问**：对于修改性操作（如安装软件、修改配置、下载文件），**必须先询问用户是否同意**，用户同意后才能执行。
-- 另外：脚本本身也会对“可能修改系统/可能泄露敏感信息”的命令进行二次确认，避免误操作或把密钥输出回传给接口。
-- 优先检测用户环境，推荐合适的安装方式
-- 如果有 Docker，推荐 Docker 安装
-- 如果没有 Docker，指导手动安装依赖
-- 提供友好的中文指导
-- **Docker 加速镜像**：如果用户在中国大陆且遇到 Docker 拉取镜像缓慢或失败的问题，请推荐配置以下加速器（daemon.json）：
-  - https://docker.1ms.run
-  - https://k-docker.asia
-  - https://docker.1panel.live
-  - https://dockerproxy.cn
-  - https://docker.nastool.de
-  - https://docker.agsv.top
-  - https://docker.agsvpt.work
-  - https://docker.m.daocloud.io
-  - https://dockerhub.anzu.vip
-  - https://docker.chenby.cn
-  - https://docker.jijiai.cn
+**命令输出格式（必须严格遵守）**：
+- 命令必须单独占一行，放在回复的**最后**
+- 格式：【执行命令：命令】
+- 命令必须是纯 shell 命令，不能包含中文
+- 每次只能输出一个命令
+- 先写说明，最后一行写命令
 
-示例 1（只读操作）：
-用户问：\"帮我检查环境\"
-你回答：\"好的，让我检查一下 Docker 版本：
-【执行命令：docker --version】\"
+正确格式示例：
+\`\`\`
+让我检查一下 Docker 版本。
+【执行命令：docker --version】
+\`\`\`
 
-示例 2（修改操作）：
-用户问：\"帮我安装 Docker\"
-你回答：\"检测到您未安装 Docker。是否允许我为您安装 Docker？（这将执行安装脚本）\"
-用户回答：\"可以\"
-你回答：\"好的，正在安装 Docker...
-【执行命令：curl -fsSL https://get.docker.com | sh】\"
+错误格式（禁止）：
+\`\`\`
+【执行命令：docker --version】让我检查版本
+\`\`\`
+\`\`\`
+让我【执行命令：docker --version】检查一下
+\`\`\`
+
+安全规则：
+- 只读命令（查看、检查）：可以直接执行
+- 修改性操作（安装、删除、修改配置）：必须先询问用户同意
+- 脚本会对敏感命令进行二次确认
+
+安装建议：
+- 优先检测环境，推荐合适的安装方式
+- 有 Docker 时推荐 Docker 安装
+- 无 Docker 时指导手动安装
+- Docker 拉取慢时推荐加速镜像：docker.1ms.run、docker.1panel.live、dockerproxy.cn
+
+示例对话 1：
+用户：帮我检查环境
+你：好的，让我检查一下 Docker 是否已安装。
+【执行命令：docker --version】
+
+示例对话 2：
+用户：docs 目录里有什么
+你：让我查看 docs 目录的内容。
+【执行命令：ls -la docs】
+
+示例对话 3：
+用户：帮我安装 Docker
+你：检测到您未安装 Docker。是否允许我为您安装？
+
+用户：可以
+你：好的，正在为您安装 Docker。
+【执行命令：curl -fsSL https://get.docker.com | sh】
 
 现在，请开始与用户对话，了解他们的需求。"
 }
@@ -273,6 +287,9 @@ command_needs_confirmation() {
     if echo "$cmd" | grep -Eiq '(^|[[:space:]])docker([[:space:]]+)compose([[:space:]]+)(up|down|build|pull|push|rm)([[:space:]]|$)'; then
         return 0
     fi
+    if echo "$cmd" | grep -Eiq '(^|[[:space:]])docker-compose([[:space:]]+)(up|down|build|pull|push|rm|start|stop|restart)([[:space:]]|$)'; then
+        return 0
+    fi
     if echo "$cmd" | grep -Eiq '(^|[[:space:]])(systemctl|service)([[:space:]]|$)'; then
         return 0
     fi
@@ -280,8 +297,12 @@ command_needs_confirmation() {
     return 1
 }
 
+# 用户拒绝命令时的反馈（全局变量）
+USER_REJECT_FEEDBACK=""
+
 confirm_command() {
     local cmd="$1"
+    USER_REJECT_FEEDBACK=""
 
     if [ "${APPROVE_ALL:-0}" = "1" ] || [ "${ASSUME_YES:-0}" = "1" ]; then
         return 0
@@ -304,11 +325,17 @@ confirm_command() {
             ;;
         a|A)
             APPROVE_ALL=1
-            print_color "$YELLOW" "⚠️  已选择“本次全部允许”，后续将不再逐条确认（请谨慎）" >&2
+            print_color "$YELLOW" "⚠️  已选择"本次全部允许"，后续将不再逐条确认（请谨慎）" >&2
             return 0
             ;;
         *)
             print_color "$CYAN" "已拒绝执行该命令。" >&2
+            # 询问用户是否有修正建议
+            local feedback=""
+            read -r -p "$(prompt_color "$CYAN" "请输入修正建议（直接回车跳过）: ")" feedback || true
+            if [ -n "$feedback" ]; then
+                USER_REJECT_FEEDBACK="$feedback"
+            fi
             return 1
             ;;
     esac
@@ -1023,7 +1050,11 @@ process_ai_response() {
                 if confirm_command "$cmd"; then
                     result=$(execute_command "$cmd")
                 else
-                    result=$'已跳过：用户未同意执行该命令。'
+                    if [ -n "$USER_REJECT_FEEDBACK" ]; then
+                        result="已跳过：用户拒绝执行该命令。用户反馈：$USER_REJECT_FEEDBACK"
+                    else
+                        result="已跳过：用户未同意执行该命令。"
+                    fi
                 fi
             else
                 result=$(execute_command "$cmd")
