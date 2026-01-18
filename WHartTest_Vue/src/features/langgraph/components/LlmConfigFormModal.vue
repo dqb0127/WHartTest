@@ -85,15 +85,15 @@
             <a-textarea
               v-model="formData.system_prompt"
               placeholder="设置模型的默认 System Prompt（可选）"
-              :auto-size="{ minRows: 3, maxRows: 6 }"
+              :auto-size="{ minRows: 1, maxRows: 6 }"
               :max-length="2000"
               show-word-limit
             />
           </a-form-item>
         </a-col>
 
-        <!-- 第五行：开关区域 + 上下文限制 -->
-        <a-col :span="8">
+        <!-- 第五行：上下文限制 + 基础开关 -->
+        <a-col :span="6">
           <a-form-item field="context_limit" label="上下文限制">
             <a-input-number
               v-model="formData.context_limit"
@@ -104,19 +104,45 @@
             />
           </a-form-item>
         </a-col>
-        <a-col :span="8">
-          <a-form-item field="supports_vision" label="图片">
+        <a-col :span="6">
+          <a-form-item field="supports_vision" label="多模态">
             <a-space>
               <a-switch v-model="formData.supports_vision" />
               <span class="switch-desc">Vision</span>
             </a-space>
           </a-form-item>
         </a-col>
-        <a-col :span="8">
-          <a-form-item field="is_active" label="配置状态">
+        <a-col :span="6">
+          <a-form-item field="enable_streaming" label="流式输出">
+            <a-space>
+              <a-switch v-model="formData.enable_streaming" checked-color="#722ed1" />
+              <span class="switch-desc">Stream</span>
+            </a-space>
+          </a-form-item>
+        </a-col>
+        <a-col :span="6">
+          <a-form-item field="is_active" label="状态">
             <a-space>
               <a-switch v-model="formData.is_active" checked-color="#00b42a" />
-              <span class="switch-desc">已激活</span>
+              <span class="switch-desc">激活</span>
+            </a-space>
+          </a-form-item>
+        </a-col>
+
+        <!-- 第六行：中间件配置 -->
+        <a-col :span="8">
+          <a-form-item field="enable_summarization" label="上下文摘要">
+            <a-space>
+              <a-switch v-model="formData.enable_summarization" checked-color="#165dff" />
+              <span class="switch-desc">超限时自动压缩对话历史</span>
+            </a-space>
+          </a-form-item>
+        </a-col>
+        <a-col :span="8">
+          <a-form-item field="enable_hitl" label="人工审批">
+            <a-space>
+              <a-switch v-model="formData.enable_hitl" checked-color="#f77234" />
+              <span class="switch-desc">高风险操作需确认</span>
             </a-space>
           </a-form-item>
         </a-col>
@@ -181,6 +207,9 @@ const defaultFormData: CreateLlmConfigRequest = {
   system_prompt: '',
   supports_vision: false,
   context_limit: 128000,
+  enable_summarization: true,
+  enable_hitl: false,
+  enable_streaming: true,
   is_active: false,
 };
 const formData = ref<CreateLlmConfigRequest>({ ...defaultFormData });
@@ -214,6 +243,9 @@ watch(
           system_prompt: props.configData.system_prompt || '',
           supports_vision: props.configData.supports_vision || false,
           context_limit: props.configData.context_limit || 128000,
+          enable_summarization: props.configData.enable_summarization ?? true,
+          enable_hitl: props.configData.enable_hitl || false,
+          enable_streaming: props.configData.enable_streaming ?? true,
           is_active: props.configData.is_active,
         };
       } else {
@@ -259,6 +291,15 @@ const handleSubmit = async () => {
     }
     if (formData.value.context_limit !== undefined) { // 包含上下文限制
       partialData.context_limit = formData.value.context_limit;
+    }
+    if (formData.value.enable_summarization !== undefined) { // 包含上下文摘要
+      partialData.enable_summarization = formData.value.enable_summarization;
+    }
+    if (formData.value.enable_hitl !== undefined) { // 包含人工审批
+      partialData.enable_hitl = formData.value.enable_hitl;
+    }
+    if (formData.value.enable_streaming !== undefined) { // 包含流式输出
+      partialData.enable_streaming = formData.value.enable_streaming;
     }
     submitData = partialData;
     emit('submit', submitData, props.configData.id);

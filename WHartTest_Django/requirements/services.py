@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 from django.conf import settings
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph_integration.models import LLMConfig
 from .models import RequirementDocument, RequirementModule, DocumentImage
 from prompts.models import UserPrompt

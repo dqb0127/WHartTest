@@ -28,9 +28,9 @@ daphne==4.2.1
 # https://github.com/theskumar/python-dotenv/blob/main/LICENSE
 python-dotenv==1.1.1
 
-# OpenAI API客户端 - MIT许可证 (当前版本: 1.79.0)
+# OpenAI API客户端 - MIT许可证 (v1.x 重大升级)
 # https://github.com/openai/openai-python/blob/main/LICENSE
-openai==1.79.0
+openai>=1.109.1
 
 # Django查询过滤器 - BSD许可证 (当前版本: 25.1)
 # https://github.com/carltongibson/django-filter/blob/main/LICENSE
@@ -40,54 +40,55 @@ django-filter==25.1
 # https://github.com/alanjds/drf-nested-routers/blob/master/LICENSE
 drf-nested-routers==0.94.2
 
-# LangGraph工作流框架 - MIT许可证 (当前版本: 0.4.5)
+# LangGraph工作流框架 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langgraph/blob/main/LICENSE
-langgraph==0.4.5
+langgraph==1.0.6
 
-# LangChain主库 - MIT许可证 (当前版本: 0.3.25)
+# LangChain主库 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langchain/blob/master/LICENSE
-langchain==0.3.25
+langchain==1.2.3
 
-# LangChain OpenAI集成 - MIT许可证 (当前版本: 0.3.17)
+# LangChain OpenAI集成 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langchain/blob/master/libs/partners/openai/LICENSE
-langchain-openai==0.3.17
+langchain-openai==1.1.7
 
 # LangChain Anthropic/Claude 支持（已移除 - 保留注释以便记录）
 # 如果将来需要使用 Anthropic/Claude，请取消注释以下依赖：
-# langchain-anthropic==0.2.4
-# anthropic==0.48.0
+# langchain-anthropic>=0.3.0
+# anthropic>=0.48.0
 
-# LangChain核心库 - MIT许可证 (当前版本: 0.3.60)
+# LangChain核心库 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langchain/blob/master/libs/core/LICENSE
-langchain-core==0.3.60
+langchain-core==1.2.7
 
-# LangChain实验性功能 - MIT许可证 (当前版本: 0.3.4)
-# https://github.com/langchain-ai/langchain/blob/master/libs/experimental/LICENSE
-langchain-experimental==0.3.4
+# LangChain实验性功能 - MIT许可证 (已移除 - 项目未使用)
+# 注意：langchain-experimental 尚未适配 v1.x 生态
+# 如需使用请取消注释并确保版本兼容
+# langchain-experimental>=0.4.0
 
-# LangGraph检查点 - MIT许可证 (当前版本: 2.0.26)
+# LangGraph检查点 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langgraph/blob/main/libs/checkpoint/LICENSE
-langgraph-checkpoint==2.0.26
+langgraph-checkpoint==4.0.0
 
-# LangGraph预构建组件 - MIT许可证 (当前版本: 0.2.2)
+# LangGraph预构建组件 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langgraph/blob/main/libs/prebuilt/LICENSE
-langgraph-prebuilt==0.2.2
+langgraph-prebuilt==1.0.6
 
-# LangGraph SDK - MIT许可证 (当前版本: 0.1.70)
+# LangGraph SDK - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langgraph/blob/main/libs/sdk-py/LICENSE
-langgraph-sdk==0.1.70
+langgraph-sdk>=0.2.0
 
-# LangSmith开发平台 - MIT许可证 (当前版本: 0.3.45)
+# LangSmith开发平台 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langsmith/blob/main/LICENSE
-langsmith==0.3.45
+langsmith>=0.3.45,<1.0.0
 
-# LangGraph SQLite检查点 - MIT许可证 (当前版本: 2.0.10)
+# LangGraph SQLite检查点 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langgraph/blob/main/libs/checkpoint-sqlite/LICENSE
-langgraph-checkpoint-sqlite==2.0.10
+langgraph-checkpoint-sqlite==3.0.2
 
-# LangGraph PostgreSQL检查点 - MIT许可证
+# LangGraph PostgreSQL检查点 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langgraph/blob/main/libs/checkpoint-postgres/LICENSE
-langgraph-checkpoint-postgres==2.0.17
+langgraph-checkpoint-postgres==3.0.3
 
 # PostgreSQL数据库驱动 - LGPL许可证
 # psycopg2-binary: Django ORM 使用
@@ -96,26 +97,26 @@ langgraph-checkpoint-postgres==2.0.17
 psycopg2-binary==2.9.10
 psycopg[binary]==3.3.1
 
-# LangChain MCP适配器 - MIT许可证 (当前版本: 0.1.9)
+# LangChain MCP适配器 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langchain-mcp-adapters/blob/main/LICENSE
-langchain-mcp-adapters==0.1.9
+langchain-mcp-adapters==0.2.1
 
 # Excel文件处理 - MIT许可证 (当前版本: 3.1.5)
 # https://github.com/theorchard/openpyxl/blob/master/LICENCE.rst
 openpyxl==3.1.5
 
 # 知识库依赖
-# LangChain社区库 - MIT许可证 (当前版本: 0.3.24)
+# LangChain社区库 - MIT许可证 (最新稳定版)
 # https://github.com/langchain-ai/langchain/blob/master/libs/community/LICENSE
-langchain-community==0.3.24
+langchain-community==0.4.1
 
-# 文本分割器 - MIT许可证 (当前版本: 0.3.8)
+# 文本分割器 - MIT许可证 (最新稳定版)
 # https://github.com/langchain-ai/langchain/blob/master/libs/text-splitters/LICENSE
-langchain-text-splitters==0.3.8
+langchain-text-splitters==1.1.0
 
-# Qdrant向量数据库 - Apache 2.0许可证
+# Qdrant向量数据库 - Apache 2.0许可证 (v1.x 重大升级)
 # https://github.com/qdrant/qdrant-client/blob/master/LICENSE
-langchain-qdrant==0.2.1
+langchain-qdrant==1.0.0
 
 # Qdrant客户端 - Apache 2.0许可证
 # https://github.com/qdrant/qdrant-client/blob/master/LICENSE
@@ -164,13 +165,13 @@ fastembed>=0.7.0,<1.0
 # # https://github.com/langchain-ai/langchain/blob/master/libs/partners/mistralai/LICENSE
 # langchain-mistralai==0.2.4
 
-# Ollama本地模型支持 - MIT许可证 (当前版本: 0.2.2)
+# Ollama本地模型支持 - MIT许可证 (v1.x 重大升级)
 # https://github.com/langchain-ai/langchain/blob/master/libs/partners/ollama/LICENSE
-langchain-ollama==0.2.2
+langchain-ollama==1.0.1
 
-# Ollama客户端 - MIT许可证 (当前版本: 0.4.7)
+# Ollama客户端 - MIT许可证 (v1.x 重大升级)
 # https://github.com/ollama/ollama-python/blob/main/LICENSE
-ollama==0.4.7
+ollama>=0.6.0
 
 # HTML/XML解析器 - MIT许可证 (当前版本: 4.13.3)
 # https://github.com/wention/BeautifulSoup4/blob/master/LICENSE

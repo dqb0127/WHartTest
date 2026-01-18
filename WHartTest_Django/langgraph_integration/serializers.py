@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import LLMConfig
+from .models import LLMConfig, UserToolApproval
 
 
 class LLMConfigSerializer(serializers.ModelSerializer):
@@ -11,8 +11,9 @@ class LLMConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = LLMConfig
         fields = [
-            'id', 'config_name', 'provider', 'name', 'api_url', 'api_key', 'system_prompt', 
-            'supports_vision', 'context_limit', 'is_active', 'created_at', 'updated_at'
+            'id', 'config_name', 'provider', 'name', 'api_url', 'api_key', 'system_prompt',
+            'supports_vision', 'context_limit', 'enable_summarization', 'enable_hitl',
+            'enable_streaming', 'is_active', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
         extra_kwargs = {
@@ -81,3 +82,46 @@ class LLMConfigSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """更新LLM配置"""
         return super().update(instance, validated_data)
+
+
+class UserToolApprovalSerializer(serializers.ModelSerializer):
+    """用户工具审批偏好序列化器"""
+
+    class Meta:
+        model = UserToolApproval
+        fields = [
+            'id', 'tool_name', 'policy', 'scope', 'session_id',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_tool_name(self, value):
+        """验证工具名称"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("工具名称不能为空")
+        return value.strip()
+
+    def validate(self, attrs):
+        """全局验证"""
+        scope = attrs.get('scope', 'permanent')
+        session_id = attrs.get('session_id')
+
+        # 如果是会话级别偏好，必须提供 session_id
+        if scope == 'session' and not session_id:
+            raise serializers.ValidationError({
+                'session_id': '会话级别偏好必须提供 session_id'
+            })
+
+        return attrs
+
+
+class UserToolApprovalBatchSerializer(serializers.Serializer):
+    """批量更新用户工具审批偏好"""
+
+    tool_name = serializers.CharField(max_length=100)
+    policy = serializers.ChoiceField(choices=UserToolApproval.POLICY_CHOICES)
+    scope = serializers.ChoiceField(
+        choices=UserToolApproval.SCOPE_CHOICES,
+        default='permanent'
+    )
+    session_id = serializers.CharField(max_length=255, required=False, allow_null=True)

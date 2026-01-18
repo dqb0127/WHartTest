@@ -23,6 +23,17 @@ class RemoteMCPConfig(models.Model):
         help_text="可选的认证头，例如 {'Authorization': 'Bearer YOUR_TOKEN'}"
     )
     is_active = models.BooleanField(default=True, help_text="是否启用此远程 MCP 服务器")
+
+    # HITL 配置
+    require_hitl = models.BooleanField(
+        default=False,
+        help_text="是否对该 MCP 的所有工具启用人工审批"
+    )
+    hitl_tools = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="需要人工审批的工具列表（为空时表示所有工具），例如 ['playwright_click', 'playwright_fill']"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -47,3 +58,62 @@ class RemoteMCPConfig(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean() # Call full_clean to run all validations including clean()
         super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        # 删除 MCP 时，级联删除关联的工具记录
+        self.tools.all().delete()
+        super().delete(*args, **kwargs)
+
+
+class MCPTool(models.Model):
+    """
+    存储 MCP 服务器的工具信息
+
+    当 MCP 配置激活或手动同步时，从远程服务器获取工具列表并存入此表。
+    支持工具级别的 HITL 审批配置。
+    """
+    mcp_config = models.ForeignKey(
+        RemoteMCPConfig,
+        on_delete=models.CASCADE,
+        related_name='tools',
+        help_text="关联的 MCP 配置"
+    )
+    name = models.CharField(max_length=255, help_text="工具名称")
+    description = models.TextField(blank=True, default='', help_text="工具描述")
+    input_schema = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="工具的输入参数 JSON Schema"
+    )
+
+    # 工具级别的 HITL 配置（优先级高于 MCP 级别）
+    require_hitl = models.BooleanField(
+        default=None,
+        null=True,
+        blank=True,
+        help_text="是否需要人工审批（None 表示继承 MCP 配置）"
+    )
+
+    synced_at = models.DateTimeField(auto_now=True, help_text="上次同步时间")
+
+    class Meta:
+        verbose_name = "MCP 工具"
+        verbose_name_plural = "MCP 工具"
+        unique_together = ['mcp_config', 'name']
+        ordering = ['mcp_config', 'name']
+
+    def __str__(self):
+        return f"{self.mcp_config.name}:{self.name}"
+
+    @property
+    def effective_require_hitl(self) -> bool:
+        """获取有效的 HITL 配置（工具级别优先，否则继承 MCP 级别）"""
+        if self.require_hitl is not None:
+            return self.require_hitl
+        # 检查是否在 MCP 的 hitl_tools 列表中
+        if self.mcp_config.require_hitl:
+            if not self.mcp_config.hitl_tools:
+                # 空列表表示所有工具都需要审批
+                return True
+            return self.name in self.mcp_config.hitl_tools
+        return False

@@ -940,6 +940,12 @@ const formatToolMessage = (content: string) => {
   color: #666;
 }
 
+.message-bubble :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
 /* 用户消息中的引用样式 - 适配蓝色背景 */
 .user-message .message-bubble :deep(blockquote) {
   border-left-color: rgba(255, 255, 255, 0.5);

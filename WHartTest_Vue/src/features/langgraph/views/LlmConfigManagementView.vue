@@ -63,7 +63,9 @@ import {
 import type { PaginationProps } from '@arco-design/web-vue';
 import { useProjectStore } from '@/store/projectStore';
 import { useLlmConfigRefresh } from '@/composables/useLlmConfigRefresh';
+import { useRouter } from 'vue-router';
 
+const router = useRouter();
 const projectStore = useProjectStore();
 const { triggerLlmConfigRefresh } = useLlmConfigRefresh();
 

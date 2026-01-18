@@ -2,18 +2,7 @@
   <div class="chat-header-container">
     <div class="chat-header">
       <div class="chat-actions">
-        <!-- ⭐大脑模式下隐藏流式开关 -->
-        <div v-if="!brainMode" class="stream-toggle">
-          <span class="toggle-label">流式输出</span>
-          <a-switch
-            :model-value="isStreamMode"
-            @update:model-value="(value: string | number | boolean) => $emit('update:is-stream-mode', Boolean(value))"
-            size="small"
-          />
-        </div>
-
-        <!-- ⭐大脑模式下隐藏知识库开关 -->
-        <div v-if="!brainMode" class="kb-toggle">
+        <div class="kb-toggle">
           <span class="kb-icon">📚</span>
           <span class="toggle-label">知识库</span>
           <a-switch
@@ -23,8 +12,7 @@
           />
         </div>
 
-        <!-- ⭐大脑模式下隐藏提示词选择器 -->
-        <div v-if="!brainMode" class="prompt-selector">
+        <div class="prompt-selector">
           <span class="prompt-label">提示词：</span>
           <a-select
             v-model="selectedPromptId"
@@ -47,23 +35,27 @@
           </a-select>
         </div>
 
-        <!-- ⭐大脑模式下隐藏管理提示词按钮 -->
-        <a-button v-if="!brainMode" type="text" @click="$emit('show-system-prompt')">
+        <a-button type="text" @click="$emit('show-system-prompt')">
           <template #icon>
             <i class="icon-settings"></i>
           </template>
           管理提示词
         </a-button>
-        
-        <!-- LLM配置按钮 -->
-        <a-button v-if="!brainMode" type="text" @click="goToLlmConfigs">
+
+        <a-button type="text" @click="goToLlmConfigs">
           <template #icon>
             <icon-settings />
           </template>
           LLM配置
         </a-button>
-        
-        <a-tag v-if="sessionId" color="green">会话ID: {{ sessionIdShort }}</a-tag>
+
+        <a-button type="text" @click="$emit('show-tool-approval-settings')">
+          <template #icon>
+            <icon-thunderbolt />
+          </template>
+          工具审批
+        </a-button>
+
         <a-button v-if="hasMessages" type="text" status="danger" @click="$emit('clear-chat')">
           <template #icon>
             <icon-delete style="color: #f53f3f;" />
@@ -73,8 +65,7 @@
       </div>
     </div>
 
-    <!-- ⭐大脑模式下隐藏知识库设置面板 -->
-    <div v-if="useKnowledgeBase && !brainMode" class="kb-settings-panel">
+    <div v-if="useKnowledgeBase" class="kb-settings-panel">
       <KnowledgeBaseSelector
         :project-id="projectId"
         :use-knowledge-base="useKnowledgeBase"
@@ -96,7 +87,7 @@
 import { computed, ref, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { Button as AButton, Tag as ATag, Switch as ASwitch, Select as ASelect, Option as AOption } from '@arco-design/web-vue';
-import { IconDelete, IconSettings } from '@arco-design/web-vue/es/icon';
+import { IconDelete, IconSettings, IconThunderbolt } from '@arco-design/web-vue/es/icon';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import { getUserPrompts, getDefaultPrompt } from '@/features/prompts/services/promptService';
 import type { UserPrompt } from '@/features/prompts/types/prompt';
@@ -105,7 +96,6 @@ const router = useRouter();
 
 interface Props {
   sessionId: string;
-  isStreamMode: boolean;
   hasMessages: boolean;
   projectId: number | null;
   useKnowledgeBase: boolean;
@@ -113,29 +103,20 @@ interface Props {
   similarityThreshold: number;
   topK: number;
   selectedPromptId: number | null;
-  brainMode?: boolean; // ⭐大脑模式
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  brainMode: false
-});
+const props = defineProps<Props>();
 
 const emit = defineEmits<{
-  (e: 'update:is-stream-mode', value: boolean): void;
   (e: 'clear-chat'): void;
   (e: 'show-system-prompt'): void;
+  (e: 'show-tool-approval-settings'): void;
   (e: 'update:use-knowledge-base', value: boolean): void;
   (e: 'update:selected-knowledge-base-id', value: string | null): void;
   (e: 'update:similarity-threshold', value: number): void;
   (e: 'update:top-k', value: number): void;
   (e: 'update:selected-prompt-id', value: number | null): void;
 }>();
-
-// 截断会话ID以便展示
-const sessionIdShort = computed(() => {
-  if (!props.sessionId) return '';
-  return props.sessionId.length > 8 ? `${props.sessionId.substring(0, 8)}...` : props.sessionId;
-});
 
 // 跳转到LLM配置页面
 const goToLlmConfigs = () => {
@@ -169,31 +150,19 @@ const loadUserPrompts = async () => {
       } else if (promptsResponse.data.results) {
         allPrompts = promptsResponse.data.results;
       }
-      
-      // 🆕 过滤：只显示 general 和 brain_orchestrator 类型的提示词
-      const allowedTypes = ['general', 'brain_orchestrator'];
-      allPrompts = allPrompts.filter(prompt => 
-        allowedTypes.includes(prompt.prompt_type || 'general')
+
+      // 过滤：只显示 general 类型的提示词
+      allPrompts = allPrompts.filter(prompt =>
+        (prompt.prompt_type || 'general') === 'general'
       );
-      
-      // 🆕 在前端手动排序：默认提示词在前，然后按类型和名称排序
+
+      // 排序：默认提示词在前，然后按名称排序
       userPrompts.value = allPrompts.sort((a, b) => {
         // 第一级：按 is_default 排序，默认的在前
         if (a.is_default && !b.is_default) return -1;
         if (!a.is_default && b.is_default) return 1;
-        
-        // 第二级：按提示词类型排序，通用对话类型在前，智能规划在后
-        const getTypeSort = (type: string) => {
-          if (type === 'general') return 1; // 通用对话类型
-          if (type === 'brain_orchestrator') return 2; // 智能规划类型
-          return 3; // 其他类型(理论上不会出现)
-        };
-        
-        const aTypeSort = getTypeSort(a.prompt_type || 'general');
-        const bTypeSort = getTypeSort(b.prompt_type || 'general');
-        if (aTypeSort !== bTypeSort) return aTypeSort - bTypeSort;
-        
-        // 第三级：按名称排序
+
+        // 第二级：按名称排序
         return a.name.localeCompare(b.name);
       });
       console.log('📋 ChatHeader加载到的提示词列表:', userPrompts.value.map(p => ({ id: p.id, name: p.name, isDefault: p.is_default, type: p.prompt_type })));
@@ -335,7 +304,6 @@ defineExpose({
   }
 }
 
-.stream-toggle,
 .kb-toggle {
   display: flex;
   align-items: center;

@@ -1,9 +1,17 @@
 """
 模型上下文限制配置和检测
+
+支持两种数据源：
+1. LangChain Model Profiles (v1.1+) - 优先使用，数据来自 models.dev
+2. 手动配置 MODEL_CONTEXT_LIMITS - 后备方案，用于代理服务/自定义模型
 """
 
 import tiktoken
 import logging
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +159,53 @@ class ContextLimitChecker:
 
 # 全局实例
 context_checker = ContextLimitChecker()
+
+
+def get_context_limit_from_llm(llm: "BaseChatModel", fallback_model_name: Optional[str] = None) -> int:
+    """
+    从 LLM 实例获取上下文限制（Model Profiles 优先）
+
+    LangChain v1.1+ 支持 Model Profiles，提供 max_input_tokens 等元数据。
+    对于代理服务或自定义模型，profile 可能为空，此时使用手动配置后备。
+
+    Args:
+        llm: LangChain Chat Model 实例
+        fallback_model_name: 后备查询的模型名（如果 profile 为空）
+
+    Returns:
+        int: 上下文 Token 限制
+    """
+    profile = getattr(llm, 'profile', None)
+    if profile and isinstance(profile, dict):
+        max_input_tokens = profile.get('max_input_tokens')
+        if max_input_tokens and isinstance(max_input_tokens, int):
+            logger.debug("从 Model Profile 获取上下文限制: %d", max_input_tokens)
+            return max_input_tokens
+
+    # Profile 为空或无效，使用后备配置
+    model_name = fallback_model_name or getattr(llm, 'model_name', None) or getattr(llm, 'model', 'gpt-4o')
+    limit = context_checker.get_context_limit(model_name)
+    logger.debug("Model Profile 不可用，使用后备配置 (%s): %d", model_name, limit)
+    return limit
+
+
+def get_vision_support_from_llm(llm: "BaseChatModel", fallback: bool = False) -> bool:
+    """
+    从 LLM 实例获取是否支持图片输入
+
+    Args:
+        llm: LangChain Chat Model 实例
+        fallback: Profile 不可用时的默认值
+
+    Returns:
+        bool: 是否支持图片输入
+    """
+    profile = getattr(llm, 'profile', None)
+    if profile and isinstance(profile, dict):
+        image_inputs = profile.get('image_inputs')
+        if isinstance(image_inputs, bool):
+            return image_inputs
+    return fallback
 
 def check_document_context_limit(content: str, model_name: str = None) -> dict:
     """检查文档是否超过上下文限制的便捷函数"""

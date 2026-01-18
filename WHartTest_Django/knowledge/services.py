@@ -57,7 +57,7 @@ import logging
 import requests
 import uuid
 from typing import List, Optional, Dict
-from langchain.embeddings.base import Embeddings
+from langchain_core.embeddings import Embeddings
 
 # 尝试导入 FastEmbed 用于 BM25 稀疏编码
 # 注意：需要在导入前临时禁用离线模式

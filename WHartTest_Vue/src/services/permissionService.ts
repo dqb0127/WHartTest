@@ -127,6 +127,9 @@ export const getPermissionList = async (params?: PaginationParams): Promise<Perm
         if (statusCode === 401) {
           errorMessage = '登录已过期，请重新登录';
           authStore.logout();
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
         }
       } else if (error.request) {
         errorMessage = '网络连接超时或服务器无响应';
@@ -264,6 +267,9 @@ export const getUserPermissions = async (userId: number): Promise<PermissionList
         if (statusCode === 401) {
           errorMessage = '登录已过期，请重新登录';
           authStore.logout();
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
         }
       } else if (error.request) {
         errorMessage = '网络连接超时或服务器无响应';
@@ -341,6 +347,9 @@ export const getGroupPermissions = async (groupId: number): Promise<PermissionLi
         if (statusCode === 401) {
           errorMessage = '登录已过期，请重新登录';
           authStore.logout();
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
         }
       } else if (error.request) {
         errorMessage = '网络连接超时或服务器无响应';
@@ -423,6 +432,9 @@ export const removePermissionFromUser = async (permissionId: number, userId: num
         if (statusCode === 401) {
           errorMessage = '登录已过期，请重新登录';
           authStore.logout();
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
         }
       } else if (error.request) {
         errorMessage = '网络连接超时或服务器无响应';
@@ -504,6 +516,9 @@ export const assignPermissionToGroup = async (permissionId: number, groupId: num
         if (statusCode === 401) {
           errorMessage = '登录已过期，请重新登录';
           authStore.logout();
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
         }
       } else if (error.request) {
         errorMessage = '网络连接超时或服务器无响应';
@@ -585,6 +600,9 @@ export const removePermissionFromGroup = async (permissionId: number, groupId: n
         if (statusCode === 401) {
           errorMessage = '登录已过期，请重新登录';
           authStore.logout();
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
         }
       } else if (error.request) {
         errorMessage = '网络连接超时或服务器无响应';
@@ -660,6 +678,9 @@ export const assignPermissionToUser = async (permissionId: number, userId: numbe
         if (statusCode === 401) {
           errorMessage = '登录已过期，请重新登录';
           authStore.logout();
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
         }
       } else if (error.request) {
         errorMessage = '网络连接超时或服务器无响应';

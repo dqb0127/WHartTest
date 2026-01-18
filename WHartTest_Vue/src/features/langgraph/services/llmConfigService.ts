@@ -224,3 +224,27 @@ export async function testLlmConnection(id: number): Promise<ApiResponse<{ statu
  * 获取所有可用的供应商选项
  */
 // getProviders API 已废弃: 前端不再支持多供应商选择，仅保留 openai_compatible。如果需要恢复，可实现该函数并返回 provider 列表。
+
+/**
+ * 获取当前激活的 LLM 配置
+ */
+export async function getActiveLlmConfig(): Promise<ApiResponse<LlmConfig | null>> {
+  const response = await listLlmConfigs();
+  if (response.status === 'success' && response.data) {
+    const activeConfig = response.data.find(config => config.is_active);
+    return {
+      status: 'success',
+      code: 200,
+      message: 'success',
+      data: activeConfig || null,
+      errors: null
+    };
+  }
+  return {
+    status: 'error',
+    code: response.code,
+    message: response.message,
+    data: null,
+    errors: response.errors
+  };
+}
