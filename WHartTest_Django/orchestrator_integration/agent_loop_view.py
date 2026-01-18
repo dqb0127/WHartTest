@@ -94,6 +94,19 @@ class AgentLoopStreamAPIView(View):
     # 最大步骤数（用于前端显示）
     MAX_STEPS = 500
 
+    def _update_session_token_usage(self, session_id: str, input_tokens: int, output_tokens: int):
+        """更新会话的 Token 使用统计"""
+        try:
+            from django.db.models import F
+            ChatSession.objects.filter(session_id=session_id).update(
+                total_input_tokens=F('total_input_tokens') + input_tokens,
+                total_output_tokens=F('total_output_tokens') + output_tokens,
+                total_tokens=F('total_tokens') + input_tokens + output_tokens,
+                request_count=F('request_count') + 1,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update session token usage: {e}")
+
     async def authenticate_request(self, request):
         """JWT 认证"""
         auth_header = request.META.get('HTTP_AUTHORIZATION')
@@ -483,6 +496,20 @@ class AgentLoopStreamAPIView(View):
                             'context_token_count': total_tokens,
                             'context_limit': context_limit
                         })
+
+                        # 记录 Token 使用量到 ChatSession
+                        input_tokens = 0
+                        output_tokens = 0
+                        for msg in all_messages:
+                            if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
+                                input_tokens += msg.usage_metadata.get('input_tokens', 0)
+                                output_tokens += msg.usage_metadata.get('output_tokens', 0)
+
+                        if input_tokens > 0 or output_tokens > 0:
+                            await sync_to_async(self._update_session_token_usage)(
+                                session_id, input_tokens, output_tokens
+                            )
+                            logger.info(f"AgentLoopStreamAPI: Token usage recorded - input={input_tokens}, output={output_tokens}")
                     except Exception as e:
                         logger.warning(f"AgentLoopStreamAPI: Failed to calculate token count: {e}")
 
@@ -1058,6 +1085,20 @@ class AgentLoopResumeAPIView(View):
                             'context_token_count': total_tokens,
                             'context_limit': context_limit
                         })
+
+                        # 记录 Token 使用量到 ChatSession
+                        input_tokens = 0
+                        output_tokens = 0
+                        for msg in all_messages:
+                            if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
+                                input_tokens += msg.usage_metadata.get('input_tokens', 0)
+                                output_tokens += msg.usage_metadata.get('output_tokens', 0)
+
+                        if input_tokens > 0 or output_tokens > 0:
+                            await sync_to_async(AgentLoopStreamAPIView()._update_session_token_usage)(
+                                session_id, input_tokens, output_tokens
+                            )
+                            logger.info(f"AgentLoopResumeAPI: Token usage recorded - input={input_tokens}, output={output_tokens}")
                     except Exception as e:
                         logger.warning(f"AgentLoopResumeAPI: Failed to calculate token count: {e}")
 

@@ -694,3 +694,97 @@ export const getProjectStatistics = async (projectId: number): Promise<ProjectSt
     };
   }
 };
+
+// Token 使用统计接口
+export interface TokenUsageStats {
+  period: {
+    start_date: string;
+    end_date: string;
+    group_by: string;
+  };
+  total: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    request_count: number;
+    session_count: number;
+  };
+  by_user: Array<{
+    user_id: number;
+    username: string;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    request_count: number;
+    session_count: number;
+  }>;
+  by_time: Array<{
+    period: string;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    request_count: number;
+    session_count: number;
+  }>;
+}
+
+interface TokenUsageStatsResponse {
+  success: boolean;
+  data?: TokenUsageStats;
+  error?: string;
+  statusCode?: number;
+}
+
+/**
+ * 获取 Token 使用统计
+ * @param params 查询参数
+ * @returns 返回一个Promise，解析为 Token 使用统计数据
+ */
+export const getTokenUsageStats = async (params?: {
+  start_date?: string;
+  end_date?: string;
+  group_by?: 'day' | 'week' | 'month';
+  user_id?: number;
+}): Promise<TokenUsageStatsResponse> => {
+  const authStore = useAuthStore();
+  const accessToken = authStore.getAccessToken;
+
+  if (!accessToken) {
+    return {
+      success: false,
+      error: '未登录或会话已过期',
+    };
+  }
+
+  try {
+    const response = await axios.get(`${API_BASE_URL}/lg/token-usage/`, {
+      params,
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    });
+
+    // API 返回格式为 { status: 'success', code: 200, data: {...} }
+    if (response.data && response.data.status === 'success' && response.data.data) {
+      return {
+        success: true,
+        data: response.data.data,
+        statusCode: response.data.code,
+      };
+    } else {
+      return {
+        success: false,
+        error: response.data?.message || '获取 Token 统计数据失败',
+      };
+    }
+  } catch (error: any) {
+    console.error('获取 Token 统计数据出错:', error);
+    return {
+      success: false,
+      error: error.response?.data?.error || error.message || '获取 Token 统计数据时发生错误',
+      statusCode: error.response?.status,
+    };
+  }
+};

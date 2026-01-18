@@ -2365,3 +2365,140 @@ class UserToolApprovalViewSet(viewsets.ModelViewSet):
             'message': f'已重置 {count} 条审批偏好',
             'deleted_count': count
         })
+
+
+class TokenUsageStatsAPIView(APIView):
+    """
+    Token 使用统计 API
+
+    提供按用户和按时间维度的 Token 使用量统计。
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        获取 Token 使用统计
+
+        查询参数：
+        - start_date: 开始日期 (YYYY-MM-DD)
+        - end_date: 结束日期 (YYYY-MM-DD)
+        - group_by: 分组方式 (day/week/month)，默认 day
+        - user_id: 指定用户ID（仅管理员可用）
+        """
+        from django.db.models import Sum, Count
+        from django.db.models.functions import TruncDate, TruncWeek, TruncMonth
+        from datetime import datetime, timedelta
+
+        user = request.user
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        group_by = request.query_params.get('group_by', 'day')
+        target_user_id = request.query_params.get('user_id')
+
+        # 权限检查：只有管理员可以查看其他用户的统计
+        if target_user_id and not user.is_superuser:
+            return Response(
+                {'error': '无权查看其他用户的统计信息'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # 解析日期
+        try:
+            if start_date_str:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            else:
+                start_date = (timezone.now() - timedelta(days=30)).date()
+
+            if end_date_str:
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            else:
+                end_date = timezone.now().date()
+        except ValueError:
+            return Response(
+                {'error': '日期格式错误，请使用 YYYY-MM-DD'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 构建查询
+        queryset = ChatSession.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date
+        )
+
+        if target_user_id:
+            queryset = queryset.filter(user_id=target_user_id)
+        elif not user.is_superuser:
+            queryset = queryset.filter(user=user)
+
+        # 用户维度统计
+        user_stats = queryset.values('user__username', 'user_id').annotate(
+            total_input=Sum('total_input_tokens'),
+            total_output=Sum('total_output_tokens'),
+            total_tokens=Sum('total_tokens'),
+            total_requests=Sum('request_count'),
+            session_count=Count('id')
+        ).order_by('-total_tokens')
+
+        # 时间维度统计
+        trunc_func = {
+            'day': TruncDate,
+            'week': TruncWeek,
+            'month': TruncMonth
+        }.get(group_by, TruncDate)
+
+        time_stats = queryset.annotate(
+            period=trunc_func('created_at')
+        ).values('period').annotate(
+            total_input=Sum('total_input_tokens'),
+            total_output=Sum('total_output_tokens'),
+            total_tokens=Sum('total_tokens'),
+            total_requests=Sum('request_count'),
+            session_count=Count('id')
+        ).order_by('period')
+
+        # 总计统计
+        total_stats = queryset.aggregate(
+            total_input=Sum('total_input_tokens'),
+            total_output=Sum('total_output_tokens'),
+            total_tokens=Sum('total_tokens'),
+            total_requests=Sum('request_count'),
+            session_count=Count('id')
+        )
+
+        return Response({
+            'period': {
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat(),
+                'group_by': group_by
+            },
+            'total': {
+                'input_tokens': total_stats['total_input'] or 0,
+                'output_tokens': total_stats['total_output'] or 0,
+                'total_tokens': total_stats['total_tokens'] or 0,
+                'request_count': total_stats['total_requests'] or 0,
+                'session_count': total_stats['session_count'] or 0
+            },
+            'by_user': [
+                {
+                    'user_id': item['user_id'],
+                    'username': item['user__username'],
+                    'input_tokens': item['total_input'] or 0,
+                    'output_tokens': item['total_output'] or 0,
+                    'total_tokens': item['total_tokens'] or 0,
+                    'request_count': item['total_requests'] or 0,
+                    'session_count': item['session_count'] or 0
+                }
+                for item in user_stats
+            ],
+            'by_time': [
+                {
+                    'period': item['period'].isoformat() if item['period'] else None,
+                    'input_tokens': item['total_input'] or 0,
+                    'output_tokens': item['total_output'] or 0,
+                    'total_tokens': item['total_tokens'] or 0,
+                    'request_count': item['total_requests'] or 0,
+                    'session_count': item['session_count'] or 0
+                }
+                for item in time_stats
+            ]
+        })

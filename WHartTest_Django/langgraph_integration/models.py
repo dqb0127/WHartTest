@@ -87,12 +87,23 @@ class ChatSession(models.Model):
     实际聊天数据存储在 chat_history.sqlite 中，此模型仅用于Django权限系统
     """
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, verbose_name="用户")
-    session_id = models.CharField(max_length=255, unique=True, verbose_name="会话ID", 
+    session_id = models.CharField(max_length=255, unique=True, verbose_name="会话ID",
                                   help_text="LangGraph会话的唯一标识符")
     title = models.CharField(max_length=200, verbose_name="对话标题", default="新对话")
     project = models.ForeignKey('projects.Project', on_delete=models.CASCADE, null=True, blank=True, verbose_name="关联项目")
     prompt = models.ForeignKey('prompts.UserPrompt', on_delete=models.SET_NULL, null=True, blank=True,
                                verbose_name="关联提示词", help_text="该会话使用的提示词")
+
+    # Token 使用统计
+    total_input_tokens = models.BigIntegerField(default=0, verbose_name="累计输入 Token",
+                                                help_text="该会话累计消耗的输入 Token 数")
+    total_output_tokens = models.BigIntegerField(default=0, verbose_name="累计输出 Token",
+                                                 help_text="该会话累计消耗的输出 Token 数")
+    total_tokens = models.BigIntegerField(default=0, verbose_name="累计总 Token",
+                                          help_text="该会话累计消耗的总 Token 数（输入+输出）")
+    request_count = models.IntegerField(default=0, verbose_name="请求次数",
+                                        help_text="该会话的 LLM 请求次数")
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 

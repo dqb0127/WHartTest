@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     LLMConfigViewSet, ChatAPIView, ChatHistoryAPIView, UserChatSessionsAPIView,
     ChatResumeAPIView, KnowledgeRAGAPIView, ProviderChoicesAPIView, ChatBatchDeleteAPIView,
-    UserToolApprovalViewSet
+    UserToolApprovalViewSet, TokenUsageStatsAPIView
 )
 
 # Create a router and register our viewsets with it.
@@ -21,5 +21,6 @@ urlpatterns = [
     path('chat/history/', ChatHistoryAPIView.as_view(), name='chat_history_api'),
     path('chat/sessions/', UserChatSessionsAPIView.as_view(), name='user_chat_sessions_api'),
     path('chat/batch-delete/', ChatBatchDeleteAPIView.as_view(), name='chat_batch_delete_api'),
+    path('token-usage/', TokenUsageStatsAPIView.as_view(), name='token_usage_stats_api'),
     path('knowledge/rag/', KnowledgeRAGAPIView.as_view(), name='knowledge_rag_api'),
 ]
