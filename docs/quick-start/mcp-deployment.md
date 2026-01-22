@@ -41,7 +41,7 @@ uv pip install -r requirements.txt
 - **API地址**: 后端服务ip+端口
 - **API密钥**: 已内置在代码中
 
-### 3. 启动服务
+### 2. 启动服务
 
 #### 启动测试用例工具
 
@@ -49,7 +49,6 @@ uv pip install -r requirements.txt
 uv run python WHartTest_tools.py
 ```
 
-服务将在 `http://0.0.0.0:8006` 启动
 
 ## 功能说明
 
@@ -61,6 +60,13 @@ uv run python WHartTest_tools.py
 - 获取用例列表和详情
 - 保存操作截图
 - 保存功能测试用例
+## 配置说明
+
+#### WHartTest 测试用例工具 (WHartTest_tools.py)
+
+- **服务端口**: 8006
+- **API地址**: 后端服务ip+端口
+- **API密钥**: 已内置在代码中
 
 ## 注意事项
 
