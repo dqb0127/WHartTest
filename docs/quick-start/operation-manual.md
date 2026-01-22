@@ -4,6 +4,11 @@
 **1、** docker部署会自动化初始化一些配置，只需要配置系统管理-LLM配置-填写对应的大模型配置。
 
 **2、** docker部署后需要访问：http://localhost:8917/ 下载对应的 bge-m3 、bge-reranker-v2-m3。具体看下方知识库配置。
+```bash
+# 下载模型命令
+curl -X POST http://localhost:8917/v1/models -d "{\"model_name\": \"bge-reranker-v2-m3\", \"model_type\": \"rerank\"}"
+curl -X POST http://localhost:8917/v1/models -d "{\"model_name\": \"bge-m3\", \"model_type\": \"embedding\"}"
+```
 
 
 ## 1. 登录
