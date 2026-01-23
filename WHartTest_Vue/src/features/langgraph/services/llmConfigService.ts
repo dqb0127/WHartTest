@@ -28,7 +28,7 @@ export async function listLlmConfigs(): Promise<ApiResponse<LlmConfig[]>> {
       code: 200,
       message: response.message || 'success',
       data: response.data!,
-      errors: null
+      errors: undefined
     };
   } else {
     return {
@@ -36,7 +36,7 @@ export async function listLlmConfigs(): Promise<ApiResponse<LlmConfig[]>> {
       code: 500,
       message: response.error || 'Failed to list LLM configs',
       data: null,
-      errors: { detail: response.error }
+      errors: { detail: [response.error || "Unknown error"] }
     };
   }
 }
@@ -59,7 +59,7 @@ export async function createLlmConfig(
       code: 201,
       message: response.message || 'LLM config created successfully',
       data: response.data!,
-      errors: null
+      errors: undefined
     };
   } else {
     return {
@@ -67,7 +67,7 @@ export async function createLlmConfig(
       code: 500,
       message: response.error || 'Failed to create LLM config',
       data: null,
-      errors: { detail: response.error }
+      errors: { detail: [response.error || "Unknown error"] }
     };
   }
 }
@@ -87,7 +87,7 @@ export async function getLlmConfigDetails(id: number): Promise<ApiResponse<LlmCo
       code: 200,
       message: response.message || 'success',
       data: response.data!,
-      errors: null
+      errors: undefined
     };
   } else {
     return {
@@ -95,7 +95,7 @@ export async function getLlmConfigDetails(id: number): Promise<ApiResponse<LlmCo
       code: 500,
       message: response.error || 'Failed to get LLM config details',
       data: null,
-      errors: { detail: response.error }
+      errors: { detail: [response.error || "Unknown error"] }
     };
   }
 }
@@ -119,7 +119,7 @@ export async function updateLlmConfig(
       code: 200,
       message: response.message || 'LLM config updated successfully',
       data: response.data!,
-      errors: null
+      errors: undefined
     };
   } else {
     return {
@@ -127,7 +127,7 @@ export async function updateLlmConfig(
       code: 500,
       message: response.error || 'Failed to update LLM config',
       data: null,
-      errors: { detail: response.error }
+      errors: { detail: [response.error || "Unknown error"] }
     };
   }
 }
@@ -151,7 +151,7 @@ export async function partialUpdateLlmConfig(
       code: 200,
       message: response.message || 'LLM config updated successfully',
       data: response.data!,
-      errors: null
+      errors: undefined
     };
   } else {
     return {
@@ -159,7 +159,7 @@ export async function partialUpdateLlmConfig(
       code: 500,
       message: response.error || 'Failed to update LLM config',
       data: null,
-      errors: { detail: response.error }
+      errors: { detail: [response.error || "Unknown error"] }
     };
   }
 }
@@ -179,7 +179,7 @@ export async function deleteLlmConfig(id: number): Promise<ApiResponse<null>> {
       code: 200,
       message: response.message || 'LLM configuration deleted successfully',
       data: null,
-      errors: null
+      errors: undefined
     };
   } else {
     return {
@@ -187,7 +187,7 @@ export async function deleteLlmConfig(id: number): Promise<ApiResponse<null>> {
       code: 500,
       message: response.error || 'Failed to delete LLM config',
       data: null,
-      errors: { detail: response.error }
+      errors: { detail: [response.error || "Unknown error"] }
     };
   }
 }
@@ -207,7 +207,7 @@ export async function testLlmConnection(id: number): Promise<ApiResponse<{ statu
       code: 200,
       message: response.data?.message || '连接测试成功',
       data: response.data!,
-      errors: null
+      errors: undefined
     };
   } else {
     return {
@@ -215,7 +215,7 @@ export async function testLlmConnection(id: number): Promise<ApiResponse<{ statu
       code: 500,
       message: response.error || '连接测试失败',
       data: null,
-      errors: { detail: response.error }
+      errors: { detail: [response.error || "Unknown error"] }
     };
   }
 }
@@ -243,7 +243,7 @@ export async function fetchModels(apiUrl?: string, apiKey?: string, configId?: n
       code: 200,
       message: `成功获取 ${response.data.models.length} 个模型`,
       data: response.data,
-      errors: null
+      errors: undefined
     };
   } else {
     return {
@@ -251,7 +251,7 @@ export async function fetchModels(apiUrl?: string, apiKey?: string, configId?: n
       code: 500,
       message: response.data?.message || response.error || '获取模型列表失败',
       data: null,
-      errors: { detail: response.error }
+      errors: { detail: [response.error || "Unknown error"] }
     };
   }
 }
