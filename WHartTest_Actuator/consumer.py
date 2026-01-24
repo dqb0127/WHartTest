@@ -59,6 +59,41 @@ class TaskConsumer:
         self.task_queue: asyncio.Queue[QueueModel] = asyncio.Queue()
         self._stop_event = asyncio.Event()
         self._current_user: Optional[str] = None
+
+        # 启动时清理过期文件（超过7天）
+        self._cleanup_expired_files(
+            getattr(config, 'screenshot_dir', './data/screenshots') if config else './data/screenshots',
+            getattr(config, 'trace_dir', './data/traces') if config else './data/traces',
+            max_age_days=7
+        )
+
+    def _cleanup_expired_files(self, screenshot_dir: str, trace_dir: str, max_age_days: int = 7):
+        """清理超过指定天数的本地临时文件"""
+        import os
+        from pathlib import Path
+
+        now = time.time()
+        max_age_seconds = max_age_days * 24 * 60 * 60
+        cleaned_count = 0
+
+        for directory in [screenshot_dir, trace_dir]:
+            dir_path = Path(directory)
+            if not dir_path.exists():
+                continue
+
+            for file_path in dir_path.iterdir():
+                if not file_path.is_file():
+                    continue
+                try:
+                    file_age = now - file_path.stat().st_mtime
+                    if file_age > max_age_seconds:
+                        file_path.unlink()
+                        cleaned_count += 1
+                except Exception as e:
+                    logger.warning(f"清理过期文件失败 {file_path}: {e}")
+
+        if cleaned_count > 0:
+            logger.info(f"已清理 {cleaned_count} 个超过 {max_age_days} 天的过期文件")
     
     async def _get_api_token(self) -> Optional[str]:
         """获取API认证token"""
@@ -137,33 +172,43 @@ class TaskConsumer:
             return None
     
     async def _process_result_screenshots(self, result: CaseResultModel) -> CaseResultModel:
-        """处理结果中的截图，转为 Base64 数据 URL"""
+        """处理结果中的截图，转为 Base64 数据 URL，并清理本地文件"""
+        import os
         for step in result.steps:
             if step.screenshot:
-                base64_url = await self._encode_screenshot_base64(step.screenshot)
+                local_path = step.screenshot
+                base64_url = await self._encode_screenshot_base64(local_path)
                 if base64_url:
                     step.screenshot = base64_url
+                    # 清理本地截图文件
+                    try:
+                        abs_path = os.path.abspath(local_path) if local_path.startswith('./') else local_path
+                        if os.path.exists(abs_path):
+                            os.remove(abs_path)
+                            logger.debug(f"已清理本地截图: {abs_path}")
+                    except Exception as e:
+                        logger.warning(f"清理截图失败: {e}")
                 else:
-                    step.screenshot = None  # 编码失败则清空
+                    step.screenshot = None
         return result
     
     async def _upload_trace_file(self, trace_path: str) -> Optional[str]:
-        """上传 Trace 文件到服务器
-        
+        """上传 Trace 文件到服务器，成功后清理本地文件
+
         Returns:
             服务器返回的相对路径（用于存储到数据库）
         """
         import os
-        
+
         if not trace_path or not os.path.exists(trace_path):
             logger.warning(f"Trace 文件不存在: {trace_path}")
             return None
-        
+
         token = await self._get_api_token()
         if not token:
             logger.error("无法获取 API Token，跳过 Trace 上传")
             return None
-        
+
         url = f"{self.api_base_url}/api/ui-automation/traces/upload/"
         try:
             async with httpx.AsyncClient() as client:
@@ -181,6 +226,12 @@ class TaskConsumer:
                         inner_data = resp_data.get('data', resp_data)
                         server_path = inner_data.get('path')
                         logger.info(f"Trace 上传成功: {server_path}")
+                        # 清理本地 Trace 文件
+                        try:
+                            os.remove(trace_path)
+                            logger.debug(f"已清理本地 Trace: {trace_path}")
+                        except Exception as e:
+                            logger.warning(f"清理 Trace 失败: {e}")
                         return server_path
                     else:
                         logger.error(f"Trace 上传失败: {response.status_code}")
@@ -281,12 +332,22 @@ class TaskConsumer:
         failed_steps = len(step_results) - passed_steps
         
         # 处理截图为 Base64 并发送步骤结果
+        import os
         for result in step_results:
             if result.screenshot:
-                base64_url = await self._encode_screenshot_base64(result.screenshot)
+                local_path = result.screenshot
+                base64_url = await self._encode_screenshot_base64(local_path)
                 if base64_url:
                     result.screenshot = base64_url
-            
+                    # 清理本地截图文件
+                    try:
+                        abs_path = os.path.abspath(local_path) if local_path.startswith('./') else local_path
+                        if os.path.exists(abs_path):
+                            os.remove(abs_path)
+                            logger.debug(f"已清理本地截图: {abs_path}")
+                    except Exception as e:
+                        logger.warning(f"清理截图失败: {e}")
+
             # 发送步骤结果
             await self.ws_client.send_result(
                 UiSocketEnum.STEP_RESULT,

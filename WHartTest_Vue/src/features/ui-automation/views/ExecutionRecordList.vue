@@ -61,6 +61,12 @@
             <template #icon><icon-eye /></template>
             详情
           </a-button>
+          <a-popconfirm content="确定删除此执行记录？关联的截图、视频、Trace文件将一并删除。" @ok="handleDelete(record.id)">
+            <a-button type="text" size="mini" status="danger">
+              <template #icon><icon-delete /></template>
+              删除
+            </a-button>
+          </a-popconfirm>
         </a-space>
       </template>
     </a-table>
@@ -171,7 +177,8 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { IconRefresh, IconEye } from '@arco-design/web-vue/es/icon'
+import { IconRefresh, IconEye, IconDelete } from '@arco-design/web-vue/es/icon'
+import { Message } from '@arco-design/web-vue'
 import { executionRecordApi } from '../api'
 import type { UiExecutionRecord, ExecutionStatus } from '../types'
 import { STATUS_LABELS, extractPaginationData } from '../types'
@@ -216,7 +223,7 @@ const columns = [
   { title: '触发类型', slotName: 'trigger_type', width: 100, align: 'center' as const },
   { title: '时长', slotName: 'duration', width: 90, align: 'center' as const },
   { title: '开始时间', slotName: 'start_time', width: 160, align: 'center' as const },
-  { title: '操作', slotName: 'operations', width: 80, fixed: 'right' as const, align: 'center' as const },
+  { title: '操作', slotName: 'operations', width: 130, fixed: 'right' as const, align: 'center' as const },
 ]
 
 const formatTime = (time: string) => {
@@ -308,6 +315,17 @@ const viewDetail = async (record: UiExecutionRecord) => {
 /** 跳转到 Trace 详情页 */
 const viewTrace = (recordId: number) => {
   router.push({ name: 'TraceDetail', params: { id: recordId } })
+}
+
+/** 删除执行记录 */
+const handleDelete = async (id: number) => {
+  try {
+    await executionRecordApi.delete(id)
+    Message.success('删除成功')
+    fetchRecords()
+  } catch {
+    Message.error('删除失败')
+  }
 }
 
 const refresh = () => fetchRecords()

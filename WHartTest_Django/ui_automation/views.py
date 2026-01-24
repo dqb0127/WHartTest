@@ -199,6 +199,31 @@ class UiExecutionRecordViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(executor=self.request.user)
+
+    def perform_destroy(self, instance):
+        """删除执行记录及其关联文件"""
+        import os
+        from django.conf import settings
+
+        def safe_delete(path):
+            if not path:
+                return
+            full_path = path if os.path.isabs(path) else os.path.join(settings.MEDIA_ROOT, path.lstrip('/'))
+            if os.path.exists(full_path):
+                os.remove(full_path)
+
+        # 删除截图
+        for screenshot in instance.screenshots or []:
+            if isinstance(screenshot, str):
+                safe_delete(screenshot.replace(settings.MEDIA_URL, ''))
+
+        # 删除视频
+        safe_delete(instance.video_path)
+
+        # 删除 Trace 文件
+        safe_delete(instance.trace_path)
+
+        instance.delete()
     
     @action(detail=True, methods=['get'], url_path='trace')
     def get_trace_data(self, request, pk=None):
