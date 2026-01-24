@@ -43,6 +43,7 @@ class Config:
         # 默认配置
         self.ws_url = "ws://localhost:8000/ws/ui/actuator/"
         self.api_url = "http://localhost:8000"
+        self.use_gui = False  # 是否使用 GUI 登录
         self.api_username = "admin"
         self.api_password = "admin123"
         self.actuator_id: str | None = None
@@ -91,6 +92,7 @@ class Config:
         if 'server' in data:
             self.ws_url = data['server'].get('ws_url', self.ws_url)
             self.api_url = data['server'].get('api_url', self.api_url)
+            self.use_gui = data['server'].get('use_gui', self.use_gui)
             self.api_username = data['server'].get('api_username', self.api_username)
             self.api_password = data['server'].get('api_password', self.api_password)
         
@@ -138,6 +140,10 @@ class Config:
             self.api_url = args.api
         if args.id:
             self.actuator_id = args.id
+        if args.gui:
+            self.use_gui = True
+        if args.no_gui:
+            self.use_gui = False
         if args.log_level:
             self.log_level = args.log_level
 
@@ -183,6 +189,18 @@ def parse_args():
         help='执行器ID (覆盖配置文件)'
     )
     parser.add_argument(
+        '--gui', '-g',
+        action='store_true',
+        default=None,
+        help='启用 GUI 登录窗口 (覆盖配置文件)'
+    )
+    parser.add_argument(
+        '--no-gui',
+        action='store_true',
+        default=None,
+        help='禁用 GUI 登录窗口 (覆盖配置文件)'
+    )
+    parser.add_argument(
         '--log-level', '-l',
         default=None,
         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
@@ -203,6 +221,29 @@ async def main():
     # 配置日志
     setup_logging(config.log_level, config.log_file)
     logger = logging.getLogger('actuator')
+    
+    # GUI 登录模式
+    if config.use_gui:
+        try:
+            from gui import show_login_dialog
+        except ImportError as e:
+            logger.error(f"GUI 模式需要安装 PySide6: pip install PySide6")
+            logger.error(f"或者设置 use_gui = false 使用配置文件中的账号密码")
+            logger.error(f"导入错误: {e}")
+            sys.exit(1)
+        
+        logger.info("启动 GUI 登录窗口...")
+        login_result = show_login_dialog(args.config)
+        
+        if not login_result:
+            logger.info("用户取消登录")
+            sys.exit(0)
+        
+        # 使用 GUI 登录获取的凭证更新配置
+        config.api_url = login_result['api_url']
+        config.api_username = login_result['username']
+        config.api_password = login_result['password']
+        logger.info(f"登录成功: {config.api_username} @ {config.api_url}")
     
     # 生成执行器ID
     actuator_id = config.actuator_id or f"actuator-{os.getpid()}"

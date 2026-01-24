@@ -1,59 +1,31 @@
-# UI自动化执行器配置文件
-# 复制此文件为 config.toml 并修改配置
-
 [server]
-# WebSocket服务器地址
 ws_url = "ws://localhost:8000/ws/ui/actuator/"
-# API服务器地址
 api_url = "http://localhost:8000"
-# API认证用户名（用于获取JWT Token上传截图等）
+use_gui = true
 api_username = "admin"
-# API认证密码
 api_password = "123456"
 
 [actuator]
-# 执行器名称（可选，默认自动生成）
-# name = "my-actuator"
-# 执行器描述（可选）
-# description = "测试执行器"
 
 [browser]
-# 浏览器类型: chromium, firefox, webkit
 browser_type = "chromium"
-# 是否无头模式
 headless = false
-# 是否持久化浏览器上下文
 persistent = false
-# 持久化数据目录
 user_data_dir = "./data/browser"
-# 浏览器启动超时（秒）
 launch_timeout = 30
-# 操作超时（秒）- 建议5-10秒，过长会导致失败检测慢
 action_timeout = 10
 
 [execution]
-# 失败重试次数
 retry_count = 3
-# 步骤间隔时间（毫秒）- 建议50-200ms
 step_interval = 100
-# 截图保存目录
 screenshot_dir = "./data/screenshots"
 
 [trace]
-# 是否启用执行追踪功能（记录网络请求、页面快照、操作时间线）
 enabled = true
-# 追踪文件保存目录
 trace_dir = "./data/traces"
-# 是否包含截图
 screenshots = true
-# 是否包含DOM快照
 snapshots = true
-# 是否包含源代码（通常不需要）
 sources = false
 
 [logging]
-# 日志级别: DEBUG, INFO, WARNING, ERROR
-# DEBUG 可以看到每个步骤的耗时信息
 level = "INFO"
-# 日志文件（可选，不设置则只输出到控制台）
-# file = "./data/logs/actuator.log"

@@ -6,9 +6,13 @@
 ws_url = "ws://localhost:8000/ws/ui/actuator/"
 # API服务器地址
 api_url = "http://localhost:8000"
-# API认证用户名（用于获取JWT Token上传截图等）
+# 是否启用 GUI 登录窗口（需要安装 PySide6）
+# true = 使用图形界面登录，适合本地开发调试
+# false = 使用配置文件中的账号密码，适合服务器无头部署
+use_gui = false
+# API认证用户名（仅 use_gui=false 时有效）
 api_username = "admin"
-# API认证密码
+# API认证密码（仅 use_gui=false 时有效）
 api_password = "admin123"
 
 [actuator]
