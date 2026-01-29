@@ -606,17 +606,19 @@ const handleToolEnd = (data: any) => {
   
   // 兼容 tool_end 和 tool_result 两种格式
   // tool_end: { tool_name, tool_output }
-  // tool_result: { summary: "tool_name:\n{json}\n\nother_tool: 失败 - xxx" }
+  // tool_result: { content: "完整工具输出" } 或 { summary: "截断摘要"（旧版） }
   let tool_name = '';
   let tool_output = '';
 
   if (data.tool_name) {
     tool_name = data.tool_name;
     tool_output = data.tool_output;
-  } else if (data.summary) {
-    // summary 可能包含多个工具结果，用 \n\n 分隔
+  } else if (data.content || data.summary) {
+    // 优先使用 content（完整内容），fallback 到 summary（旧版截断摘要）
+    const toolData = data.content || data.summary;
+    // toolData 可能包含多个工具结果，用 \n\n 分隔
     // 处理 display_diagram 或 edit_diagram 的结果
-    const tools = data.summary.split(/\n\n+/);
+    const tools = toolData.split(/\n\n+/);
     for (const toolStr of tools) {
       // 匹配格式: "tool_name:\n{json}" 或 "tool_name: 失败 - xxx"
       const match = toolStr.match(/^(\w+):\s*\n?(.*)$/s);

@@ -309,18 +309,23 @@ class TaskConsumer:
         if not page_step_data:
             return
         
+        # 初始化数据处理器，加载项目公共变量
+        project_id = page_step_data.get('project')
+        data_processor = await self._init_data_processor(project_id)
+        
         # 获取环境配置
         env_config = None
         base_url = ''
         if env_config_id:
             env_config = await self._fetch_env_config(env_config_id)
-            if env_config:
-                base_url = env_config.get('base_url', '') or ''
-                logger.info(f"使用环境配置: {env_config.get('name')}, base_url: {base_url}")
+        else:
+            # 尝试获取项目的默认环境配置
+            if project_id:
+                env_config = await self._fetch_default_env_config(project_id)
         
-        # 初始化数据处理器，加载项目公共变量
-        project_id = page_step_data.get('project')
-        data_processor = await self._init_data_processor(project_id)
+        if env_config:
+            base_url = env_config.get('base_url', '') or ''
+            logger.info(f"使用环境配置: {env_config.get('name')}, base_url: {base_url}")
         
         # 构建配置，传入 base_url 和数据处理器
         config = self._build_page_step_config(page_step_data, base_url, data_processor)
@@ -402,6 +407,12 @@ class TaskConsumer:
             # 尝试获取项目的默认环境配置
             if project_id:
                 env_config = await self._fetch_default_env_config(project_id)
+
+        # 日志：确认环境配置
+        if env_config:
+            logger.info(f"环境配置已获取: name={env_config.get('name')}, base_url={env_config.get('base_url')}")
+        else:
+            logger.warning(f"未获取到环境配置 (env_config_id={env_config_id}, project_id={project_id})")
 
         # 初始化数据处理器，加载项目公共变量
         data_processor = await self._init_data_processor(project_id)
@@ -540,10 +551,30 @@ class TaskConsumer:
     async def _fetch_default_env_config(self, project_id: int) -> Optional[dict]:
         """从API获取项目的默认环境配置"""
         result = await self._api_get(f"/api/ui-automation/env-configs/?project={project_id}&is_default=true")
-        if result and isinstance(result, dict):
+        logger.debug(f"获取默认环境配置: project_id={project_id}, result={result}")
+
+        if not result:
+            logger.warning(f"未找到项目 {project_id} 的默认环境配置")
+            return None
+
+        # 处理不同的返回格式
+        if isinstance(result, list):
+            # API 直接返回列表
+            if len(result) > 0:
+                logger.info(f"使用默认环境配置: {result[0].get('name')}")
+                return result[0]
+        elif isinstance(result, dict):
+            # API 返回分页格式 {"items": [...]} 或 {"results": [...]}
             items = result.get('items', result.get('results', []))
             if items and len(items) > 0:
+                logger.info(f"使用默认环境配置: {items[0].get('name')}")
                 return items[0]
+            # 可能直接就是配置对象
+            if result.get('id') and result.get('base_url'):
+                logger.info(f"使用默认环境配置: {result.get('name')}")
+                return result
+
+        logger.warning(f"未找到项目 {project_id} 的默认环境配置")
         return None
 
     async def _fetch_public_data(self, project_id: int) -> list[dict]:
@@ -582,10 +613,24 @@ class TaskConsumer:
         steps = []
         
         for detail in data.get('step_details', []):
-            # 从 ope_value 中提取输入值（如 {"text": "admin"}）
+            # 从 ope_value 中提取输入值
+            # 支持多种格式：{"text": "admin"}, {"value": "xxx"}, {"timeout": 3000}, 或纯字符串/数字
             ope_value = detail.get('ope_value', {})
             if isinstance(ope_value, dict):
-                input_value = ope_value.get('text', '') or ope_value.get('value', '') or str(ope_value)
+                # 按优先级尝试提取常见字段
+                input_value = (
+                    ope_value.get('text') or
+                    ope_value.get('value') or
+                    ope_value.get('timeout') or  # wait 操作使用 timeout
+                    ope_value.get('url') or      # goto 操作可能使用 url
+                    ope_value.get('key') or      # press 操作可能使用 key
+                    ''
+                )
+                # 如果所有已知字段都没有，且字典不为空，取第一个值
+                if not input_value and ope_value:
+                    input_value = next(iter(ope_value.values()), '')
+                # 确保转换为字符串
+                input_value = str(input_value) if input_value else ''
             else:
                 input_value = str(ope_value) if ope_value else ''
             
@@ -622,8 +667,18 @@ class TaskConsumer:
                 wait_time=detail.get('wait_time', 0),
             ))
         
-        # 页面URL优先使用步骤自带的，否则使用环境配置的base_url
-        page_url = data.get('page_url', '') or base_url
+        # 页面URL处理：支持相对路径与 base_url 拼接
+        page_url = data.get('page_url', '') or ''
+        if page_url:
+            # 如果是相对路径，与 base_url 拼接
+            if page_url.startswith('/') and base_url:
+                page_url = base_url.rstrip('/') + page_url
+            elif not page_url.startswith(('http://', 'https://')) and base_url:
+                # 既不是绝对路径也不是完整URL，与 base_url 拼接
+                page_url = base_url.rstrip('/') + '/' + page_url.lstrip('/')
+        else:
+            # page_url 为空，使用 base_url
+            page_url = base_url
         
         # URL也可能包含变量
         if data_processor and page_url:

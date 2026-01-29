@@ -258,10 +258,20 @@ const replaceDocImgPlaceholders = (content: string): string => {
 
 
 
+// 去除 ANSI 转义序列（终端颜色代码等）
+const stripAnsiCodes = (text: string): string => {
+  // 匹配所有 ANSI 转义序列：ESC[...m 格式
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\x1b\[[0-9;]*m/g, '');
+};
+
 // 格式化消息内容
 const formattedContent = computed(() => {
   try {
     let processedContent = props.message.content;
+
+    // 首先去除 ANSI 转义序列（终端颜色代码）
+    processedContent = stripAnsiCodes(processedContent);
 
     // 将需求文档图片占位符转换为可访问的图片URL（用于Markdown渲染）
     processedContent = replaceDocImgPlaceholders(processedContent);

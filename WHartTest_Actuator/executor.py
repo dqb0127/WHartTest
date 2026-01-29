@@ -237,12 +237,21 @@ class PlaywrightExecutor:
             return True, f"页面操作 {operation} 执行成功", screenshot_path
         
         # 页面操作（不需要定位器）
+        def _parse_wait_timeout(value: str) -> int:
+            """解析等待时间（毫秒）"""
+            if not value:
+                return 1000  # 默认 1 秒
+            try:
+                return int(float(value))
+            except ValueError:
+                return 1000
+
         page_operations = {
             'goto': lambda: page.goto(step.input_value),
             'reload': lambda: page.reload(),
             'go_back': lambda: page.go_back(),
             'go_forward': lambda: page.go_forward(),
-            'wait': lambda: page.wait_for_timeout(int(float(step.input_value) * 1000) if step.input_value else 1000),
+            'wait': lambda: page.wait_for_timeout(_parse_wait_timeout(step.input_value)),
             'wait_load': lambda: page.wait_for_load_state("load"),
             'wait_network': lambda: page.wait_for_load_state("networkidle"),
         }
@@ -361,19 +370,38 @@ class PlaywrightExecutor:
             # 使用带 trace 的浏览器会话
             async with self.browser_session_with_trace(trace_name) as page:
                 logger.info(f"开始执行用例: {config.case_name}")
-                
+
+                # 浏览器启动后，立即导航到环境配置的 base_url
+                base_url = ''
+                if config.env_config:
+                    base_url = config.env_config.get('base_url', '') or ''
+                if base_url:
+                    logger.info(f"导航到环境 base_url: {base_url}")
+                    await page.goto(base_url, wait_until="networkidle")
+
                 for page_step in config.page_steps:
                     if self._stop_requested:
                         raise Exception("用例被手动停止")
-                    
+
                     logger.info(f"执行页面步骤: {page_step.page_name}")
-                    
-                    # 导航到页面
+
+                    # 检测页面跳转：仅当下一个页面 URL 与当前不同时才等待
                     if page_step.page_url:
-                        nav_start = time.time()
-                        await page.goto(page_step.page_url)
-                        await page.wait_for_load_state("domcontentloaded")
-                        logger.debug(f"页面导航 {page_step.page_name} 耗时 {time.time() - nav_start:.2f}s")
+                        current_url = page.url
+                        expected_url = page_step.page_url.rstrip('/')
+                        
+                        # 只有当期望的 URL 与当前 URL 不同时，才等待跳转
+                        if expected_url not in current_url:
+                            try:
+                                # 短暂等待，检测是否有 URL 变化
+                                await page.wait_for_url(
+                                    lambda url: url != current_url,
+                                    timeout=2000
+                                )
+                                logger.debug(f"检测到页面跳转: {current_url} -> {page.url}")
+                            except Exception:
+                                # 没有页面跳转是正常情况
+                                pass
                     
                     # 执行页面内的步骤
                     for step in page_step.steps:
@@ -431,7 +459,14 @@ class PlaywrightExecutor:
                             )
                         
                         step_results.append(step_result)
-                
+
+                    # 页面步骤执行完毕后，等待页面稳定（处理可能的页面跳转）
+                    try:
+                        await page.wait_for_load_state("load", timeout=10000)
+                        await page.wait_for_load_state("networkidle", timeout=10000)
+                    except Exception:
+                        logger.debug(f"页面步骤 {page_step.page_name} 执行后等待页面稳定超时，继续执行")
+
                 duration = time.time() - start_time
                 status = 'success' if failed_steps == 0 else 'failed'
                 message = f"用例执行{'成功' if status == 'success' else '失败'}: 通过 {passed_steps}/{total_steps}"

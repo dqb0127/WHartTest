@@ -146,6 +146,9 @@ class AgentLoopStreamAPIView(View):
         """
         thread_id = f"{request.user.id}_{project_id}_{session_id}"
 
+        # 0. 清理上一次可能残留的停止信号（防止新对话被误停）
+        clear_stop_signal(session_id)
+
         # 1. 获取 LLM 配置
         try:
             active_config = await sync_to_async(LLMConfig.objects.get)(is_active=True)
@@ -438,11 +441,10 @@ class AgentLoopStreamAPIView(View):
                                         tool_messages = node_output.get("messages", [])
                                         for tool_msg in tool_messages:
                                             if hasattr(tool_msg, 'content'):
-                                                content = tool_msg.content
-                                                summary = content[:200] if isinstance(content, str) else str(content)[:200]
+                                                content = tool_msg.content if isinstance(tool_msg.content, str) else str(tool_msg.content)
                                                 yield create_sse_data({
                                                     'type': 'tool_result',
-                                                    'summary': summary,
+                                                    'content': content,
                                                     'step': step_count
                                                 })
                                         # 步骤完成
@@ -1035,11 +1037,10 @@ class AgentLoopResumeAPIView(View):
                                         tool_messages = node_output.get("messages", [])
                                         for tool_msg in tool_messages:
                                             if hasattr(tool_msg, 'content'):
-                                                content = tool_msg.content
-                                                summary = content[:200] if isinstance(content, str) else str(content)[:200]
+                                                content = tool_msg.content if isinstance(tool_msg.content, str) else str(tool_msg.content)
                                                 yield create_sse_data({
                                                     'type': 'tool_result',
-                                                    'summary': summary,
+                                                    'content': content,
                                                     'step': step_count
                                                 })
                                         if step_count > 0:

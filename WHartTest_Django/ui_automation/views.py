@@ -128,6 +128,9 @@ class UiPageStepsDetailedViewSet(viewsets.ModelViewSet):
         for idx, step_data in enumerate(steps):
             step_data['page_step'] = page_step_id
             step_data['step_sort'] = idx
+            # 兼容 element_id 和 element 两种参数名
+            if 'element_id' in step_data and 'element' not in step_data:
+                step_data['element'] = step_data.pop('element_id')
             serializer = self.get_serializer(data=step_data)
             serializer.is_valid(raise_exception=True)
             serializer.save()

@@ -151,8 +151,12 @@ const routes: Array<RouteRecordRaw> = [
       // 其他受保护的子路由可以加在这里
     ]
   },
-  // 可以添加一个 404 页面
-  // { path: '/:pathMatch(.*)*', name: 'NotFound', component: NotFoundView }
+  // Catch-all 路由：捕获所有未匹配的路径，重定向到首页
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    redirect: '/dashboard'
+  }
 ];
 
 const router = createRouter({
@@ -161,6 +165,8 @@ const router = createRouter({
 });
 
 router.beforeEach((to, _from, next) => {
+  console.log('[Router Guard] 路由守卫触发:', { path: to.path, name: to.name, matched: to.matched.length });
+
   const authStore = useAuthStore();
 
   // 确保在每次导航前检查认证状态，特别是对于首次加载或刷新
@@ -169,21 +175,22 @@ router.beforeEach((to, _from, next) => {
   }
 
   const isLoggedIn = authStore.isAuthenticated;
+  console.log('[Router Guard] 认证状态:', { isLoggedIn, toName: to.name });
 
-  if (to.meta.requiresAuth && !isLoggedIn) {
-    // 如果目标路由需要认证但用户未登录，重定向到登录页
+  // 不需要认证的白名单路由
+  const publicRoutes = ['Login', 'Register'];
+  const isPublicRoute = publicRoutes.includes(to.name as string);
+
+  if (!isLoggedIn && !isPublicRoute) {
+    // 未登录且不是公开路由，重定向到登录页
+    console.log('[Router Guard] 未登录，重定向到登录页');
     next({ name: 'Login', query: { redirect: to.fullPath } });
-  } else if ((to.name === 'Login' || to.name === 'Register') && isLoggedIn) {
-    // 如果用户已登录并尝试访问登录页或注册页，重定向到首页
+  } else if (isLoggedIn && isPublicRoute) {
+    // 已登录但访问登录/注册页，重定向到首页
+    console.log('[Router Guard] 已登录，重定向到首页');
     next({ name: 'Dashboard' });
-  } else if (to.path === '/' && isLoggedIn) {
-    // 如果用户已登录并访问根路径，重定向到首页
-    next({ name: 'Dashboard' });
-  } else if (to.path === '/' && !isLoggedIn) {
-    // 如果用户未登录并访问根路径，重定向到登录页
-    next({ name: 'Login' });
-  }
-  else {
+  } else {
+    console.log('[Router Guard] 放行');
     next();
   }
 });
