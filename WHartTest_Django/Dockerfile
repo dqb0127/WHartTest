@@ -76,6 +76,8 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.li
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
     curl \
+    nodejs \
+    npm \
     # Playwright 所需的系统依赖
     libnss3 \
     libnspr4 \

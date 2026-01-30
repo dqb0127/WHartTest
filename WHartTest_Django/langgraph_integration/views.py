@@ -99,17 +99,40 @@ def create_llm_instance(active_config, temperature=0.7):
     """
     根据配置创建LLM实例
     统一使用OpenAI兼容格式，支持所有兼容的服务商
+    
+    关键参数说明：
+    - timeout: 请求超时时间（秒），防止无限期等待
+    - max_retries: 最大重试次数，处理临时网络问题
     """
     model_identifier = active_config.name or "gpt-3.5-turbo"
+    
+    # 从配置获取超时设置，默认120秒（LLM响应可能较慢）
+    request_timeout = getattr(active_config, 'request_timeout', None) or 120
+    # 重试次数，默认3次
+    max_retries = getattr(active_config, 'max_retries', None) or 3
     
     llm_kwargs = {
         "model": model_identifier,
         "temperature": temperature,
         "api_key": active_config.api_key,
-        "base_url": active_config.api_url
+        "base_url": active_config.api_url,
+        "timeout": request_timeout,  # 单次请求超时
+        "max_retries": max_retries,  # 自动重试次数
     }
-    llm = ChatOpenAI(**llm_kwargs)
-    logger.info(f"Initialized OpenAI-compatible LLM with model: {model_identifier}, base_url: {active_config.api_url}")
+    
+    try:
+        llm = ChatOpenAI(**llm_kwargs)
+        logger.info(
+            f"Initialized LLM: model={model_identifier}, base_url={active_config.api_url}, "
+            f"timeout={request_timeout}s, max_retries={max_retries}"
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to initialize LLM: model={model_identifier}, base_url={active_config.api_url}, "
+            f"error={type(e).__name__}: {e}",
+            exc_info=True
+        )
+        raise
     
     return llm
 

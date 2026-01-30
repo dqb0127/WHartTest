@@ -18,6 +18,9 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
+import httpx
+import openai
+
 from django.http import StreamingHttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -473,8 +476,67 @@ class AgentLoopStreamAPIView(View):
                                     yield create_sse_data({'type': 'stream', 'data': chunk.content})
 
                 except Exception as e:
-                    logger.error(f"AgentLoopStreamAPI: Streaming error: {e}", exc_info=True)
-                    yield create_sse_data({'type': 'error', 'message': f'Streaming error: {str(e)}'})
+                    # 详细的错误分类和日志记录
+                    error_type = type(e).__name__
+                    error_msg = str(e)
+                    
+                    # 导入常见的网络/API异常类型
+                    import httpx
+                    import openai
+                    
+                    # 分类错误并提供详细诊断信息
+                    if isinstance(e, (httpx.TimeoutException, asyncio.TimeoutError)):
+                        user_msg = f'LLM请求超时: 模型响应时间过长，请检查模型服务状态或尝试缩短问题'
+                        logger.error(
+                            f"AgentLoopStreamAPI: LLM Timeout - session={session_id}, step={step_count}, "
+                            f"error={error_type}: {error_msg}",
+                            exc_info=True
+                        )
+                    elif isinstance(e, httpx.ConnectError):
+                        user_msg = f'LLM连接失败: 无法连接到模型服务，请检查API地址和网络'
+                        logger.error(
+                            f"AgentLoopStreamAPI: LLM Connection Failed - session={session_id}, "
+                            f"base_url可能不可达, error={error_type}: {error_msg}",
+                            exc_info=True
+                        )
+                    elif isinstance(e, httpx.HTTPStatusError):
+                        status_code = getattr(e.response, 'status_code', 'unknown')
+                        user_msg = f'LLM API错误 (HTTP {status_code}): {error_msg}'
+                        logger.error(
+                            f"AgentLoopStreamAPI: LLM HTTP Error - session={session_id}, "
+                            f"status={status_code}, error={error_msg}",
+                            exc_info=True
+                        )
+                    elif isinstance(e, openai.APIConnectionError):
+                        user_msg = f'LLM API连接错误: {error_msg}'
+                        logger.error(
+                            f"AgentLoopStreamAPI: OpenAI API Connection Error - session={session_id}, "
+                            f"error={error_type}: {error_msg}",
+                            exc_info=True
+                        )
+                    elif isinstance(e, openai.RateLimitError):
+                        user_msg = 'LLM API请求频率限制: 请稍后重试'
+                        logger.warning(
+                            f"AgentLoopStreamAPI: Rate Limited - session={session_id}, error={error_msg}"
+                        )
+                    elif isinstance(e, openai.APIStatusError):
+                        status_code = getattr(e, 'status_code', 'unknown')
+                        user_msg = f'LLM API状态错误 ({status_code}): {error_msg}'
+                        logger.error(
+                            f"AgentLoopStreamAPI: OpenAI API Status Error - session={session_id}, "
+                            f"status={status_code}, error={error_msg}",
+                            exc_info=True
+                        )
+                    else:
+                        # 未知错误，记录完整堆栈
+                        user_msg = f'流式处理错误 ({error_type}): {error_msg}'
+                        logger.error(
+                            f"AgentLoopStreamAPI: Unexpected Streaming Error - session={session_id}, "
+                            f"step={step_count}, type={error_type}, error={error_msg}",
+                            exc_info=True
+                        )
+                    
+                    yield create_sse_data({'type': 'error', 'message': user_msg})
 
                 # 16. 处理结束状态
                 if user_stopped:
@@ -529,10 +591,40 @@ class AgentLoopStreamAPIView(View):
                 yield "data: [DONE]\n\n"
 
         except Exception as e:
-            logger.error(f"AgentLoopStreamAPI: Error: {e}", exc_info=True)
+            # 最外层异常捕获 - 详细分类和日志
+            error_type = type(e).__name__
+            error_msg = str(e)
+            
+            if isinstance(e, (httpx.TimeoutException, asyncio.TimeoutError)):
+                user_msg = f'请求超时: LLM服务响应时间过长'
+                logger.error(
+                    f"AgentLoopStreamAPI: Outer Timeout - session={session_id}, error={error_type}: {error_msg}",
+                    exc_info=True
+                )
+            elif isinstance(e, httpx.ConnectError):
+                user_msg = f'连接失败: 无法连接到LLM服务'
+                logger.error(
+                    f"AgentLoopStreamAPI: Outer Connection Error - session={session_id}, error={error_msg}",
+                    exc_info=True
+                )
+            elif isinstance(e, (openai.APIConnectionError, openai.APIStatusError)):
+                user_msg = f'LLM API错误: {error_msg}'
+                logger.error(
+                    f"AgentLoopStreamAPI: OpenAI API Error - session={session_id}, "
+                    f"type={error_type}, error={error_msg}",
+                    exc_info=True
+                )
+            else:
+                user_msg = f'执行错误 ({error_type}): {error_msg}'
+                logger.error(
+                    f"AgentLoopStreamAPI: Unexpected Error - session={session_id}, "
+                    f"type={error_type}, error={error_msg}",
+                    exc_info=True
+                )
+            
             yield create_sse_data({
                 'type': 'error',
-                'message': f'执行错误: {str(e)}'
+                'message': user_msg
             })
 
     async def post(self, request, *args, **kwargs):
