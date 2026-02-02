@@ -405,7 +405,7 @@ const loadSessionsFromServer = async () => {
     isLoading.value = true;
     const response = await getChatSessions(projectStore.currentProjectId);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       // 优先使用 sessions_detail（包含标题和时间），避免 N+1 查询
       const sessionsDetail = response.data.sessions_detail;
       
@@ -546,26 +546,27 @@ const loadChatHistory = async () => {
     isLoading.value = true;
     const response = await getChatHistory(storedSessionId, projectStore.currentProjectId);
 
-    if (response.status === 'success') {
-      sessionId.value = response.data.session_id;
+    if (response.status === 'success' && response.data) {
+      const data = response.data;
+      sessionId.value = data.session_id;
 
       // 🆕 恢复该会话的Token使用信息
-      if (response.data.context_token_count !== undefined) {
-        const tokenCount = response.data.context_token_count || 0;
-        const limit = response.data.context_limit || 128000;
-        latestContextUsage.value[response.data.session_id] = { tokenCount, limit };
+      if (data.context_token_count !== undefined) {
+        const tokenCount = data.context_token_count || 0;
+        const limit = data.context_limit || 128000;
+        latestContextUsage.value[data.session_id] = { tokenCount, limit };
         console.log(`🔄 恢复会话Token使用: ${tokenCount}/${limit}`);
       }
 
       // 🆕 恢复该会话关联的提示词
-      if (response.data.prompt_id !== null && response.data.prompt_id !== undefined) {
-        selectedPromptId.value = response.data.prompt_id;
-        localStorage.setItem(PROMPT_STORAGE_KEY, String(response.data.prompt_id));
-        console.log(`🔄 恢复会话提示词: ${response.data.prompt_name} (ID: ${response.data.prompt_id})`);
+      if (data.prompt_id !== null && data.prompt_id !== undefined) {
+        selectedPromptId.value = data.prompt_id;
+        localStorage.setItem(PROMPT_STORAGE_KEY, String(data.prompt_id));
+        console.log(`🔄 恢复会话提示词: ${data.prompt_name} (ID: ${data.prompt_id})`);
       }
 
       // ✅ 使用纯函数处理历史记录,自动插入步骤分隔符
-      const tempMessages = enrichMessagesWithSeparators(response.data.history, formatHistoryTime);
+      const tempMessages = enrichMessagesWithSeparators(data.history, formatHistoryTime);
       
       // 🎨 合并连续的思考过程消息
       messages.value = mergeThinkingProcessMessages(tempMessages);
@@ -574,10 +575,10 @@ const loadChatHistory = async () => {
       console.log('🔍 [Debug] 最终step_separator数量:', messages.value.filter(m => m.messageType === 'step_separator').length);
 
       // 只有在会话列表中不存在该会话时才添加（避免重复）
-      const existingSession = chatSessions.value.find(s => s.id === response.data.session_id);
+      const existingSession = chatSessions.value.find(s => s.id === data.session_id);
       if (!existingSession) {
-        const firstHumanMessage = response.data.history.find(msg => msg.type === 'human')?.content;
-        updateSessionInList(response.data.session_id, firstHumanMessage, false);
+        const firstHumanMessage = data.history.find(msg => msg.type === 'human')?.content;
+        updateSessionInList(data.session_id, firstHumanMessage, false);
       }
       
       console.log(`✅ 成功加载会话历史: ${sessionId.value}, ${messages.value.length} 条消息`);
@@ -831,7 +832,7 @@ const handleStopGeneration = async () => {
       if (sessionId.value && projectStore.currentProjectId) {
         try {
           const response = await getChatHistory(sessionId.value, projectStore.currentProjectId);
-          if (response.status === 'success' && response.data.history) {
+          if (response.status === 'success' && response.data?.history) {
             const tempMessages = enrichMessagesWithSeparators(response.data.history, formatHistoryTime);
             messages.value = mergeThinkingProcessMessages(tempMessages);
             console.log('[LangGraphChatView] History reloaded after stop:', messages.value.length, 'messages');
@@ -1048,7 +1049,7 @@ const switchSession = async (id: string) => {
     isLoading.value = true;
     const response = await getChatHistory(id, projectStore.currentProjectId);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       // 🆕 恢复该会话的Token使用信息
       if (response.data.context_token_count !== undefined) {
         const tokenCount = response.data.context_token_count || 0;
@@ -1154,7 +1155,7 @@ const batchDeleteSessions = async (sessionIds: string[]) => {
     isLoading.value = true;
     const response = await batchDeleteChatHistory(sessionIds, projectStore.currentProjectId);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       const { processed_sessions, failed_sessions } = response.data;
       
       // 从列表中移除已删除的会话
@@ -1452,7 +1453,7 @@ const handleNormalMessage = async (requestData: ChatRequest, originalMessage: st
     // 移除loading消息
     messages.value.splice(loadingMessageIndex, 1);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       const data = response.data;
 
       // 保存会话ID
@@ -1562,7 +1563,7 @@ watch(() => projectStore.currentProjectId, async (newProjectId, oldProjectId) =>
 const loadCurrentLlmConfig = async () => {
   try {
     const response = await listLlmConfigs();
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       // 找到激活的配置
       const activeConfig = response.data.find(config => config.is_active);
       if (activeConfig) {

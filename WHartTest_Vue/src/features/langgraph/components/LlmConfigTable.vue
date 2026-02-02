@@ -73,7 +73,7 @@ interface Props {
   pagination?: PaginationProps; // 可选的分页配置
 }
 
-const props = withDefaults(defineProps<Props>(), {
+withDefaults(defineProps<Props>(), {
   configs: () => [],
   loading: false,
   pagination: () => ({

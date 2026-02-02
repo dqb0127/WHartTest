@@ -288,6 +288,7 @@ class AgentLoopStreamAPIView(View):
             yield create_sse_data({
                 'type': 'start',
                 'session_id': session_id,
+                'thread_id': thread_id,
                 'project_id': project_id,
                 'mode': 'agent_loop',
                 'created_at': chat_session.created_at.isoformat() if chat_session and chat_session.created_at else None
@@ -439,9 +440,12 @@ class AgentLoopStreamAPIView(View):
                                         for tool_msg in tool_messages:
                                             if hasattr(tool_msg, 'content'):
                                                 content = tool_msg.content
+                                                tool_name = getattr(tool_msg, 'name', None) or getattr(tool_msg, 'tool_name', 'unknown')
                                                 summary = content[:200] if isinstance(content, str) else str(content)[:200]
                                                 yield create_sse_data({
                                                     'type': 'tool_result',
+                                                    'tool_name': tool_name,
+                                                    'tool_output': content,
                                                     'summary': summary,
                                                     'step': step_count
                                                 })
@@ -1036,9 +1040,12 @@ class AgentLoopResumeAPIView(View):
                                         for tool_msg in tool_messages:
                                             if hasattr(tool_msg, 'content'):
                                                 content = tool_msg.content
+                                                tool_name = getattr(tool_msg, 'name', None) or getattr(tool_msg, 'tool_name', 'unknown')
                                                 summary = content[:200] if isinstance(content, str) else str(content)[:200]
                                                 yield create_sse_data({
                                                     'type': 'tool_result',
+                                                    'tool_name': tool_name,
+                                                    'tool_output': content,
                                                     'summary': summary,
                                                     'step': step_count
                                                 })

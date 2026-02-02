@@ -289,9 +289,11 @@ def build_dynamic_interrupt_on(
     """
     # 获取用户偏好
     user_approvals = get_user_tool_approvals(user, session_id) if user else {}
+    logger.info(f"[HITL] 用户偏好: {user_approvals}")
 
     # 如果提供了工具名列表，默认所有工具都需要审批
     if all_tool_names:
+        logger.info(f"[HITL] 所有工具默认需要审批: {all_tool_names}")
         dynamic_config = {}
         for tool_name in all_tool_names:
             user_policy = user_approvals.get(tool_name)
@@ -318,6 +320,7 @@ def build_dynamic_interrupt_on(
                         "description": f"{tool_name} 需要审批",
                     }
 
+        logger.info(f"[HITL] 最终中断配置 (需要审批的工具): {list(dynamic_config.keys())}")
         return dynamic_config
 
     # 传统模式：只审批 base_tools 中的工具
@@ -455,13 +458,16 @@ def get_standard_middleware(
                     enable_summarization, summarization_model is not None)
 
     if enable_hitl:
+        logger.info("HITL 已启用，正在添加 HumanInTheLoopMiddleware, all_tool_names=%s", hitl_all_tool_names)
         middleware.append(get_human_in_the_loop_middleware(
             interrupt_on=hitl_tools,
             user=hitl_user,
             session_id=hitl_session_id,
             all_tool_names=hitl_all_tool_names,
         ))
-        logger.debug("已添加 HumanInTheLoopMiddleware (all_tools=%s)", bool(hitl_all_tool_names))
+        logger.info("已添加 HumanInTheLoopMiddleware (all_tools=%s)", bool(hitl_all_tool_names))
+    else:
+        logger.info("HITL 未启用，跳过 HumanInTheLoopMiddleware")
 
     return middleware
 

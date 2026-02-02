@@ -240,7 +240,7 @@ export const deleteUser = async (userId: number): Promise<OperationResponse> => 
   }
 
   try {
-    const response = await request<void>({
+    const response = await request<{ message?: string; code?: number }>({
       url: `/accounts/users/${userId}/`,
       method: 'DELETE'
     });
@@ -254,7 +254,7 @@ export const deleteUser = async (userId: number): Promise<OperationResponse> => 
     } else {
       return {
         success: false,
-        error: response.data?.message || '删除用户失败：响应数据格式不正确',
+        error: response.data?.message || response.error || '删除用户失败：响应数据格式不正确',
         statusCode: response.data?.code,
       };
     }

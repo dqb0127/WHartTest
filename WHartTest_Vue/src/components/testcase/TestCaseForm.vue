@@ -588,11 +588,6 @@ const validateStepField = (index: number, field: 'description' | 'expected_resul
   stepErrors.value[index][field] = undefined;
 };
 
-const validateAllSteps = (): boolean => {
-  // 步骤不再必填，直接返回 true
-  return true;
-};
-
 const addStep = () => {
   formState.steps.push({
     step_number: formState.steps.length + 1,
@@ -788,12 +783,6 @@ const removeNewScreenshot = (index: number) => {
   // 清理预览URL
   URL.revokeObjectURL(getFilePreview(file));
   newScreenshots.value.splice(index, 1);
-};
-
-const removeCurrentScreenshot = () => {
-  if (existingScreenshots.value.length > 0) {
-    existingScreenshots.value.splice(0, 1);
-  }
 };
 
 // 处理删除现有截图（与详情页保持一致的交互）
