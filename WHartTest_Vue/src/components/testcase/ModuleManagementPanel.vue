@@ -454,6 +454,13 @@ defineExpose({
 
 .module-action-button {
   width: 80px;
+  background-color: #ffffff; /* 修改操作按钮背景色 */
+  border-color: #ffffff;
+}
+
+.module-action-button:hover {
+  background-color: #ffffff; /* 悬停时的颜色 */
+  border-color: #ffffff;
 }
 
 :deep(.arco-dropdown-option) {

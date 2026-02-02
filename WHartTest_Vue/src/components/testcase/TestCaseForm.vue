@@ -452,6 +452,7 @@ const testCaseRules = {
     { maxLength: 500, message: '前置条件长度不能超过500个字符' },
   ],
   level: [{ required: true, message: '请选择优先级' }],
+  module_id: [{ required: true, message: '请选择所属模块' }],
   notes: [ // 备注字段的校验规则 (可选)
     { maxLength: 1000, message: '备注长度不能超过1000个字符' },
   ],
