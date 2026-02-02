@@ -668,10 +668,9 @@ onMounted(() => {
 .right-content-area > * {
   flex: 1;
   height: 100%;
-  overflow: auto; /* 允许子组件自行滚动，修复表单无法滚动的问题 */
   /* 移除子组件自身的阴影、边框和内边距，因为它们现在在右侧内容区域内 */
   box-shadow: none !important;
   border-radius: 0 !important;
-  padding: 0 !important;
+  /* 不要用 !important 覆盖 overflow 和 padding，让子组件自行控制滚动 */
 }
 </style>
