@@ -628,6 +628,11 @@ export interface ProjectStatistics {
       passed: number;
       failed: number;
     };
+    summary_30d?: {
+      execution_count: number;
+      passed: number;
+      failed: number;
+    };
   };
   mcp: {
     total: number;

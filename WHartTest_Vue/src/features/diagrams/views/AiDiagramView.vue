@@ -110,6 +110,17 @@
               </div>
             </div>
           </template>
+          
+          <!-- 工具审批卡片（紧凑版，适配小对话窗口） -->
+          <div v-if="toolApprovalDialogVisible" class="compact-approval-wrapper">
+            <ToolApprovalCard
+              :visible="toolApprovalDialogVisible"
+              :interrupt="currentInterrupt"
+              :session-id="sessionId"
+              @update:visible="toolApprovalDialogVisible = $event"
+              @decision="handleToolDecision"
+            />
+          </div>
         </div>
 
         <!-- 输入区域 -->
@@ -130,7 +141,7 @@
           <a-button
             type="primary"
             :loading="isLoading"
-            :disabled="!inputMessage.trim()"
+            :disabled="!inputMessage.trim() || toolApprovalDialogVisible"
             @click="sendMessage"
           >
             <template #icon><icon-send /></template>
@@ -149,6 +160,8 @@ import { useProjectStore } from '@/store/projectStore';
 import { getPromptByType, initializeUserPrompts } from '@/features/prompts/services/promptService';
 import { DiagramEditor, type EditOperation } from '../services/diagramEditor';
 import TokenUsageIndicator from '@/features/langgraph/components/TokenUsageIndicator.vue';
+import ToolApprovalCard from '@/features/langgraph/components/ToolApprovalCard.vue';
+import type { InterruptEvent } from '@/features/langgraph/components/ToolApprovalCard.vue';
 
 interface ChatMessage {
   content: string;
@@ -178,6 +191,11 @@ const pendingMessageResolve = ref<((xml: string) => void) | null>(null);  // 等
 const sessionId = ref<string>('');  // 会话ID，用于保持对话上下文
 const contextTokenCount = ref<number>(0);  // 上下文 Token 使用量
 const contextLimit = ref<number>(200000);  // 上下文 Token 限制
+
+// ⭐ HITL 工具审批相关
+const toolApprovalDialogVisible = ref(false);
+const currentInterrupt = ref<InterruptEvent | null>(null);
+const threadId = ref<string>('');  // 线程ID，用于恢复执行
 
 // localStorage 键名
 const STORAGE_KEY = 'ai-diagram-data';
@@ -219,11 +237,19 @@ const loadFromStorage = () => {
 // 生产环境可使用相对路径如 /drawio，通过 Nginx 反向代理
 // 默认使用官方 embed 服务
 const DRAWIO_ENV_URL = import.meta.env.VITE_DRAWIO_URL || 'https://embed.diagrams.net';
+const DRAWIO_PUBLIC_URL = 'https://app.diagrams.net';  // 公共托底服务
+
 // 处理相对路径：转换为完整 URL
-const DRAWIO_BASE_URL = DRAWIO_ENV_URL.startsWith('/')
-  ? `${window.location.origin}${DRAWIO_ENV_URL}`
-  : DRAWIO_ENV_URL;
-const DRAWIO_ORIGIN = new URL(DRAWIO_BASE_URL).origin;
+const getFullUrl = (url: string) => {
+  return url.startsWith('/') ? `${window.location.origin}${url}` : url;
+};
+
+// 当前使用的 Draw.io 服务 URL（支持托底切换）
+const currentDrawioBaseUrl = ref(getFullUrl(DRAWIO_ENV_URL));
+const DRAWIO_ORIGIN = computed(() => new URL(currentDrawioBaseUrl.value).origin);
+const isFallbackMode = ref(false);  // 是否已切换到托底服务
+const loadAttempts = ref(0);  // 加载尝试次数
+let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 // Draw.io URL (使用 embed 模式，启用自动保存)
 const drawioUrl = computed(() => {
@@ -236,7 +262,7 @@ const drawioUrl = computed(() => {
     autosave: '1',   // 启用自动保存
     math: '0'        // 禁用数学公式插件（避免 404 错误）
   });
-  return `${DRAWIO_BASE_URL}/?${params.toString()}`;
+  return `${currentDrawioBaseUrl.value}/?${params.toString()}`;
 });
 
 // 从 Draw.io 获取最新的 XML（异步）
@@ -435,9 +461,15 @@ const sendMessage = async () => {
           
           console.log('[Diagram] Event type:', parsed.type);
           
-          // 处理开始事件，获取 session_id
-          if (parsed.type === 'start' && parsed.session_id) {
-            sessionId.value = parsed.session_id;
+          // 处理开始事件，获取 session_id 和 thread_id
+          if (parsed.type === 'start') {
+            console.log('[Diagram] Start event received:', parsed);
+            if (parsed.session_id) {
+              sessionId.value = parsed.session_id;
+            }
+            if (parsed.thread_id) {
+              threadId.value = parsed.thread_id;
+            }
             saveToStorage();  // 保存会话ID
             continue;
           }
@@ -448,6 +480,25 @@ const sendMessage = async () => {
             if (parsed.context_limit) {
               contextLimit.value = parsed.context_limit;
             }
+            continue;
+          }
+          
+          // ⭐ 处理 HITL 中断事件（工具审批）
+          if (parsed.type === 'interrupt') {
+            console.log('[Diagram] Interrupt event received:', parsed);
+            // 保存 thread_id（可能与 session_id 不同）
+            if (parsed.thread_id) {
+              threadId.value = parsed.thread_id;
+            }
+            // 构造 InterruptEvent 对象
+            currentInterrupt.value = {
+              id: parsed.interrupt_id,
+              action_requests: parsed.action_requests || []
+            };
+            // 显示审批对话框
+            toolApprovalDialogVisible.value = true;
+            // 停止当前加载状态，等待用户审批
+            isLoading.value = false;
             continue;
           }
           
@@ -567,6 +618,13 @@ const sendMessage = async () => {
     // 移除所有剩余的加载消息
     messages.value = messages.value.filter(m => !(m.isLoading && !m.content));
     
+    // 确保所有消息的 isStreaming 都设置为 false（停止光标闪烁）
+    messages.value.forEach(m => {
+      if (m.isStreaming) {
+        m.isStreaming = false;
+      }
+    });
+    
     // 如果没有 AI 内容，添加默认消息
     if (!aiContent && messages.value[messages.value.length - 1]?.isUser) {
       messages.value.push({ content: '图表已更新，请查看右侧预览。', isUser: false });
@@ -582,6 +640,203 @@ const sendMessage = async () => {
     messages.value.push({ 
       content: `❌ 发送失败: ${error.message || '未知错误'}`, 
       isUser: false 
+    });
+  } finally {
+    isLoading.value = false;
+    scrollToBottom();
+  }
+};
+
+// ⭐ 处理工具审批决策
+const handleToolDecision = async (decision: {
+  interruptId: string;
+  type: 'approve' | 'reject';
+  rememberChoice?: boolean;
+  rememberScope?: string;
+  toolName?: string;
+}) => {
+  console.log('[Diagram] handleToolDecision:', decision);
+  
+  // 关闭审批对话框
+  toolApprovalDialogVisible.value = false;
+  currentInterrupt.value = null;
+  
+  // 如果是拒绝，添加拒绝消息
+  if (decision.type === 'reject') {
+    messages.value.push({
+      content: '❌ 工具调用已被拒绝',
+      isUser: false,
+      messageType: 'ai'
+    });
+    scrollToBottom();
+    return;
+  }
+  
+  // 批准后恢复执行
+  try {
+    isLoading.value = true;
+    // 添加已批准的提示消息
+    messages.value.push({
+      content: '✅ 工具调用已批准，正在继续执行...',
+      isUser: false,
+      isLoading: true,
+      messageType: 'ai'
+    });
+    scrollToBottom();
+    
+    // 调用 resume API 恢复执行 - 使用后端期望的格式
+    // 后端期望: { resume: { [interrupt_id]: { decisions: [{type: 'approve'}], action_count: n } } }
+    const actionCount = currentInterrupt.value?.action_requests?.length || 1;
+    const resumePayload: Record<string, any> = {
+      session_id: sessionId.value,
+      resume: {
+        [decision.interruptId]: {
+          decisions: [{ type: decision.type }],
+          action_count: actionCount
+        }
+      }
+    };
+    
+    const response = await fetch('/api/orchestrator/agent-loop/resume/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('auth-accessToken')}`
+      },
+      body: JSON.stringify(resumePayload)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Resume failed: ${response.status}`);
+    }
+    
+    // 处理流式响应（与 sendMessage 类似的逻辑）
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let aiContent = '';
+    let currentStep = 0;
+    let streamingMsgIndex = -1;
+    
+    // 移除"已批准"消息的加载状态
+    const lastMsg = messages.value[messages.value.length - 1];
+    if (lastMsg && lastMsg.isLoading) {
+      lastMsg.isLoading = false;
+      lastMsg.content = '✅ 工具调用已批准，继续执行...';
+    }
+    
+    while (reader) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonData = line.slice(6).trim();
+        if (!jsonData || jsonData === '[DONE]') continue;
+        
+        try {
+          const parsed = JSON.parse(jsonData);
+          console.log('[Diagram Resume] Event type:', parsed.type);
+          
+          // 处理上下文更新事件
+          if (parsed.type === 'context_update') {
+            contextTokenCount.value = parsed.context_token_count || 0;
+            continue;
+          }
+          
+          // 再次遇到 interrupt 事件（嵌套工具审批）
+          if (parsed.type === 'interrupt') {
+            console.log('[Diagram Resume] Interrupt event received:', parsed);
+            if (parsed.thread_id) {
+              threadId.value = parsed.thread_id;
+            }
+            currentInterrupt.value = {
+              id: parsed.interrupt_id,
+              action_requests: parsed.action_requests || []
+            };
+            toolApprovalDialogVisible.value = true;
+            isLoading.value = false;
+            return;  // 中断当前流处理，等待下一次审批
+          }
+          
+          // 步骤开始事件
+          if (parsed.type === 'step_start') {
+            currentStep = parsed.step || (currentStep + 1);
+            if (streamingMsgIndex >= 0 && messages.value[streamingMsgIndex]) {
+              messages.value[streamingMsgIndex].isStreaming = false;
+            }
+            messages.value.push({
+              content: '',
+              isUser: false,
+              messageType: 'step',
+              stepNumber: currentStep,
+              maxSteps: parsed.max_steps
+            });
+            messages.value.push({
+              content: '',
+              isUser: false,
+              isLoading: true,
+              messageType: 'ai'
+            });
+            aiContent = '';
+            streamingMsgIndex = messages.value.length - 1;
+            scrollToBottom();
+          }
+          
+          // 处理流式输出
+          if (parsed.type === 'stream' && parsed.data) {
+            aiContent += parsed.data;
+            const lastMsg = messages.value[messages.value.length - 1];
+            if (lastMsg && !lastMsg.isUser && lastMsg.messageType !== 'step' && lastMsg.messageType !== 'tool') {
+              lastMsg.content = aiContent;
+              lastMsg.isLoading = false;
+              lastMsg.isStreaming = true;
+              streamingMsgIndex = messages.value.length - 1;
+            } else {
+              messages.value.push({ content: aiContent, isUser: false, isStreaming: true, messageType: 'ai' });
+              streamingMsgIndex = messages.value.length - 1;
+            }
+            scrollToBottom();
+          }
+          
+          // 流式结束
+          if (parsed.type === 'stream_end' || parsed.type === 'complete') {
+            if (streamingMsgIndex >= 0 && messages.value[streamingMsgIndex]) {
+              messages.value[streamingMsgIndex].isStreaming = false;
+              messages.value[streamingMsgIndex].isLoading = false;
+            }
+          }
+          
+          // 处理工具结果
+          if (parsed.type === 'tool_end' || parsed.type === 'tool_result') {
+            handleToolEnd(parsed);
+          }
+        } catch (parseError) {
+          console.warn('[Diagram Resume] Parse error:', parseError);
+        }
+      }
+    }
+    
+    // 清理加载状态
+    messages.value = messages.value.filter(m => !(m.isLoading && !m.content));
+    
+    // 确保所有消息的 isStreaming 都设置为 false（停止光标闪烁）
+    messages.value.forEach(m => {
+      if (m.isStreaming) {
+        m.isStreaming = false;
+      }
+    });
+    
+  } catch (error: any) {
+    console.error('[Diagram] Resume failed:', error);
+    messages.value.push({
+      content: `❌ 恢复执行失败: ${error.message || '未知错误'}`,
+      isUser: false,
+      messageType: 'ai'
     });
   } finally {
     isLoading.value = false;
@@ -606,26 +861,34 @@ const handleToolEnd = (data: any) => {
   
   // 兼容 tool_end 和 tool_result 两种格式
   // tool_end: { tool_name, tool_output }
-  // tool_result: { summary: "tool_name:\n{json}\n\nother_tool: 失败 - xxx" }
+  // tool_result: { tool_name, tool_output } 或 { summary: "tool_name:\n{json}\n\nother_tool: 失败 - xxx" }
   let tool_name = '';
   let tool_output = '';
 
   if (data.tool_name) {
+    // 新格式：直接包含 tool_name
     tool_name = data.tool_name;
-    tool_output = data.tool_output;
+    tool_output = data.tool_output || data.summary || '';
   } else if (data.summary) {
-    // summary 可能包含多个工具结果，用 \n\n 分隔
-    // 处理 display_diagram 或 edit_diagram 的结果
-    const tools = data.summary.split(/\n\n+/);
-    for (const toolStr of tools) {
-      // 匹配格式: "tool_name:\n{json}" 或 "tool_name: 失败 - xxx"
-      const match = toolStr.match(/^(\w+):\s*\n?(.*)$/s);
-      if (match && (match[1] === 'display_diagram' || match[1] === 'edit_diagram')) {
-        tool_name = match[1];
-        tool_output = match[2].trim();
-        // 处理可能存在的多重转义
-        tool_output = tool_output.replace(/\\\\"/g, '\\"').replace(/\\\\n/g, '\\n');
-        break;
+    // 旧格式：summary 可能包含多个工具结果，用 \n\n 分隔
+    // 尝试直接解析为 JSON（如果是纯 JSON 字符串）
+    try {
+      const parsed = JSON.parse(data.summary);
+      if (parsed.action === 'display' || parsed.action === 'edit') {
+        tool_name = parsed.action === 'display' ? 'display_diagram' : 'edit_diagram';
+        tool_output = data.summary;
+      }
+    } catch {
+      // 不是纯 JSON，尝试匹配 "tool_name:\n{json}" 格式
+      const tools = data.summary.split(/\n\n+/);
+      for (const toolStr of tools) {
+        const match = toolStr.match(/^(\w+):\s*\n?(.*)$/s);
+        if (match && (match[1] === 'display_diagram' || match[1] === 'edit_diagram')) {
+          tool_name = match[1];
+          tool_output = match[2].trim();
+          tool_output = tool_output.replace(/\\\\"/g, '\\"').replace(/\\\\n/g, '\\n');
+          break;
+        }
       }
     }
   }
@@ -929,21 +1192,65 @@ const sendDrawioMessage = (msg: any) => {
   }
 };
 
+// 切换到公共托底服务
+const fallbackToPublicService = () => {
+  if (isFallbackMode.value) return;  // 已经是托底模式，不再切换
+  
+  console.warn('[Draw.io] 自托管服务不可用，切换到公共服务');
+  isFallbackMode.value = true;
+  currentDrawioBaseUrl.value = DRAWIO_PUBLIC_URL;
+  drawioReady.value = false;
+  iframeLoading.value = true;
+  loadAttempts.value = 0;
+  
+  Message.warning({
+    content: 'Draw.io 自托管服务不可用，已自动切换到公共服务',
+    duration: 3000
+  });
+};
+
+// 启动加载超时检测
+const startLoadTimeout = () => {
+  // 清除之前的超时
+  if (loadTimeoutId) {
+    clearTimeout(loadTimeoutId);
+  }
+  
+  // 设置 10 秒超时
+  loadTimeoutId = setTimeout(() => {
+    if (!drawioReady.value && !isFallbackMode.value) {
+      console.warn('[Draw.io] 加载超时，尝试切换到公共服务');
+      loadAttempts.value++;
+      if (loadAttempts.value >= 2) {
+        fallbackToPublicService();
+      }
+    }
+  }, 10000);
+};
+
 // iframe 加载完成
 const onIframeLoad = () => {
   console.log('Draw.io iframe loaded');
   iframeLoading.value = false;
+  
+  // 启动超时检测（等待 Draw.io init 消息）
+  startLoadTimeout();
 };
 
 // 处理来自 Draw.io 的消息
 const handleDrawioMessage = (event: MessageEvent) => {
   // 验证消息来源是配置的 Draw.io 服务
-  if (event.origin !== DRAWIO_ORIGIN) return;
+  if (event.origin !== DRAWIO_ORIGIN.value) return;
 
   try {
     const msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
     
     if (msg.event === 'init') {
+      // 清除超时检测
+      if (loadTimeoutId) {
+        clearTimeout(loadTimeoutId);
+        loadTimeoutId = null;
+      }
       drawioReady.value = true;
       // Draw.io embed 初始化后必须发送 load 消息才能显示编辑器
       const xmlToLoad = pendingXml.value || '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>';
@@ -1045,6 +1352,9 @@ onMounted(async () => {
   // 从 localStorage 恢复数据
   loadFromStorage();
   
+  // 启动初始加载超时检测
+  startLoadTimeout();
+  
   // 页面加载时检查提示词是否存在
   await checkAndInitializePrompt();
   
@@ -1060,6 +1370,10 @@ const handleBeforeUnload = () => {
 onUnmounted(() => {
   window.removeEventListener('message', handleDrawioMessage);
   window.removeEventListener('beforeunload', handleBeforeUnload);
+  // 清除超时检测
+  if (loadTimeoutId) {
+    clearTimeout(loadTimeoutId);
+  }
 });
 </script>
 
@@ -1354,5 +1668,79 @@ onUnmounted(() => {
   50% {
     opacity: 0;
   }
+}
+
+/* 紧凑版工具审批卡片样式 - 适配小对话窗口 */
+.compact-approval-wrapper {
+  padding: 8px;
+  margin: 8px 0;
+}
+
+.compact-approval-wrapper :deep(.approval-card) {
+  margin: 0;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.compact-approval-wrapper :deep(.card-content) {
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.compact-approval-wrapper :deep(.tool-section) {
+  width: 100%;
+}
+
+.compact-approval-wrapper :deep(.tool-info) {
+  flex: 1;
+}
+
+.compact-approval-wrapper :deep(.tool-name) {
+  font-size: 13px;
+}
+
+.compact-approval-wrapper :deep(.tool-args) {
+  font-size: 11px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compact-approval-wrapper :deep(.tool-args code) {
+  font-size: 11px;
+}
+
+.compact-approval-wrapper :deep(.action-section) {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.compact-approval-wrapper :deep(.remember-option) {
+  flex: 1;
+}
+
+.compact-approval-wrapper :deep(.remember-option .arco-select) {
+  width: 100% !important;
+}
+
+.compact-approval-wrapper :deep(.action-buttons) {
+  gap: 6px;
+}
+
+.compact-approval-wrapper :deep(.action-buttons .arco-btn) {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.compact-approval-wrapper :deep(.args-detail) {
+  font-size: 11px;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.compact-approval-wrapper :deep(.arg-key),
+.compact-approval-wrapper :deep(.arg-value) {
+  font-size: 11px;
 }
 </style>

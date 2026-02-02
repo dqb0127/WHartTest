@@ -94,7 +94,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { Button as AButton, Checkbox as ACheckbox, Space as ASpace, Modal, Message } from '@arco-design/web-vue';
-import { IconPlus, IconDelete, IconMessage, IconCheckCircle, IconCloseCircle } from '@arco-design/web-vue/es/icon';
+import { IconPlus, IconDelete, IconCheckCircle, IconCloseCircle } from '@arco-design/web-vue/es/icon';
 
 interface ChatSession {
   id: string;

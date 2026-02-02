@@ -142,15 +142,6 @@ const formatArgsInline = (args?: Record<string, unknown>) => {
   return str.length > 60 ? str.substring(0, 60) + '...' : str;
 };
 
-const formatArgs = (args?: Record<string, unknown>) => {
-  if (!args) return '';
-  try {
-    return JSON.stringify(args, null, 2);
-  } catch {
-    return String(args);
-  }
-};
-
 const getValueType = (value: unknown): string => {
   if (value === null) return 'type-null';
   if (typeof value === 'string') return 'type-string';

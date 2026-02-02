@@ -37,7 +37,7 @@
 
         <a-button type="text" @click="$emit('show-system-prompt')">
           <template #icon>
-            <i class="icon-settings"></i>
+            <icon-file />
           </template>
           管理提示词
         </a-button>
@@ -84,10 +84,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { Button as AButton, Tag as ATag, Switch as ASwitch, Select as ASelect, Option as AOption } from '@arco-design/web-vue';
-import { IconDelete, IconSettings, IconThunderbolt } from '@arco-design/web-vue/es/icon';
+import { IconDelete, IconSettings, IconThunderbolt, IconFile } from '@arco-design/web-vue/es/icon';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import { getUserPrompts, getDefaultPrompt } from '@/features/prompts/services/promptService';
 import type { UserPrompt } from '@/features/prompts/types/prompt';
@@ -143,7 +143,7 @@ const loadUserPrompts = async () => {
       getDefaultPrompt()
     ]);
 
-    if (promptsResponse.status === 'success') {
+    if (promptsResponse.status === 'success' && promptsResponse.data) {
       let allPrompts: UserPrompt[] = [];
       if (Array.isArray(promptsResponse.data)) {
         allPrompts = promptsResponse.data;
