@@ -95,8 +95,8 @@ def get_testcase_detail(project_id: int, case_id: int):
         return {"error": str(e)}
 
 
-def add_testcase(project_id: int, module_id: int, name: str, level: str,
-                 precondition: str = "", steps: list = None, notes: str = "",
+def add_testcase(project_id: int, module_id: int, name: str, level: str = "P1",
+                 precondition: str = "无", steps: list = None, notes: str = "",
                  review_status: str = "pending_review"):
     """新增测试用例"""
     url = f"{BASE_URL}/api/projects/{project_id}/testcases/"
@@ -114,7 +114,7 @@ def add_testcase(project_id: int, module_id: int, name: str, level: str,
         resp.raise_for_status()
         result = resp.json()
         if result.get("code") == 201:
-            return {"message": "保存成功", "testcase": result.get("data", {})}
+            return {"message": "保存成功", "testcase": {"id": result.get("data", {}).get("id"),"name": result.get("data", {}).get("name", name)}}
         return {"message": "保存失败", "response": result}
     except Exception as e:
         return {"error": str(e)}

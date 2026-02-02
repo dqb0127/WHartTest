@@ -20,6 +20,8 @@
 ```bash
 cd WHartTest_MCP
 
+cp .env.example .env # 复制env副本使其生效
+
 # 创建虚拟环境
 uv venv --python 3.11
 
@@ -27,35 +29,13 @@ uv venv --python 3.11
 # Linux/macOS
 source .venv/bin/activate
 # Windows
-# .venv\Scripts\activate
+.venv\Scripts\activate
 
 # 安装依赖
 uv pip install -r requirements.txt
 ```
 
-### 2. 配置说明
-
-#### MS测试用例工具 (ms_mcp_api.py)
-
-- **服务端口**: 8007
-- **API地址**: http://msxxxxxxxxx.com
-- **认证信息**: 需要在 `.env` 文件中配置 `MS_ACCESS_KEY` 和 `MS_SECRET_KEY`
-
-#### WHartTest 测试用例工具 (WHartTest_tools.py)
-
-- **服务端口**: 8006
-- **API地址**: 后端服务ip+端口
-- **API密钥**: 已内置在代码中
-
-### 3. 启动服务
-
-#### 启动MS测试用例工具
-
-```bash
-uv run python ms_mcp_api.py
-```
-
-服务将在 `http://127.0.0.1:8007` 启动
+### 2. 启动服务
 
 #### 启动测试用例工具
 
@@ -63,17 +43,8 @@ uv run python ms_mcp_api.py
 uv run python WHartTest_tools.py
 ```
 
-服务将在 `http://0.0.0.0:8006` 启动
 
 ## 功能说明
-
-### MS测试用例工具功能
-
-- 获取项目名称和ID
-- 获取模块名称和ID
-- 获取用例等级信息
-- 生成测试用例步骤数据
-- 保存功能测试用例
 
 ### 测试用例工具功能
 
@@ -83,31 +54,13 @@ uv run python WHartTest_tools.py
 - 获取用例列表和详情
 - 保存操作截图
 - 保存功能测试用例
+## 配置说明
 
-## MCP 集成
+#### WHartTest 测试用例工具 (WHartTest_tools.py)
 
-这些工具基于 FastMCP 框架构建，可以与支持 MCP 协议的【其他客户端】集成使用。
-
-### 连接配置
-
-在 MCP 客户端中配置连接：
-
-```json
-{
-  "mcpServers": {
-    "ms-testcase-tools": {
-      "command": "python",
-      "args": ["path/to/ms_mcp_api.py"],
-      "env": {}
-    },
-    "testauto-tools": {
-      "command": "python",
-      "args": ["path/to/WHartTest_tools.py"],
-      "env": {}
-    }
-  }
-}
-```
+- **服务端口**: 8006
+- **API地址**: 后端服务ip+端口
+- **API密钥**: 已内置在代码中
 
 ## 注意事项
 

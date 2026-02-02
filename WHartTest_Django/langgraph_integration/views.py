@@ -324,6 +324,64 @@ class LLMConfigViewSet(BaseModelViewSet):
                     msg = e.response.text[:200] if e.response.text else str(e)
             return Response({'status': 'error', 'message': f'连接失败: {msg}'}, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=False, methods=['post'])
+    def fetch_models(self, request):
+        """
+        从LLM API获取可用模型列表
+        请求体: 
+        - 新建配置时: { "api_url": "...", "api_key": "..." }
+        - 编辑配置时: { "config_id": 123 } 或 { "api_url": "...", "config_id": 123 }
+          (api_key 优先从数据库获取)
+        """
+        import requests as http_requests
+        
+        api_url = request.data.get('api_url', '').rstrip('/')
+        api_key = request.data.get('api_key', '')
+        config_id = request.data.get('config_id')
+        
+        # 如果提供了 config_id，优先从数据库获取配置
+        if config_id:
+            try:
+                config = LLMConfig.objects.get(pk=config_id)
+                if not api_url:
+                    api_url = config.api_url.rstrip('/')
+                if not api_key:
+                    api_key = config.api_key or ''
+            except LLMConfig.DoesNotExist:
+                return Response({'status': 'error', 'message': '配置不存在'}, status=status.HTTP_404_NOT_FOUND)
+        
+        if not api_url:
+            return Response({'status': 'error', 'message': '请提供 API URL'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        headers = {'Content-Type': 'application/json'}
+        if api_key:
+            headers['Authorization'] = f'Bearer {api_key}'
+        
+        try:
+            resp = http_requests.get(
+                f'{api_url}/models',
+                headers=headers,
+                timeout=10
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            if data.get('data'):
+                models = [model.get('id') for model in data['data'] if model.get('id')]
+                return Response({'status': 'success', 'models': models})
+            else:
+                return Response({'status': 'warning', 'message': 'API 返回格式不符合预期', 'models': []})
+        except http_requests.Timeout:
+            return Response({'status': 'error', 'message': '请求超时'}, status=status.HTTP_408_REQUEST_TIMEOUT)
+        except http_requests.RequestException as e:
+            msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    msg = e.response.json().get('error', {}).get('message', str(e))
+                except Exception:
+                    msg = e.response.text[:200] if e.response.text else str(e)
+            return Response({'status': 'error', 'message': f'获取模型列表失败: {msg}'}, status=status.HTTP_400_BAD_REQUEST)
+
 
 def get_effective_system_prompt(user, prompt_id=None):
     """

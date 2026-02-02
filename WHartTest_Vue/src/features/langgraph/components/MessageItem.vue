@@ -180,13 +180,37 @@ const canQuote = computed(() => ['human', 'ai'].includes(props.message.messageTy
 const canRetry = computed(() => ['human', 'ai'].includes(props.message.messageType || '') && !props.message.isStreaming && !props.message.isLoading);
 const canDelete = computed(() => props.message.messageType !== 'system' && showActions.value);
 
-// 复制到剪贴板
+// 复制到剪贴板（兼容HTTP环境）
 const handleCopy = async () => {
   try {
-    await navigator.clipboard.writeText(props.message.content);
-    Message.success('已复制到剪贴板');
-  } catch {
-    Message.error('复制失败');
+    // 优先使用 Clipboard API（HTTPS或localhost可用）
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(props.message.content);
+      Message.success('复制成功');
+      return;
+    }
+    
+    // 回退方案：使用 document.execCommand（兼容HTTP）
+    const textArea = document.createElement('textarea');
+    textArea.value = props.message.content;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    textArea.style.top = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    
+    if (successful) {
+      Message.success('复制成功');
+    } else {
+      Message.error('复制失败，请手动复制');
+    }
+  } catch (error) {
+    console.error('复制失败:', error);
+    Message.error('复制失败，请手动复制');
   }
 };
 
@@ -559,18 +583,24 @@ const formatToolMessage = (content: string) => {
 /* 图片容器样式 */
 .message-image-container {
   margin-bottom: 8px;
-  max-width: 300px;
+  max-width: 100%;
+  width: 100%;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  justify-content: center; /* 居中显示图片 */
 }
 
 .message-image {
   width: 100%;
   height: auto;
+  max-width: 100%;
+  max-width: min(100%, 600px); /* 限制图片最大宽度为600px或容器宽度，取较小值 */
   display: block;
   cursor: pointer;
   transition: transform 0.2s ease;
+  object-fit: contain;
 }
 
 .message-image:hover {
@@ -1019,6 +1049,43 @@ const formatToolMessage = (content: string) => {
   cursor: pointer;
   transition: background-color 0.2s ease;
   user-select: none;
+}
+
+/* 响应式图片尺寸调整 */
+@media (max-width: 768px) {
+  .message-image {
+    max-width: min(100%, 400px); /* 在小屏幕上限制最大宽度为400px */
+  }
+}
+
+@media (max-width: 480px) {
+  .message-image {
+    max-width: min(100%, 300px); /* 在手机上限制最大宽度为300px */
+  }
+}
+
+/* 确保消息气泡内的图片不会超出容器 */
+.message-bubble :deep(img) {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 8px 0;
+}
+
+/* 用户消息中的图片样式 */
+.user-message .message-image-container {
+  display: flex;
+  justify-content: flex-end; /* 用户消息的图片靠右对齐 */
+}
+
+.user-message .message-image {
+  max-width: min(100%, 500px); /* 用户消息的图片稍微小一些 */
+}
+
+/* AI消息中的图片样式 */
+.ai-message .message-image-container {
+  display: flex;
+  justify-content: flex-start; /* AI消息的图片靠左对齐 */
 }
 
 .thinking-header:hover {

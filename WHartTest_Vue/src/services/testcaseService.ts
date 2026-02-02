@@ -278,9 +278,34 @@ export const createTestCase = async (projectId: number, testCaseData: CreateTest
     }
   } catch (error: any) {
     console.error('创建测试用例出错:', error);
+    
+    // 处理验证错误，提供更友好的错误信息
+    let errorMessage = '创建测试用例时发生错误';
+    if (error.response?.data) {
+      if (error.response.data.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response.data.errors) {
+        // 处理字段验证错误
+        const fieldErrors = error.response.data.errors;
+        const errorMessages = [];
+        for (const field in fieldErrors) {
+          if (fieldErrors[field] && Array.isArray(fieldErrors[field])) {
+            errorMessages.push(`${fieldErrors[field].join(', ')}`);
+          }
+        }
+        if (errorMessages.length > 0) {
+          errorMessage = errorMessages.join('; ');
+        }
+      } else if (error.response.data.error) {
+        errorMessage = error.response.data.error;
+      }
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+    
     return {
       success: false,
-      error: error.response?.data?.message || error.message || '创建测试用例时发生错误',
+      error: errorMessage,
       statusCode: error.response?.status,
     };
   }

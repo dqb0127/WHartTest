@@ -33,6 +33,7 @@
                 :loading="loadingModels"
                 placeholder="输入或选择模型名称 (如: gpt-4-turbo)"
                 allow-clear
+                :filter-option="filterModelOption"
                 @focus="handleModelInputFocus"
                 class="model-input"
               />
@@ -173,8 +174,7 @@ import {
   type FieldRule,
 } from '@arco-design/web-vue';
 import { IconRefresh, IconThunderbolt } from '@arco-design/web-vue/es/icon';
-import { createLlmConfig, partialUpdateLlmConfig, testLlmConnection } from '@/features/langgraph/services/llmConfigService';
-import axios from 'axios';
+import { createLlmConfig, partialUpdateLlmConfig, testLlmConnection, fetchModels } from '@/features/langgraph/services/llmConfigService';
 import type { LlmConfig, CreateLlmConfigRequest, PartialUpdateLlmConfigRequest } from '@/features/langgraph/types/llmConfig';
 
 interface Props {
@@ -314,7 +314,7 @@ const handleCancel = () => {
   emit('cancel');
 };
 
-// 从 API 获取可用模型列表（OpenAI 兼容格式）
+// 从后端 API 获取可用模型列表
 const fetchAvailableModels = async () => {
   if (!formData.value.api_url) {
     Message.warning('请先填写 API URL');
@@ -324,36 +324,28 @@ const fetchAvailableModels = async () => {
   loadingModels.value = true;
 
   try {
-    const apiUrl = formData.value.api_url.replace(/\/$/, '');
-    const modelsEndpoint = `${apiUrl}/models`;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (formData.value.api_key) {
-      headers['Authorization'] = `Bearer ${formData.value.api_key}`;
-    }
-    const response = await axios.get(modelsEndpoint, {
-      headers,
-      timeout: 10000,
-    });
-
-    if (response.data && response.data.data) {
-      const models = response.data.data.map((model: any) => model.id);
-      modelOptions.value = models;
-      if (models.length > 0) {
-        Message.success(`成功获取 ${models.length} 个模型`);
+    // 编辑模式时传递 configId，让后端从数据库获取 API Key
+    const configId = props.configData?.id;
+    const response = await fetchModels(
+      formData.value.api_url,
+      formData.value.api_key || undefined,
+      configId
+    );
+    
+    if (response.status === 'success' && response.data?.models) {
+      modelOptions.value = response.data.models;
+      if (response.data.models.length > 0) {
+        Message.success(`成功获取 ${response.data.models.length} 个模型`);
       } else {
         Message.warning('未找到可用模型');
       }
     } else {
-      Message.warning('API 返回格式不符合预期');
+      Message.error(response.message || '获取模型列表失败');
       modelOptions.value = [];
     }
   } catch (error: any) {
     console.error('获取模型列表失败:', error);
-    const errorMsg = error.response?.data?.error?.message 
-      || error.response?.statusText 
-      || error.message 
-      || '获取模型列表失败';
-    Message.error(`获取模型列表失败: ${errorMsg}`);
+    Message.error('获取模型列表失败');
     modelOptions.value = [];
   } finally {
     loadingModels.value = false;
@@ -423,6 +415,14 @@ const handleModelInputFocus = () => {
   if (formData.value.api_url && modelOptions.value.length === 0) {
     fetchAvailableModels();
   }
+};
+
+// 自定义模型过滤，没输入时显示全部，输入时模糊匹配
+const filterModelOption = (inputValue: string, option: { value: string }) => {
+  if (!inputValue) {
+    return true; // 没有输入时显示全部
+  }
+  return option.value.toLowerCase().includes(inputValue.toLowerCase());
 };
 </script>
 

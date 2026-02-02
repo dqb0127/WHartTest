@@ -375,6 +375,7 @@ const handlePaste = (e: ClipboardEvent) => {
   position: relative;
   display: inline-block;
   max-width: 200px;
+  max-height: 150px;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -382,7 +383,10 @@ const handlePaste = (e: ClipboardEvent) => {
 
 .image-preview img {
   width: 100%;
-  height: auto;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
   display: block;
 }
 

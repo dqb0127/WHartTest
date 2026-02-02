@@ -135,10 +135,12 @@
         <div v-if="document?.status === 'uploaded'" class="upload-hint">
           <a-alert
             type="warning"
-            message="请先进行拆分"
-            description="上传完成后请使用 AI 拆分生成模块，用例生成和后续评审依赖这些模块。"
-            show-icon
-          />
+            :show-icon="true"
+            :closable="false"
+          >
+            <template #title>请先进行拆分</template>
+            <template #content>上传完成后请使用 AI 拆分生成模块，用例生成和后续评审依赖这些模块。</template>
+          </a-alert>
         </div>
       </a-card>
     </div>
@@ -254,10 +256,10 @@
                     {{ module.title }}
                   </span>
                   <div v-if="document.status === 'user_reviewing'" class="label-actions">
-                    <a-button type="text" size="mini" @click.stop="editModuleContent(module)">
+                    <a-button type="text" size="mini" class="module-action-btn edit-btn" @click.stop="editModuleContent(module)">
                       <template #icon><icon-edit /></template>
                     </a-button>
-                    <a-button type="text" size="mini" @click.stop="splitAtCursor(module)">
+                    <a-button type="text" size="mini" class="module-action-btn split-btn" @click.stop="splitAtCursor(module)">
                       <template #icon><icon-scissor /></template>
                     </a-button>
                   </div>
@@ -424,7 +426,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick, h } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, h, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Message, Modal, Input as AInput } from '@arco-design/web-vue';
 import {
@@ -450,10 +452,14 @@ import type {
 } from '../types';
 import { DocumentStatusDisplay, DocumentTypeDisplay } from '../types';
 import SplitOptionsModal from '../components/SplitOptionsModal.vue';
+import { useProjectStore } from '@/store/projectStore';
 
 // 路由
 const route = useRoute();
 const router = useRouter();
+
+// Store
+const projectStore = useProjectStore();
 
 // 响应式数据
 const loading = ref(false);
@@ -1165,6 +1171,17 @@ onMounted(() => {
   loadDocument();
 });
 
+// 监听项目变化 - 当在详情页切换项目时，返回到列表页
+watch(
+  () => projectStore.currentProjectId,
+  (newProjectId, oldProjectId) => {
+    if (newProjectId && oldProjectId && newProjectId !== oldProjectId) {
+      // 项目切换时，返回到需求文档列表页
+      router.push('/requirements');
+    }
+  }
+);
+
 // 组件卸载时停止轮询
 onBeforeUnmount(() => {
   isPollingActive = false;
@@ -1674,6 +1691,62 @@ onBeforeUnmount(() => {
   gap: 4px;
 }
 
+/* 模块标题框内的按钮样式 - 白色主题 */
+.label-actions .module-action-btn {
+  color: #ffffff !important; /* 按钮颜色为白色，使用important强制覆盖 */
+  background-color: rgba(255, 255, 255, 0.2) !important; /* 半透明白色背景 */
+  border-radius: 4px;
+  padding: 4px 8px;
+  transition: all 0.2s ease;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important; /* 白色边框 */
+}
+
+.label-actions .module-action-btn:hover {
+  color: #ffffff !important; /* 悬停时保持白色 */
+  background-color: rgba(255, 255, 255, 0.3) !important; /* 悬停时背景色加深 */
+  border-color: rgba(255, 255, 255, 0.5) !important; /* 悬停时边框颜色加深 */
+  transform: translateY(-1px); /* 悬停时轻微上浮 */
+  box-shadow: 0 2px 8px rgba(255, 255, 255, 0.2); /* 悬停时添加白色阴影 */
+}
+
+.label-actions .module-action-btn:active {
+  transform: translateY(0); /* 点击时恢复原位 */
+  box-shadow: 0 1px 4px rgba(255, 255, 255, 0.1); /* 点击时阴影变小 */
+}
+
+/* 强制覆盖图标颜色 - 使用更具体的选择器 */
+.label-actions .module-action-btn .arco-icon,
+.label-actions .module-action-btn svg,
+.label-actions .module-action-btn i,
+.label-actions .edit-btn .arco-icon-edit,
+.label-actions .split-btn .arco-icon-scissor {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* 确保所有子元素都继承白色 */
+.label-actions .module-action-btn * {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* 针对编辑按钮和拆分按钮的统一白色样式 */
+.label-actions .edit-btn,
+.label-actions .split-btn {
+  color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.label-actions .edit-btn:hover,
+.label-actions .split-btn:hover {
+  color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.3) !important;
+  border-color: rgba(255, 255, 255, 0.5) !important;
+}
+
 .segment-content {
   white-space: pre-wrap;
   padding: 12px;
@@ -1857,6 +1930,80 @@ onBeforeUnmount(() => {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid #e5e6eb;
+}
+
+/* 调整警告提示框的布局，确保图标和文字完美对齐并垂直居中 */
+.upload-hint :deep(.arco-alert) {
+  padding: 14px 20px; /* 统一上下内边距 */
+  min-height: 52px; /* 设置合适的最小高度 */
+  width: 100%;
+  display: flex;
+  align-items: center; /* 垂直居中对齐 */
+  gap: 10px; /* 图标与内容之间的间距 */
+}
+
+/* 确保警告图标完美垂直居中 */
+.upload-hint :deep(.arco-alert-icon) {
+  font-size: 16px; /* 适当大小的图标 */
+  margin: 0;
+  display: flex;
+  align-items: center; /* 图标垂直居中 */
+  height: auto;
+  line-height: 1; /* 确保图标行高一致 */
+  flex-shrink: 0; /* 防止图标被压缩 */
+}
+
+/* 优化内容区域的布局 */
+.upload-hint :deep(.arco-alert-content-wrapper) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center; /* 内容垂直居中 */
+  align-items: flex-start;
+  gap: 3px; /* 标题与内容之间的合适间距 */
+}
+
+/* 标题样式优化（"请先进行拆分"）*/
+.upload-hint :deep(.arco-alert-title) {
+  font-size: 14px; /* 适中的字体大小 */
+  font-weight: 600;
+  margin: 0;
+  line-height: 1.4; /* 合适的行高 */
+  display: flex;
+  align-items: center; /* 标题文字垂直居中 */
+  color: #333; /* 确保文字颜色清晰 */
+}
+
+/* 内容样式优化（提示文字）*/
+.upload-hint :deep(.arco-alert-content) {
+  font-size: 12px; /* 稍小的字体大小 */
+  line-height: 1.4;
+  margin: 0;
+  color: #666; /* 提示文字用稍浅的颜色 */
+  display: flex;
+  align-items: center; /* 内容文字垂直居中 */
+}
+
+/* 特殊处理：确保整体内容完美居中 */
+.upload-hint :deep(.arco-alert-body) {
+  display: flex;
+  align-items: center; /* 整体内容垂直居中 */
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* 移除可能存在的额外边距 */
+.upload-hint :deep(.arco-alert-with-title) {
+  align-items: center; /* 有标题时也保持居中 */
+}
+
+/* 调整警告提示框的内边距和高度 */
+.upload-hint :deep(.arco-alert) {
+  padding: 20px 24px;
+  max-height: 30px;
+  width: 100%;
+  align-items: center;
 }
 
 /* 评审报告区域样式 */
