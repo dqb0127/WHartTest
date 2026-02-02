@@ -27,6 +27,37 @@
         </div>
       </div>
       <div class="user-info">
+        <!-- 版本号显示 -->
+        <a-popover v-if="hasUpdate" position="bottom" trigger="hover" content-class="version-popover">
+          <a 
+            class="version-badge update-available" 
+            :href="versionInfo?.releaseUrl || 'https://github.com/mgdaaslab/WHartTest/releases'"
+            target="_blank"
+          >
+            当前版本: {{ currentVersion }}
+            <span class="update-dot"></span>
+          </a>
+          <template #content>
+            <div class="version-update-info">
+              <div class="version-update-header">
+                <span class="update-title">🎉 新版本可用</span>
+                <span class="update-version">v{{ versionInfo?.latest }}</span>
+              </div>
+              <div class="version-update-notes" v-if="releaseNotesPreview">
+                {{ releaseNotesPreview }}
+              </div>
+              <a 
+                class="version-update-footer"
+                :href="versionInfo?.releaseUrl || 'https://github.com/mgdaaslab/WHartTest/releases'"
+                target="_blank"
+              >
+                点击查看完整更新日志
+              </a>
+            </div>
+          </template>
+        </a-popover>
+        <span v-else class="version-badge">当前版本: {{ currentVersion }}</span>
+        
         <a-avatar class="avatar" style="background-color: #00a0e9; color: white;">
           <span>{{ userInitial }}</span>
         </a-avatar>
@@ -193,6 +224,12 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/store/authStore';
 import { useProjectStore } from '@/store/projectStore';
 import {
+  getCurrentVersion,
+  formatVersion,
+  checkLatestVersion,
+  type VersionInfo
+} from '@/services/versionService';
+import {
   Layout as ALayout,
   Menu as AMenu,
   Avatar as AAvatar,
@@ -200,6 +237,7 @@ import {
   Doption as ADoption,
   SubMenu as ASubMenu,
   Select as ASelect,
+  Popover as APopover,
   Message
 } from '@arco-design/web-vue';
 import {
@@ -234,6 +272,33 @@ const AOption = ASelect.Option;
 const router = useRouter();
 const authStore = useAuthStore();
 const projectStore = useProjectStore();
+
+// 版本信息
+const currentVersion = ref(formatVersion(getCurrentVersion()));
+const versionInfo = ref<VersionInfo | null>(null);
+const hasUpdate = computed(() => versionInfo.value?.hasUpdate ?? false);
+
+// 更新说明预览（显示完整内容）
+const releaseNotesPreview = computed(() => {
+  const notes = versionInfo.value?.releaseNotes;
+  if (!notes) return '';
+  // 移除 Markdown 标题符号，提取纯文本
+  return notes
+    .replace(/^#+\s*/gm, '')  // 移除标题 #
+    .replace(/\r\n/g, '\n')    // 统一换行符
+    .replace(/\*\*/g, '')      // 移除粗体
+    .replace(/`[^`]+`/g, '')   // 移除代码
+    .trim();
+});
+
+// 检查版本更新
+async function checkVersion() {
+  try {
+    versionInfo.value = await checkLatestVersion();
+  } catch (error) {
+    console.warn('版本检查失败:', error);
+  }
+}
 
 // 用户信息
 const user = computed(() => authStore.currentUser);
@@ -463,6 +528,9 @@ onMounted(async () => {
 
   // 加载项目列表
   await projectStore.fetchProjects();
+  
+  // 检查版本更新（后台执行，不阻塞页面）
+  checkVersion();
 });
 </script>
 
@@ -529,6 +597,114 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   margin-right: 20px;
+  gap: 12px;
+}
+
+/* 版本号样式 */
+.version-badge {
+  font-size: 13px;
+  color: #86909c;
+  background: #f2f3f5;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.5;
+}
+
+.version-badge.update-available {
+  color: #00b42a;
+  background: #e8ffea;
+  cursor: pointer;
+}
+
+.version-badge.update-available:hover {
+  background: #d4f7d4;
+}
+
+.update-dot {
+  width: 5px;
+  height: 5px;
+  background: #00b42a;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* 版本更新弹出框样式 */
+.version-update-info {
+  max-width: 320px;
+  padding: 4px;
+}
+
+.version-update-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e6eb;
+}
+
+.update-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1d2129;
+}
+
+.update-version {
+  font-size: 13px;
+  color: #00b42a;
+  font-weight: 500;
+  background: #e8ffea;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.version-update-notes {
+  font-size: 12px;
+  color: #4e5969;
+  line-height: 1.6;
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.version-update-notes::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
+
+.version-update-footer {
+  display: block;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e6eb;
+  font-size: 12px;
+  color: #165dff;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.version-update-footer:hover {
+  color: #0e42d2;
+  text-decoration: underline;
 }
 
 .avatar {

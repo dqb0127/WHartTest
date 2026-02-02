@@ -208,9 +208,10 @@ class Command(BaseCommand):
         return issues
 
     def check_vector_stores(self):
-        """检查向量存储状态"""
+        """检查向量存储状态和数据一致性"""
         self.stdout.write('\n🗄️  检查向量存储...')
         issues = []
+        self._inconsistent_kbs = []  # 保存不一致的知识库，供修复使用
         
         try:
             # 检查向量存储缓存
@@ -222,23 +223,45 @@ class Command(BaseCommand):
             if kb_dir.exists():
                 kb_dirs = [d for d in kb_dir.iterdir() if d.is_dir()]
                 self.stdout.write(f'  📁 知识库目录数量: {len(kb_dirs)}')
+            
+            # 检查 Qdrant 连接和数据一致性
+            try:
+                from qdrant_client import QdrantClient
+                qdrant_url = os.environ.get('QDRANT_URL', 'http://localhost:8918')
+                client = QdrantClient(url=qdrant_url)
+                collections = client.get_collections().collections
+                collection_names = {col.name for col in collections}
+                self.stdout.write(f'  🗄️  Qdrant 集合数量: {len(collections)}')
                 
-                # 检查 Qdrant 连接
-                try:
-                    from qdrant_client import QdrantClient
-                    import os
-                    qdrant_url = os.environ.get('QDRANT_URL', 'http://localhost:8918')
-                    client = QdrantClient(url=qdrant_url)
-                    collections = client.get_collections().collections
-                    self.stdout.write(f'  🗄️  Qdrant 集合数量: {len(collections)}')
-                    for col in collections:
-                        self.stdout.write(f'     ✅ {col.name}')
-                except Exception as e:
-                    issue = f'Qdrant 连接失败: {e}'
-                    issues.append(issue)
-                    self.stdout.write(f'  ❌ {issue}')
-            else:
-                self.stdout.write('  📁 知识库目录不存在')
+                # 检查每个知识库的数据一致性
+                self.stdout.write('\n  📊 数据一致性检查:')
+                for kb in KnowledgeBase.objects.all():
+                    collection_name = f'kb_{kb.id}'
+                    doc_count = kb.documents.filter(status='completed').count()
+                    
+                    if collection_name in collection_names:
+                        info = client.get_collection(collection_name)
+                        points_count = info.points_count
+                        if doc_count > 0 and points_count == 0:
+                            issue = f'知识库 "{kb.name}" 有 {doc_count} 个文档但 Qdrant 向量为空'
+                            issues.append(issue)
+                            self._inconsistent_kbs.append(kb)
+                            self.stdout.write(f'     ⚠️  {kb.name}: {doc_count} 文档, {points_count} 向量 (需要重新索引)')
+                        else:
+                            self.stdout.write(f'     ✅ {kb.name}: {doc_count} 文档, {points_count} 向量')
+                    else:
+                        if doc_count > 0:
+                            issue = f'知识库 "{kb.name}" 有 {doc_count} 个文档但 Qdrant Collection 不存在'
+                            issues.append(issue)
+                            self._inconsistent_kbs.append(kb)
+                            self.stdout.write(f'     ❌ {kb.name}: {doc_count} 文档, Collection 不存在 (需要重新索引)')
+                        else:
+                            self.stdout.write(f'     ℹ️  {kb.name}: 空知识库 (无需 Collection)')
+                            
+            except Exception as e:
+                issue = f'Qdrant 连接失败: {e}'
+                issues.append(issue)
+                self.stdout.write(f'  ❌ {issue}')
                 
         except Exception as e:
             issue = f'向量存储检查失败: {str(e)}'
@@ -249,5 +272,15 @@ class Command(BaseCommand):
 
     def attempt_fixes(self):
         """尝试自动修复问题"""
-        self.stdout.write('🔧 自动修复功能开发中...')
-        self.stdout.write('💡 请根据上述提示手动修复问题')
+        if not hasattr(self, '_inconsistent_kbs') or not self._inconsistent_kbs:
+            self.stdout.write('  ℹ️  没有需要修复的知识库一致性问题')
+            return
+            
+        self.stdout.write(f'\n🔧 发现 {len(self._inconsistent_kbs)} 个知识库需要重新索引')
+        self.stdout.write('💡 建议操作:')
+        for kb in self._inconsistent_kbs:
+            self.stdout.write(f'   - 知识库 "{kb.name}" (ID: {kb.id}): 删除后重新上传文档')
+        
+        self.stdout.write('\n📌 你也可以通过以下方式修复:')
+        self.stdout.write('   1. 在前端管理界面删除并重建知识库')
+        self.stdout.write('   2. 或者调用 API 重新处理文档')
