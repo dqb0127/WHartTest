@@ -749,7 +749,7 @@ onMounted(async () => {
   background-color: #f8f9fc;
   height: calc(100vh - 86px); /* 保持 86px 是因为底部还有 10px 的 margin */
   margin: 0 10px 10px 10px;
-  overflow-y: auto; /* 允许垂直滚动 */
+  overflow: hidden; /* 让子组件自行控制滚动 */
   border-radius: 8px;
   box-shadow: 4px 0 10px rgba(0, 0, 0, 0.2), 0 4px 10px rgba(0, 0, 0, 0.2), 0 0 10px rgba(0, 0, 0, 0.15);
 }
