@@ -623,7 +623,7 @@ export interface ProjectStatistics {
       passed: number;
       failed: number;
     }>;
-    summary_30d: {
+    summary_7d: {
       execution_count: number;
       passed: number;
       failed: number;
@@ -636,6 +636,12 @@ export interface ProjectStatistics {
   skills: {
     total: number;
     active: number;
+  };
+  requirements: {
+    total: number;
+  };
+  knowledge: {
+    total: number;
   };
 }
 

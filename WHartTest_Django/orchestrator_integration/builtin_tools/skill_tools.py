@@ -228,25 +228,51 @@ def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = No
                         logger.error(f"[execute_skill_script] 持久化 Playwright 执行失败: {e}", exc_info=True)
                         return f"错误: {str(e)}"
 
-            result = subprocess.run(
-                exec_command,
-                shell=True,
-                cwd=skill_dir,
-                capture_output=True,
-                text=True,
-                timeout=120,
-                env=env,
-                encoding='utf-8',
-                errors='replace'
-            )
+            # Windows 编码处理：cmd.exe 默认使用 GBK (cp936)，需要使用系统默认编码
+            import locale
+            if platform.system() == 'Windows':
+                # Windows cmd 默认使用 GBK 编码，使用 None 让 subprocess 自动检测
+                result = subprocess.run(
+                    exec_command,
+                    shell=True,
+                    cwd=skill_dir,
+                    capture_output=True,
+                    timeout=120,
+                    env=env,
+                )
+                # 智能解码：先尝试 UTF-8（现代工具通常输出 UTF-8），失败再用 GBK（Windows cmd 默认）
+                def smart_decode(data: bytes) -> str:
+                    if not data:
+                        return ''
+                    try:
+                        return data.decode('utf-8')
+                    except UnicodeDecodeError:
+                        return data.decode('gbk', errors='replace')
+                
+                stdout = smart_decode(result.stdout)
+                stderr = smart_decode(result.stderr)
+            else:
+                result = subprocess.run(
+                    exec_command,
+                    shell=True,
+                    cwd=skill_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    env=env,
+                    encoding='utf-8',
+                    errors='replace'
+                )
+                stdout = result.stdout or ''
+                stderr = result.stderr or ''
 
             output = ''
-            if result.stdout:
-                output += result.stdout
-            if result.stderr:
+            if stdout:
+                output += stdout
+            if stderr:
                 if output:
                     output += '\n--- stderr ---\n'
-                output += result.stderr
+                output += stderr
 
             if result.returncode != 0:
                 output = f"命令执行失败 (退出码: {result.returncode})\n{output}"

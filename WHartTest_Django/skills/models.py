@@ -73,10 +73,11 @@ class Skill(models.Model):
         return f"{self.name} ({self.project.name})"
 
     def get_full_path(self):
-        """获取 Skill 的完整文件系统路径"""
+        """获取 Skill 的完整文件系统路径（始终返回绝对路径）"""
         from django.conf import settings
         if self.skill_path:
-            return os.path.join(settings.MEDIA_ROOT, self.skill_path)
+            path = os.path.join(settings.MEDIA_ROOT, self.skill_path)
+            return os.path.abspath(path)
         return None
 
     def get_script_path(self):

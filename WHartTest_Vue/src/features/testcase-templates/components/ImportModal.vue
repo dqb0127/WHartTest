@@ -2,7 +2,7 @@
   <a-modal
     v-model:visible="visible"
     title="导入用例"
-    :width="480"
+    :width="600"
     :mask-closable="false"
     :modal-class="'import-modal'"
     :footer-style="{ display: 'flex', justifyContent: 'flex-end' }"

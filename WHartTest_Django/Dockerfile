@@ -76,6 +76,8 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.li
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor \
     curl \
+    nodejs \
+    npm \
     # Playwright 所需的系统依赖
     libnss3 \
     libnspr4 \
@@ -110,6 +112,11 @@ COPY --from=builder /opt/venv /opt/venv
 
 # 安装 Playwright 浏览器（Chromium）
 RUN /opt/venv/bin/playwright install chromium
+
+# 安装 agent-browser CLI 工具及其浏览器
+# agent-browser 是 AI Agent 专用的浏览器自动化工具
+RUN npm install -g agent-browser && \
+    agent-browser install
 
 # 从构建阶段复制预下载的 BM25 模型缓存
 COPY --from=builder /root/.cache/fastembed /root/.cache/fastembed
