@@ -1378,23 +1378,22 @@ class ChatHistoryAPIView(APIView):
                     logger.info(f"ChatHistoryAPIView: No checkpoints found for thread_id: {thread_id}")
             # By processing only the latest checkpoint, we get the final state of messages, avoiding duplicates.
 
-            # 计算上下文Token使用信息（从 usage_metadata 累计，如果 LLM 不返回则显示 0）
+            # 获取当前上下文Token使用信息（取最后一条 AI 消息的 usage_metadata）
             context_token_count = 0
             context_limit = 128000
             try:
                 active_config = LLMConfig.objects.get(is_active=True)
                 context_limit = active_config.context_limit or 128000
 
-                # 从 usage_metadata 累计真实 token（与 SSE 发送的数据保持一致）
+                # 获取最后一次 LLM 调用的 token 使用量
+                # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
                 if 'messages' in locals() and messages:
-                    input_tokens = 0
-                    output_tokens = 0
-                    for msg in messages:
+                    for msg in reversed(messages):
                         if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
-                            input_tokens += msg.usage_metadata.get('input_tokens', 0)
-                            output_tokens += msg.usage_metadata.get('output_tokens', 0)
-                    
-                    context_token_count = input_tokens + output_tokens
+                            input_tokens = msg.usage_metadata.get('input_tokens', 0)
+                            output_tokens = msg.usage_metadata.get('output_tokens', 0)
+                            context_token_count = input_tokens + output_tokens
+                            break  # 只取最后一条有 usage_metadata 的消息
             except Exception as e:
                 logger.warning(f"ChatHistoryAPIView: Failed to calculate token count: {e}")
 

@@ -33,29 +33,30 @@ def _create_token_counter(model_name: str) -> Callable[[Iterable], int]:
     Callable[[Iterable[MessageLikeRepresentation]], int]
     即接收消息列表，返回总 token 数
     
-    计算逻辑：累计所有消息的 usage_metadata.input_tokens + output_tokens
-    这与 LLM 返回的真实 token 使用量一致
+    计算逻辑：取最后一条有 usage_metadata 的消息的 input_tokens + output_tokens
+    这代表当前上下文的真实 token 使用量
     """
     def token_counter(messages: Iterable) -> int:
-        """计算消息列表的 token 总数（使用 usage_metadata）"""
+        """计算当前上下文的 token 数（使用最后一条消息的 usage_metadata）"""
         try:
-            # 优先使用 usage_metadata 累计（与 agent_loop_view.py 保持一致）
-            input_tokens = 0
-            output_tokens = 0
-            for msg in messages:
-                if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
-                    input_tokens += msg.usage_metadata.get('input_tokens', 0)
-                    output_tokens += msg.usage_metadata.get('output_tokens', 0)
+            # 将 Iterable 转换为列表以便反向遍历
+            messages_list = list(messages)
             
-            total = input_tokens + output_tokens
-            if total > 0:
-                logger.debug(f"token_counter: usage_metadata 累计 = {total} (input={input_tokens}, output={output_tokens})")
-                return total
+            # 优先使用最后一条消息的 usage_metadata
+            # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
+            for msg in reversed(messages_list):
+                if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
+                    input_tokens = msg.usage_metadata.get('input_tokens', 0)
+                    output_tokens = msg.usage_metadata.get('output_tokens', 0)
+                    total = input_tokens + output_tokens
+                    if total > 0:
+                        logger.debug(f"token_counter: usage_metadata = {total} (input={input_tokens}, output={output_tokens})")
+                        return total
             
             # 如果没有 usage_metadata，使用 tiktoken 估算内容 token
             # 并乘以估算系数（考虑工具定义等额外 token）
             content_tokens = 0
-            for msg in messages:
+            for msg in messages_list:
                 if hasattr(msg, 'content') and msg.content:
                     content = msg.content if isinstance(msg.content, str) else str(msg.content)
                     content_tokens += context_checker.count_tokens(content, model_name)

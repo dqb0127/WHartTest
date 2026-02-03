@@ -477,13 +477,15 @@ class AgentLoopStreamAPIView(View):
                     current_state = await agent.aget_state(invoke_config)
                     all_messages = current_state.values.get("messages", []) if current_state.values else []
 
-                    # 计算真实的 Token 使用量（从 usage_metadata 累计，如果 LLM 不返回则显示 0）
+                    # 获取最后一次 LLM 调用的 token 使用量
+                    # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
                     input_tokens = 0
                     output_tokens = 0
-                    for msg in all_messages:
+                    for msg in reversed(all_messages):
                         if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
-                            input_tokens += msg.usage_metadata.get('input_tokens', 0)
-                            output_tokens += msg.usage_metadata.get('output_tokens', 0)
+                            input_tokens = msg.usage_metadata.get('input_tokens', 0)
+                            output_tokens = msg.usage_metadata.get('output_tokens', 0)
+                            break  # 只取最后一条有 usage_metadata 的消息
 
                     total_tokens = input_tokens + output_tokens
 
@@ -1077,13 +1079,15 @@ class AgentLoopResumeAPIView(View):
                     current_state = await agent.aget_state(config)
                     all_messages = current_state.values.get("messages", []) if current_state.values else []
 
-                    # 计算真实的 Token 使用量（从 usage_metadata 累计，如果 LLM 不返回则显示 0）
+                    # 获取最后一次 LLM 调用的 token 使用量
+                    # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
                     input_tokens = 0
                     output_tokens = 0
-                    for msg in all_messages:
+                    for msg in reversed(all_messages):
                         if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
-                            input_tokens += msg.usage_metadata.get('input_tokens', 0)
-                            output_tokens += msg.usage_metadata.get('output_tokens', 0)
+                            input_tokens = msg.usage_metadata.get('input_tokens', 0)
+                            output_tokens = msg.usage_metadata.get('output_tokens', 0)
+                            break  # 只取最后一条有 usage_metadata 的消息
 
                     total_tokens = input_tokens + output_tokens
 
