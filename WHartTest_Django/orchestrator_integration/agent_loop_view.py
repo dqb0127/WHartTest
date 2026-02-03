@@ -485,6 +485,8 @@ class AgentLoopStreamAPIView(View):
                         if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
                             input_tokens = msg.usage_metadata.get('input_tokens', 0)
                             output_tokens = msg.usage_metadata.get('output_tokens', 0)
+                            # 调试日志：打印原始 usage_metadata
+                            logger.info(f"AgentLoopStreamAPI: Raw usage_metadata = {msg.usage_metadata}")
                             break  # 只取最后一条有 usage_metadata 的消息
 
                     total_tokens = input_tokens + output_tokens
