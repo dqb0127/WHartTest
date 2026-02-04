@@ -862,12 +862,10 @@ const handleRetry = async (message: ChatMessage) => {
   }
 
   let userMessage: ChatMessage;
-  let deleteFromIndex: number;
 
   if (message.messageType === 'human') {
-    // 用户消息重试：直接使用该消息，删除该消息及之后的所有内容
+    // 用户消息重试：直接使用该消息
     userMessage = message;
-    deleteFromIndex = msgIndex;
   } else {
     // AI消息重试：向前查找最近的用户消息
     let foundUser: ChatMessage | null = null;
@@ -883,13 +881,9 @@ const handleRetry = async (message: ChatMessage) => {
       return;
     }
     userMessage = foundUser;
-    deleteFromIndex = msgIndex;
   }
 
-  // 删除从指定位置开始的所有后续消息
-  messages.value = messages.value.slice(0, deleteFromIndex);
-
-  // 重新发送用户消息
+  // 不删除消息，直接重新发送用户消息（后端也不会删除历史，保持一致）
   await handleSendMessage({
     message: userMessage.content,
     image: userMessage.imageBase64,
