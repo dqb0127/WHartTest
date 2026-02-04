@@ -669,6 +669,7 @@ const sendMessage = async () => {
   } finally {
     isLoading.value = false;
     scrollToBottom();
+    saveToStorage();  // 保存对话消息到 localStorage
   }
 };
 
@@ -919,12 +920,20 @@ const handleToolEnd = (data: any) => {
   }
 
   console.log('[Diagram] Tool end:', tool_name);
-  console.log('[Diagram] Tool output (first 200 chars):', typeof tool_output === 'string' ? tool_output.substring(0, 200) : tool_output);
+  console.log('[Diagram] Tool output (first 200 chars):', typeof tool_output === 'string' ? tool_output.substring(0, 200) : JSON.stringify(tool_output).substring(0, 200));
 
   if (!tool_name) return;
   
   try {
-    let result = typeof tool_output === 'string' ? JSON.parse(tool_output) : tool_output;
+    // 处理 MCP 工具返回的数组格式: [{"type": "text", "text": "{...}"}]
+    let resultStr = tool_output;
+    if (Array.isArray(tool_output)) {
+      // 从数组中提取第一个 text 类型的内容
+      const textItem = tool_output.find((item: any) => item.type === 'text' && item.text);
+      resultStr = textItem?.text || JSON.stringify(tool_output[0]);
+    }
+    
+    let result = typeof resultStr === 'string' ? JSON.parse(resultStr) : resultStr;
     
     // 处理转义字符的辅助函数
     const unescapeXml = (xml: string): string => {

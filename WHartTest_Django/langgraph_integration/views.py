@@ -2203,7 +2203,7 @@ class UserToolApprovalViewSet(viewsets.ModelViewSet):
 
         返回所有工具及其当前用户的偏好设置，按 MCP 分组
         数据来源：
-        1. DEFAULT_HIGH_RISK_TOOLS - 内置高风险工具
+        1. 内置工具（Skill 工具、Diagram 工具）
         2. MCPTool - 从数据库读取的 MCP 工具
         """
         from mcp_tools.models import MCPTool
@@ -2231,43 +2231,11 @@ class UserToolApprovalViewSet(viewsets.ModelViewSet):
         tool_groups = []
 
         # 1. 内置工具组（按实际工具分类展示）
-        # Playwright 脚本管理工具
-        playwright_builtin_tools = [
-            {'tool_name': 'save_playwright_script', 'description': '保存 Playwright 自动化脚本到数据库'},
-            {'tool_name': 'list_playwright_scripts', 'description': '列出自动化脚本列表'},
-            {'tool_name': 'get_playwright_script', 'description': '获取脚本详细信息和代码'},
-            {'tool_name': 'update_playwright_script', 'description': '更新已有脚本内容'},
-            {'tool_name': 'execute_playwright_script', 'description': '执行自动化脚本（需审批）'},
-            {'tool_name': 'get_script_execution_result', 'description': '获取脚本执行结果'},
-        ]
-
         # Skill 工具
         skill_builtin_tools = [
             {'tool_name': 'read_skill_content', 'description': '读取 Skill 的 SKILL.md 内容'},
             {'tool_name': 'execute_skill_script', 'description': '执行 Skill 脚本命令（需审批）'},
         ]
-
-        # Diagram 工具
-        diagram_builtin_tools = [
-            {'tool_name': 'display_diagram', 'description': '创建新的 drawio 图表'},
-            {'tool_name': 'edit_diagram', 'description': '编辑现有的 drawio 图表'},
-        ]
-
-        # 组装 Playwright 组
-        playwright_tools_for_display = []
-        for t in playwright_builtin_tools:
-            playwright_tools_for_display.append({
-                'tool_name': t['tool_name'],
-                'description': t['description'],
-                'allowed_decisions': ['approve', 'reject'],
-                'current_policy': user_approvals.get(t['tool_name'], {}).get('policy', 'ask_every_time'),
-                'current_scope': user_approvals.get(t['tool_name'], {}).get('scope', 'permanent'),
-            })
-        tool_groups.append({
-            'group_name': 'Playwright 脚本工具',
-            'group_id': 'builtin_playwright',
-            'tools': playwright_tools_for_display,
-        })
 
         # 组装 Skill 组
         skill_tools_for_display = []
@@ -2285,23 +2253,8 @@ class UserToolApprovalViewSet(viewsets.ModelViewSet):
             'tools': skill_tools_for_display,
         })
 
-        # 组装 Diagram 组
-        diagram_tools_for_display = []
-        for t in diagram_builtin_tools:
-            diagram_tools_for_display.append({
-                'tool_name': t['tool_name'],
-                'description': t['description'],
-                'allowed_decisions': ['approve', 'reject'],
-                'current_policy': user_approvals.get(t['tool_name'], {}).get('policy', 'ask_every_time'),
-                'current_scope': user_approvals.get(t['tool_name'], {}).get('scope', 'permanent'),
-            })
-        tool_groups.append({
-            'group_name': 'Diagram 工具',
-            'group_id': 'builtin_diagram',
-            'tools': diagram_tools_for_display,
-        })
-
         # 2. MCP 工具组（从数据库读取，按 MCP 分组）
+        # 注意：Diagram 工具（display_diagram, edit_diagram）已移至 WHartTest-Tools MCP
         from mcp_tools.models import RemoteMCPConfig
         mcp_configs = RemoteMCPConfig.objects.filter(is_active=True).prefetch_related('tools')
 

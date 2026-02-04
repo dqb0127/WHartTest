@@ -3,11 +3,11 @@
 
 提供 AI Agent 可调用的持久化工具，包括：
 - Skill 脚本执行工具（执行用户上传的 Python 脚本）
-- Drawio 图表工具（创建、编辑图表）
+
+注意：Diagram 工具（display_diagram, edit_diagram）已移至 WHartTest-Tools MCP
 """
 
 from .skill_tools import get_skill_tools
-from .diagram_tools import get_diagram_tools
 
 import logging
 
@@ -31,9 +31,5 @@ def get_builtin_tools(
     )
     tools.extend(skill_tools)
     logger.info(f"[BuiltinTools] 加载 {len(skill_tools)} 个 Skill 工具")
-
-    diagram_tools = get_diagram_tools()
-    tools.extend(diagram_tools)
-    logger.info(f"[BuiltinTools] 加载 {len(diagram_tools)} 个 Diagram 工具")
 
     return tools
