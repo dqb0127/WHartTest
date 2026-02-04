@@ -90,7 +90,7 @@
       :title="isEdit ? '编辑操作' : '添加操作'"
       :ok-loading="submitting"
       width="700px"
-      @ok="handleSubmit"
+      @before-ok="handleSubmit"
       @cancel="handleCancel"
     >
       <a-form ref="formRef" :model="formData" :rules="rules" layout="vertical">
@@ -111,7 +111,7 @@
               </a-option>
             </a-select>
           </a-form-item>
-          <a-form-item field="ope_key" label="操作方法" required>
+          <a-form-item field="ope_key" label="操作方法">
             <a-select v-model="formData.ope_key" allow-search @change="onOpeKeyChange">
               <a-optgroup label="鼠标操作">
                 <a-option value="click">点击 (click)</a-option>
@@ -170,7 +170,7 @@
               </a-option>
             </a-select>
           </a-form-item>
-          <a-form-item field="ope_key" label="断言方法" required>
+          <a-form-item field="ope_key" label="断言方法">
             <a-select v-model="formData.ope_key" @change="onOpeKeyChange">
               <a-option value="assert_visible">元素可见</a-option>
               <a-option value="assert_hidden">元素隐藏</a-option>
@@ -351,7 +351,6 @@ const onOpeKeyChange = () => {
 
 const rules = {
   step_type: [{ required: true, message: '请选择操作类型' }],
-  ope_key: [{ required: true, message: '请选择操作方法' }],
 }
 
 const stepTypeColors: Record<StepType, string> = {
@@ -542,10 +541,12 @@ const buildOpeValue = () => {
   return Object.keys(result).length > 0 ? result : undefined
 }
 
-const handleSubmit = async () => {
+const handleSubmit = async (done: (closed: boolean) => void) => {
   try {
     await formRef.value?.validate()
   } catch {
+    Message.warning('请填写必填项')
+    done(false)
     return
   }
   submitting.value = true
@@ -571,10 +572,20 @@ const handleSubmit = async () => {
       await pageStepsDetailedApi.create(data)
       Message.success('添加成功')
     }
-    modalVisible.value = false
+    done(true)
     fetchSteps()
-  } catch {
-    Message.error(isEdit.value ? '更新失败' : '添加失败')
+  } catch (error: unknown) {
+    const err = error as { errors?: Record<string, string[]>; error?: string }
+    const errors = err?.errors
+    if (errors && typeof errors === 'object' && !('error' in errors) && !('message' in errors)) {
+      const messages = Object.entries(errors)
+        .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+        .join('\n')
+      Message.error({ content: messages, duration: 5000 })
+    } else {
+      Message.error(err?.error || (isEdit.value ? '更新失败' : '添加失败'))
+    }
+    done(false)
   } finally {
     submitting.value = false
   }

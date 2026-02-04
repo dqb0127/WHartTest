@@ -58,7 +58,7 @@
       v-model:visible="modalVisible"
       :title="isEdit ? '编辑步骤' : '添加步骤'"
       :ok-loading="submitting"
-      @ok="handleSubmit"
+      @before-ok="handleSubmit"
       @cancel="handleCancel"
     >
       <a-form ref="formRef" :model="formData" :rules="rules" layout="vertical">
@@ -174,10 +174,12 @@ const editStep = (step: UiCaseStepsDetailed) => {
   modalVisible.value = true
 }
 
-const handleSubmit = async () => {
+const handleSubmit = async (done: (closed: boolean) => void) => {
   try {
     await formRef.value?.validate()
   } catch {
+    Message.warning('请填写必填项')
+    done(false)
     return
   }
   submitting.value = true
@@ -195,10 +197,20 @@ const handleSubmit = async () => {
       })
       Message.success('添加成功')
     }
-    modalVisible.value = false
+    done(true)
     fetchSteps()
-  } catch {
-    Message.error(isEdit.value ? '更新失败' : '添加失败')
+  } catch (error: unknown) {
+    const err = error as { errors?: Record<string, string[]>; error?: string }
+    const errors = err?.errors
+    if (errors && typeof errors === 'object' && !('error' in errors) && !('message' in errors)) {
+      const messages = Object.entries(errors)
+        .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+        .join('\n')
+      Message.error({ content: messages, duration: 5000 })
+    } else {
+      Message.error(err?.error || (isEdit.value ? '更新失败' : '添加失败'))
+    }
+    done(false)
   } finally {
     submitting.value = false
   }

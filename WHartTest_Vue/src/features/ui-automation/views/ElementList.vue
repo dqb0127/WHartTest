@@ -55,7 +55,7 @@
       :title="isEdit ? '编辑元素' : '新增元素'"
       :ok-loading="submitting"
       width="600px"
-      @ok="handleSubmit"
+      @before-ok="handleSubmit"
       @cancel="handleCancel"
     >
       <a-form ref="formRef" :model="formData" :rules="rules" layout="vertical">
@@ -259,10 +259,12 @@ const editElement = (record: UiElement) => {
   modalVisible.value = true
 }
 
-const handleSubmit = async () => {
+const handleSubmit = async (done: (closed: boolean) => void) => {
   try {
     await formRef.value?.validate()
   } catch {
+    Message.warning('请填写必填项')
+    done(false)
     return
   }
   submitting.value = true
@@ -274,10 +276,22 @@ const handleSubmit = async () => {
       await elementApi.create(formData)
       Message.success('创建成功')
     }
-    modalVisible.value = false
+    done(true)
     fetchElements()
-  } catch {
-    Message.error(isEdit.value ? '更新失败' : '创建失败')
+  } catch (error: unknown) {
+    // 解析后端返回的验证错误
+    const err = error as { errors?: Record<string, string[]>; error?: string }
+    const errors = err?.errors
+    if (errors && typeof errors === 'object' && !('error' in errors) && !('message' in errors)) {
+      // 字段验证错误格式: { name: ['xxx'], locator_value: ['xxx'] }
+      const messages = Object.entries(errors)
+        .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+        .join('\n')
+      Message.error({ content: messages, duration: 5000 })
+    } else {
+      Message.error(err?.error || (isEdit.value ? '更新失败' : '创建失败'))
+    }
+    done(false)
   } finally {
     submitting.value = false
   }

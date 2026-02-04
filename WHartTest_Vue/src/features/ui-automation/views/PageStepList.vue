@@ -78,25 +78,25 @@
       v-model:visible="modalVisible"
       :title="isEdit ? '编辑页面步骤' : '新增页面步骤'"
       :ok-loading="submitting"
-      @ok="handleSubmit"
+      @before-ok="handleSubmit"
       @cancel="handleCancel"
     >
       <a-form ref="formRef" :model="formData" :rules="rules" layout="vertical">
         <a-row :gutter="16">
           <a-col :span="12">
-            <a-form-item field="page" label="所属页面" required>
-              <a-select v-model="formData.page" placeholder="请选择页面">
-                <a-option v-for="p in pageOptions" :key="p.id" :value="p.id">
-                  {{ p.name }}
+            <a-form-item field="module" label="所属模块" required>
+              <a-select v-model="formData.module" placeholder="请选择模块" @change="onFormModuleChange">
+                <a-option v-for="mod in moduleOptions" :key="mod.id" :value="mod.id">
+                  {{ mod.name }}
                 </a-option>
               </a-select>
             </a-form-item>
           </a-col>
           <a-col :span="12">
-            <a-form-item field="module" label="所属模块" required>
-              <a-select v-model="formData.module" placeholder="请选择模块">
-                <a-option v-for="mod in moduleOptions" :key="mod.id" :value="mod.id">
-                  {{ mod.name }}
+            <a-form-item field="page" label="所属页面" required>
+              <a-select v-model="formData.page" placeholder="请选择页面" :disabled="!formData.module">
+                <a-option v-for="p in filteredPageOptions" :key="p.id" :value="p.id">
+                  {{ p.name }}
                 </a-option>
               </a-select>
             </a-form-item>
@@ -151,6 +151,12 @@ const isEdit = ref(false)
 const currentPageStep = ref<UiPageSteps | null>(null)
 const formRef = ref()
 
+// 根据表单选择的模块过滤页面选项
+const filteredPageOptions = computed(() => {
+  if (!formData.module) return []
+  return pageOptions.value.filter((p) => p.module === formData.module)
+})
+
 const filters = reactive({ page: undefined as number | undefined, module: undefined as number | undefined, search: '' })
 const pagination = reactive({ current: 1, pageSize: 10, total: 0, showTotal: true, showPageSize: true })
 
@@ -193,6 +199,11 @@ const fetchPages = async () => {
   } catch {
     Message.error('获取页面列表失败')
   }
+}
+
+// 表单中模块选择变化时，清空页面选择
+const onFormModuleChange = () => {
+  formData.page = undefined as unknown as number
 }
 
 const flattenModules = (modules: UiModule[], level = 0): UiModule[] => {
@@ -285,10 +296,12 @@ const editPageStep = async (record: UiPageSteps) => {
   modalVisible.value = true
 }
 
-const handleSubmit = async () => {
+const handleSubmit = async (done: (closed: boolean) => void) => {
   try {
     await formRef.value?.validate()
   } catch {
+    Message.warning('请填写必填项')
+    done(false)
     return
   }
   submitting.value = true
@@ -300,10 +313,20 @@ const handleSubmit = async () => {
       await pageStepsApi.create(formData)
       Message.success('创建成功')
     }
-    modalVisible.value = false
+    done(true)
     fetchPageSteps()
-  } catch {
-    Message.error(isEdit.value ? '更新失败' : '创建失败')
+  } catch (error: unknown) {
+    const err = error as { errors?: Record<string, string[]>; error?: string }
+    const errors = err?.errors
+    if (errors && typeof errors === 'object' && !('error' in errors) && !('message' in errors)) {
+      const messages = Object.entries(errors)
+        .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+        .join('\n')
+      Message.error({ content: messages, duration: 5000 })
+    } else {
+      Message.error(err?.error || (isEdit.value ? '更新失败' : '创建失败'))
+    }
+    done(false)
   } finally {
     submitting.value = false
   }

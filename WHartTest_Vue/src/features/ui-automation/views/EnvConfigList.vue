@@ -74,7 +74,7 @@
       :title="isEdit ? '编辑环境配置' : '新增环境配置'"
       :ok-loading="submitting"
       width="600px"
-      @ok="handleSubmit"
+      @before-ok="handleSubmit"
       @cancel="handleCancel"
     >
       <a-form ref="formRef" :model="formData" :rules="rules" layout="vertical">
@@ -336,10 +336,12 @@ const buildMysqlConfig = () => {
   return cfg
 }
 
-const handleSubmit = async () => {
+const handleSubmit = async (done: (closed: boolean) => void) => {
   try {
     await formRef.value?.validate()
   } catch {
+    Message.warning('请填写必填项')
+    done(false)
     return
   }
   submitting.value = true
@@ -352,10 +354,20 @@ const handleSubmit = async () => {
       await envConfigApi.create(data)
       Message.success('创建成功')
     }
-    modalVisible.value = false
+    done(true)
     fetchData()
-  } catch {
-    Message.error(isEdit.value ? '更新失败' : '创建失败')
+  } catch (error: unknown) {
+    const err = error as { errors?: Record<string, string[]>; error?: string }
+    const errors = err?.errors
+    if (errors && typeof errors === 'object' && !('error' in errors) && !('message' in errors)) {
+      const messages = Object.entries(errors)
+        .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+        .join('\n')
+      Message.error({ content: messages, duration: 5000 })
+    } else {
+      Message.error(err?.error || (isEdit.value ? '更新失败' : '创建失败'))
+    }
+    done(false)
   } finally {
     submitting.value = false
   }

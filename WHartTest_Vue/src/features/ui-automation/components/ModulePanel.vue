@@ -52,7 +52,7 @@
       v-model:visible="modalVisible"
       :title="isEditing ? '编辑模块' : '新增模块'"
       :ok-loading="submitLoading"
-      @ok="handleSubmit"
+      @before-ok="handleSubmit"
       @cancel="handleCancel"
     >
       <a-form :model="formData" layout="vertical" ref="formRef">
@@ -246,11 +246,16 @@ const handleAction = async (value: string) => {
 };
 
 // 提交表单
-const handleSubmit = async () => {
-  if (!formRef.value) return;
+const handleSubmit = async (done: (closed: boolean) => void) => {
+  if (!formRef.value) {
+    done(false);
+    return;
+  }
   try {
     await formRef.value.validate();
   } catch {
+    Message.warning('请填写必填项');
+    done(false);
     return;
   }
   
@@ -264,11 +269,21 @@ const handleSubmit = async () => {
       Message.success('创建成功');
     }
     
-    modalVisible.value = false;
+    done(true);
     emit('updated');
     fetchModules();
-  } catch (error) {
-    Message.error(isEditing.value ? '更新失败' : '创建失败');
+  } catch (error: unknown) {
+    const err = error as { errors?: Record<string, string[]>; error?: string };
+    const errors = err?.errors;
+    if (errors && typeof errors === 'object' && !('error' in errors) && !('message' in errors)) {
+      const messages = Object.entries(errors)
+        .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+        .join('\n');
+      Message.error({ content: messages, duration: 5000 });
+    } else {
+      Message.error(err?.error || (isEditing.value ? '更新失败' : '创建失败'));
+    }
+    done(false);
   } finally {
     submitLoading.value = false;
   }
