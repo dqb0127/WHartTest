@@ -490,11 +490,36 @@ const sendMessage = async () => {
             if (parsed.thread_id) {
               threadId.value = parsed.thread_id;
             }
+
+            // 检查是否所有工具都需要自动拒绝
+            const actionRequests = parsed.action_requests || [];
+            const allAutoReject = actionRequests.length > 0 &&
+              actionRequests.every((ar: { auto_reject?: boolean }) => ar.auto_reject === true);
+
             // 构造 InterruptEvent 对象
             currentInterrupt.value = {
               id: parsed.interrupt_id,
+              interrupt_id: parsed.interrupt_id,
               action_requests: parsed.action_requests || []
             };
+
+            if (allAutoReject) {
+              // 所有工具都设为"始终拒绝"，自动发送拒绝响应
+              console.log('[Diagram] All tools marked as auto_reject, sending auto-reject');
+              const toolNames = actionRequests.map((ar: { name?: string }) => ar.name || 'unknown').join(', ');
+              Message.warning(`工具 ${toolNames} 已被设为始终拒绝，自动拒绝执行`);
+
+              // 延迟自动拒绝，等待当前 SSE 流完全结束
+              setTimeout(() => {
+                handleToolDecision({
+                  interruptId: parsed.interrupt_id,
+                  type: 'reject',
+                });
+              }, 100);
+              isLoading.value = false;
+              continue;
+            }
+
             // 显示审批对话框
             toolApprovalDialogVisible.value = true;
             // 停止当前加载状态，等待用户审批

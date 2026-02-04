@@ -44,10 +44,12 @@ interface StreamState {
   // ⭐ HITL 中断信息
   interrupt?: {
     id: string;
+    interrupt_id?: string;
     action_requests: Array<{
       name: string;
       args: Record<string, unknown>;
       description?: string;
+      auto_reject?: boolean;
     }>;
   };
   isWaitingForApproval?: boolean; // 是否正在等待用户审批
@@ -503,7 +505,10 @@ export async function sendChatMessageStream(
         // ⚠️ 流结束但未收到 complete/[DONE] 事件 = 异常中断
         // 不自动设置 isComplete，让前端保持加载状态直到用户手动刷新
         // 这避免了网络波动导致停止按钮过早消失的问题
-        if (streamSessionId && activeStreams.value[streamSessionId] && !activeStreams.value[streamSessionId].isComplete) {
+        // HITL: 如果正在等待审批，不设置错误状态
+        if (streamSessionId && activeStreams.value[streamSessionId] && 
+            !activeStreams.value[streamSessionId].isComplete &&
+            !activeStreams.value[streamSessionId].isWaitingForApproval) {
             console.warn('[ChatService] Stream ended without complete event, possible network interruption');
             // 设置错误状态而非完成状态，让用户知道可能需要重试
             activeStreams.value[streamSessionId].error = '连接意外中断，请重试';
@@ -522,7 +527,10 @@ export async function sendChatMessageStream(
         const jsonData = line.slice(6);
         if (jsonData === '[DONE]') {
             if (streamSessionId && activeStreams.value[streamSessionId]) {
-                activeStreams.value[streamSessionId].isComplete = true;
+                // HITL: 如果正在等待审批，不设置 isComplete，让 resumeAgentLoop 处理后续流程
+                if (!activeStreams.value[streamSessionId].isWaitingForApproval) {
+                    activeStreams.value[streamSessionId].isComplete = true;
+                }
             }
             continue;
         }
@@ -712,6 +720,7 @@ export async function sendChatMessageStream(
             console.log('[ChatService] Interrupt event received:', parsed);
             activeStreams.value[streamSessionId].interrupt = {
               id: parsed.interrupt_id || parsed.id,
+              interrupt_id: parsed.interrupt_id,
               action_requests: parsed.action_requests || [],
             };
             activeStreams.value[streamSessionId].isWaitingForApproval = true;
@@ -1018,6 +1027,17 @@ export async function resumeAgentLoop(
     };
     console.log('[ChatService] Resume: Initialized activeStreams for session', sessionId);
   } else {
+    // 在开始新的 resume 之前，将当前累积的 content 固化到 messages
+    // 这样拒绝后的新回复会显示为独立的消息框
+    if (activeStreams.value[sessionId].content?.trim()) {
+      activeStreams.value[sessionId].messages.push({
+        content: activeStreams.value[sessionId].content,
+        type: 'ai',
+        time: formatStreamTime(),
+        isExpanded: false
+      });
+      activeStreams.value[sessionId].content = '';
+    }
     // 清除中断状态，准备接收新的流
     activeStreams.value[sessionId].interrupt = undefined;
     activeStreams.value[sessionId].isWaitingForApproval = false;
@@ -1247,6 +1267,7 @@ export async function resumeAgentLoop(
             console.log('[ChatService] New interrupt after resume:', parsed);
             activeStreams.value[sessionId].interrupt = {
               id: parsed.interrupt_id || parsed.id,
+              interrupt_id: parsed.interrupt_id,
               action_requests: parsed.action_requests || []
             };
             activeStreams.value[sessionId].isWaitingForApproval = true;

@@ -261,10 +261,32 @@ const currentInterrupt = computed<InterruptEvent | null>(() => {
 });
 
 // 监听中断状态，自动弹出/关闭审批对话框
-watch(currentInterrupt, (interrupt) => {
+watch(currentInterrupt, async (interrupt) => {
   console.log('[LangGraphChatView] currentInterrupt watch triggered:', interrupt);
   if (interrupt) {
-    toolApprovalDialogVisible.value = true;
+    // 检查是否所有工具都需要自动拒绝
+    const actionRequests = interrupt.action_requests || [];
+    const allAutoReject = actionRequests.length > 0 &&
+      actionRequests.every((ar) => ar.auto_reject === true);
+
+    if (allAutoReject) {
+      // 所有工具都设为"始终拒绝"，自动发送拒绝响应
+      console.log('[LangGraphChatView] All tools marked as auto_reject, sending auto-reject');
+      const toolNames = actionRequests.map((ar) => ar.name || 'unknown').join(', ');
+      Message.warning(`工具 ${toolNames} 已被设为始终拒绝，自动拒绝执行`);
+
+      // 延迟自动拒绝，等待当前 SSE 流完全结束
+      // 避免 clearStreamState 删除 activeStreams 后 resumeAgentLoop 无法正常工作
+      setTimeout(async () => {
+        await handleToolDecision({
+          interruptId: interrupt.interrupt_id || interrupt.id || '',
+          type: 'reject',
+        });
+      }, 100);
+    } else {
+      // 有需要用户审批的工具，显示对话框
+      toolApprovalDialogVisible.value = true;
+    }
   } else {
     // 当 interrupt 变为 null 时，自动关闭对话框
     toolApprovalDialogVisible.value = false;
@@ -1498,6 +1520,7 @@ const handleNormalMessage = async (requestData: ChatRequest, originalMessage: st
             isWaitingForApproval: true,
             interrupt: {
               id: data.interrupt.interrupt_id,
+              interrupt_id: data.interrupt.interrupt_id,
               action_requests: data.interrupt.action_requests
             }
           };
@@ -1505,6 +1528,7 @@ const handleNormalMessage = async (requestData: ChatRequest, originalMessage: st
           activeStreams.value[data.session_id].isWaitingForApproval = true;
           activeStreams.value[data.session_id].interrupt = {
             id: data.interrupt.interrupt_id,
+            interrupt_id: data.interrupt.interrupt_id,
             action_requests: data.interrupt.action_requests
           };
         }

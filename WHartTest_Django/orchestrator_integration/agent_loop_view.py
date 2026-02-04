@@ -30,7 +30,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain.agents import create_agent
 from wharttest_django.checkpointer import get_async_checkpointer
 
-from .middleware_config import get_middleware_from_config
+from .middleware_config import get_middleware_from_config, get_user_tool_approvals
 from .playwright_instructions import PLAYWRIGHT_SCRIPT_INSTRUCTION
 from .stop_signal import should_stop, clear_stop_signal
 from langgraph_integration.models import ChatSession, LLMConfig
@@ -398,6 +398,14 @@ class AgentLoopStreamAPIView(View):
                                             })
 
                                 if action_requests:
+                                    # 获取用户工具偏好，为 always_reject 的工具添加 auto_reject 标记
+                                    user_approvals = await sync_to_async(get_user_tool_approvals)(request.user, session_id)
+                                    for ar in action_requests:
+                                        tool_name = ar.get('name', '')
+                                        if user_approvals.get(tool_name) == 'always_reject':
+                                            ar['auto_reject'] = True
+                                            logger.info(f"AgentLoopStreamAPI: Tool {tool_name} marked as auto_reject")
+
                                     interrupt_detected = True
                                     yield create_sse_data({
                                         'type': 'interrupt',
@@ -1004,6 +1012,14 @@ class AgentLoopResumeAPIView(View):
                                             })
 
                                 if action_requests:
+                                    # 获取用户工具偏好，为 always_reject 的工具添加 auto_reject 标记
+                                    user_approvals = await sync_to_async(get_user_tool_approvals)(user, session_id)
+                                    for ar in action_requests:
+                                        tool_name = ar.get('name', '')
+                                        if user_approvals.get(tool_name) == 'always_reject':
+                                            ar['auto_reject'] = True
+                                            logger.info(f"AgentLoopResumeAPI: Tool {tool_name} marked as auto_reject")
+
                                     interrupt_detected = True
                                     yield create_sse_data({
                                         'type': 'interrupt',
