@@ -14,9 +14,9 @@ from .models import (
 )
 from .serializers import (
     UiModuleSerializer, UiPageSerializer, UiPageDetailSerializer,
-    UiElementSerializer, UiPageStepsSerializer, UiPageStepsDetailSerializer,
-    UiPageStepsDetailedSerializer, UiTestCaseSerializer, UiTestCaseDetailSerializer,
-    UiCaseStepsDetailedSerializer, UiExecutionRecordSerializer,
+    UiElementSerializer, UiPageStepsSerializer, UiPageStepsListSerializer, UiPageStepsDetailSerializer,
+    UiPageStepsDetailedSerializer, UiTestCaseSerializer, UiTestCaseListSerializer, UiTestCaseDetailSerializer,
+    UiCaseStepsDetailedSerializer, UiExecutionRecordSerializer, UiExecutionRecordListSerializer,
     UiPublicDataSerializer, UiEnvironmentConfigSerializer, UiTestCaseExecuteSerializer,
     UiPageStepsExecuteSerializer, UiBatchExecutionRecordSerializer, UiBatchExecutionRecordDetailSerializer
 )
@@ -89,7 +89,16 @@ class UiPageStepsViewSet(viewsets.ModelViewSet):
     ordering_fields = ['name', 'created_at']
     ordering = ['-id']
 
+    def get_queryset(self):
+        """列表查询时排除大字段"""
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            return queryset.defer('result_data', 'flow_data', 'run_flow', 'description')
+        return queryset
+
     def get_serializer_class(self):
+        if self.action == 'list':
+            return UiPageStepsListSerializer
         if self.action == 'retrieve':
             return UiPageStepsDetailSerializer
         if self.action == 'execute_data':
@@ -147,7 +156,19 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
     ordering_fields = ['name', 'level', 'created_at']
     ordering = ['-created_at']
 
+    def get_queryset(self):
+        """列表查询时排除大字段"""
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            return queryset.defer(
+                'result_data', 'front_custom', 'front_sql', 'posterior_sql',
+                'parametrize', 'case_flow', 'error_message', 'description'
+            )
+        return queryset
+
     def get_serializer_class(self):
+        if self.action == 'list':
+            return UiTestCaseListSerializer
         if self.action == 'retrieve':
             return UiTestCaseDetailSerializer
         if self.action == 'execute_data':
@@ -202,12 +223,22 @@ class UiExecutionRecordViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        """支持 project 参数过滤"""
+        """列表查询时排除大字段，支持 project 参数过滤"""
         queryset = super().get_queryset()
         project_id = self.request.query_params.get('project')
         if project_id:
             queryset = queryset.filter(test_case__project_id=project_id)
+        if self.action == 'list':
+            return queryset.defer(
+                'step_results', 'screenshots', 'trace_data', 'log',
+                'error_message', 'environment'
+            )
         return queryset
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return UiExecutionRecordListSerializer
+        return UiExecutionRecordSerializer
 
     def perform_create(self, serializer):
         serializer.save(executor=self.request.user)
@@ -378,7 +409,7 @@ class ActuatorViewSet(viewsets.ViewSet):
 
 class UiBatchExecutionRecordViewSet(viewsets.ModelViewSet):
     """批量执行记录管理视图"""
-    queryset = UiBatchExecutionRecord.objects.select_related('executor').prefetch_related('execution_records')
+    queryset = UiBatchExecutionRecord.objects.select_related('executor')
     serializer_class = UiBatchExecutionRecordSerializer
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['status', 'trigger_type']
@@ -386,11 +417,14 @@ class UiBatchExecutionRecordViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        """支持 project 参数过滤（通过关联的执行记录的测试用例）"""
+        """列表查询时不预加载执行记录，支持 project 参数过滤"""
         queryset = super().get_queryset()
         project_id = self.request.query_params.get('project')
         if project_id:
             queryset = queryset.filter(execution_records__test_case__project_id=project_id).distinct()
+        # 详情时预加载执行记录
+        if self.action == 'retrieve':
+            queryset = queryset.prefetch_related('execution_records', 'execution_records__test_case')
         return queryset
 
     def get_serializer_class(self):

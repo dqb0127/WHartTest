@@ -80,6 +80,26 @@ class UiPageStepsDetailedExecuteSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
+class UiPageStepsListSerializer(serializers.ModelSerializer):
+    """页面步骤列表序列化器（精简字段，提升性能）"""
+    page_name = serializers.CharField(source='page.name', read_only=True)
+    module_name = serializers.CharField(source='module.name', read_only=True)
+    creator_name = serializers.CharField(source='creator.username', read_only=True)
+    step_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UiPageSteps
+        fields = [
+            'id', 'project', 'page', 'page_name', 'module', 'module_name',
+            'name', 'status', 'step_count', 'creator', 'creator_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['status', 'creator', 'created_at', 'updated_at']
+
+    def get_step_count(self, obj):
+        return obj.step_details.count()
+
+
 class UiPageStepsSerializer(serializers.ModelSerializer):
     """页面步骤序列化器"""
     page_name = serializers.CharField(source='page.name', read_only=True)
@@ -133,6 +153,24 @@ class UiCaseStepsWithDetailSerializer(serializers.ModelSerializer):
         read_only_fields = ['status', 'error_message', 'result_data', 'created_at', 'updated_at']
 
 
+class UiTestCaseListSerializer(serializers.ModelSerializer):
+    """测试用例列表序列化器（精简字段，提升性能）"""
+    module_name = serializers.CharField(source='module.name', read_only=True)
+    creator_name = serializers.CharField(source='creator.username', read_only=True)
+    step_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UiTestCase
+        fields = [
+            'id', 'project', 'module', 'module_name', 'name', 'level', 'status',
+            'step_count', 'creator', 'creator_name', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['status', 'creator', 'created_at', 'updated_at']
+
+    def get_step_count(self, obj):
+        return obj.case_steps.count()
+
+
 class UiTestCaseSerializer(serializers.ModelSerializer):
     """测试用例序列化器"""
     module_name = serializers.CharField(source='module.name', read_only=True)
@@ -162,6 +200,20 @@ class UiTestCaseExecuteSerializer(UiTestCaseSerializer):
 
     class Meta(UiTestCaseSerializer.Meta):
         fields = '__all__'
+
+
+class UiExecutionRecordListSerializer(serializers.ModelSerializer):
+    """执行记录列表序列化器（精简字段，提升性能）"""
+    test_case_name = serializers.CharField(source='test_case.name', read_only=True)
+    executor_name = serializers.CharField(source='executor.username', read_only=True)
+
+    class Meta:
+        model = UiExecutionRecord
+        fields = [
+            'id', 'batch', 'test_case', 'test_case_name', 'executor', 'executor_name',
+            'status', 'trigger_type', 'start_time', 'end_time', 'duration', 'created_at'
+        ]
+        read_only_fields = ['created_at']
 
 
 class UiExecutionRecordSerializer(serializers.ModelSerializer):
@@ -212,8 +264,8 @@ class UiBatchExecutionRecordSerializer(serializers.ModelSerializer):
 
 
 class UiBatchExecutionRecordDetailSerializer(UiBatchExecutionRecordSerializer):
-    """批量执行记录详情序列化器（含关联执行记录）"""
-    execution_records = UiExecutionRecordSerializer(many=True, read_only=True)
+    """批量执行记录详情序列化器（含关联执行记录列表）"""
+    execution_records = UiExecutionRecordListSerializer(many=True, read_only=True)
 
     class Meta(UiBatchExecutionRecordSerializer.Meta):
         fields = '__all__'
