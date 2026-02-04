@@ -12,9 +12,6 @@
               <span class="tool-name">{{ actionRequest.name }}</span>
               <span class="approval-badge">需要审批</span>
             </div>
-            <div class="tool-args" v-if="hasArgs">
-              <code>{{ formatArgsInline(actionRequest.args) }}</code>
-            </div>
           </div>
         </div>
 
@@ -95,10 +92,12 @@ export interface ActionRequest {
   name: string;
   args: Record<string, unknown>;
   description?: string;
+  auto_reject?: boolean;
 }
 
 export interface InterruptEvent {
   id: string;
+  interrupt_id?: string;
   action_requests: ActionRequest[];
 }
 
@@ -140,15 +139,6 @@ const formatArgsInline = (args?: Record<string, unknown>) => {
   if (!args) return '';
   const str = JSON.stringify(args);
   return str.length > 60 ? str.substring(0, 60) + '...' : str;
-};
-
-const formatArgs = (args?: Record<string, unknown>) => {
-  if (!args) return '';
-  try {
-    return JSON.stringify(args, null, 2);
-  } catch {
-    return String(args);
-  }
 };
 
 const getValueType = (value: unknown): string => {

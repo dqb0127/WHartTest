@@ -192,6 +192,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'submit', data: CreateLlmConfigRequest | PartialUpdateLlmConfigRequest, id?: number): void;
   (e: 'cancel'): void;
+  (e: 'auto-saved', closeModal?: boolean): void;
 }>();
 
 const formRef = ref<FormInstance | null>(null);
@@ -215,7 +216,10 @@ const defaultFormData: CreateLlmConfigRequest = {
 const formData = ref<CreateLlmConfigRequest>({ ...defaultFormData });
 const currentConfigId = ref<number | null>(null);
 
-const isEditing = computed(() => !!props.configData?.id);
+// 编辑模式：考虑 props.configData 或自动保存后的 currentConfigId
+const isEditing = computed(() => !!(props.configData?.id || currentConfigId.value));
+// 获取当前配置ID（优先 props，其次是自动保存后的 currentConfigId）
+const effectiveConfigId = computed(() => props.configData?.id || currentConfigId.value);
 
 const formRules: Record<string, FieldRule[]> = {
   config_name: [{ required: true, message: '配置名称不能为空' }],
@@ -271,8 +275,8 @@ const handleSubmit = async () => {
 
   let submitData: CreateLlmConfigRequest | PartialUpdateLlmConfigRequest;
 
-  if (isEditing.value && props.configData?.id) {
-    // 编辑模式
+  if (isEditing.value && effectiveConfigId.value) {
+    // 编辑模式（包括自动保存后的情况）
     const partialData: PartialUpdateLlmConfigRequest = {
       config_name: formData.value.config_name,
       provider: formData.value.provider,
@@ -302,7 +306,7 @@ const handleSubmit = async () => {
       partialData.enable_streaming = formData.value.enable_streaming;
     }
     submitData = partialData;
-    emit('submit', submitData, props.configData.id);
+    emit('submit', submitData, effectiveConfigId.value);
   } else {
     // 新增模式
     submitData = { ...formData.value };
@@ -375,6 +379,7 @@ const testLlmModel = async () => {
       configId = createResp.data.id;
       currentConfigId.value = configId;
       Message.success('配置已自动保存');
+      emit('auto-saved', false); // false 表示不关闭弹窗
     } else if (isEditing.value) {
       // 编辑模式：先保存更改
       const partialData: PartialUpdateLlmConfigRequest = {

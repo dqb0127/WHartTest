@@ -304,12 +304,7 @@ const formatDate = (dateStr: string): string => {
 };
 
 const formatTokenCount = (count: number): string => {
-  if (count >= 1000000) {
-    return (count / 1000000).toFixed(1) + 'M';
-  } else if (count >= 1000) {
-    return (count / 1000).toFixed(1) + 'K';
-  }
-  return count.toString();
+  return count.toLocaleString('zh-CN');
 };
 
 const avgTokensPerRequest = computed(() => {

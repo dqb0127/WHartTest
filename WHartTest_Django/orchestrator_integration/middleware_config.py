@@ -27,29 +27,47 @@ logger = logging.getLogger(__name__)
 
 def _create_token_counter(model_name: str) -> Callable[[Iterable], int]:
     """
-    创建基于 tiktoken 的精确 Token 计数器
+    创建基于 usage_metadata 的 Token 计数器
 
     注意：SummarizationMiddleware 需要的 token_counter 签名是:
     Callable[[Iterable[MessageLikeRepresentation]], int]
     即接收消息列表，返回总 token 数
+    
+    计算逻辑：取最后一条有 usage_metadata 的消息的 input_tokens + output_tokens
+    这代表当前上下文的真实 token 使用量
     """
-    from langchain_core.messages.utils import count_tokens_approximately
-
     def token_counter(messages: Iterable) -> int:
-        """计算消息列表的 token 总数"""
+        """计算当前上下文的 token 数（使用最后一条消息的 usage_metadata）"""
         try:
-            # 使用 LangChain 官方的 count_tokens_approximately
-            # 它会正确处理 content、tool_calls、role 等所有字段
-            return count_tokens_approximately(messages)
-        except Exception as e:
-            logger.warning(f"Token 计数失败，使用粗略估算: {e}")
-            # 回退方案
-            total = 0
-            for msg in messages:
+            # 将 Iterable 转换为列表以便反向遍历
+            messages_list = list(messages)
+            
+            # 优先使用最后一条消息的 usage_metadata
+            # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
+            for msg in reversed(messages_list):
+                if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
+                    input_tokens = msg.usage_metadata.get('input_tokens', 0)
+                    output_tokens = msg.usage_metadata.get('output_tokens', 0)
+                    total = input_tokens + output_tokens
+                    if total > 0:
+                        logger.debug(f"token_counter: usage_metadata = {total} (input={input_tokens}, output={output_tokens})")
+                        return total
+            
+            # 如果没有 usage_metadata，使用 tiktoken 估算内容 token
+            # 并乘以估算系数（考虑工具定义等额外 token）
+            content_tokens = 0
+            for msg in messages_list:
                 if hasattr(msg, 'content') and msg.content:
                     content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                    total += context_checker.count_tokens(content, model_name)
-            return total
+                    content_tokens += context_checker.count_tokens(content, model_name)
+            
+            # 估算系数：工具定义、系统提示词等通常占总 token 的 2-3 倍
+            estimated_total = content_tokens * 3
+            logger.debug(f"token_counter: tiktoken 估算 = {estimated_total} (content={content_tokens} * 3)")
+            return estimated_total
+        except Exception as e:
+            logger.warning(f"Token 计数失败: {e}")
+            return 0
 
     return token_counter
 
@@ -289,9 +307,11 @@ def build_dynamic_interrupt_on(
     """
     # 获取用户偏好
     user_approvals = get_user_tool_approvals(user, session_id) if user else {}
+    logger.info(f"[HITL] 用户偏好: {user_approvals}")
 
     # 如果提供了工具名列表，默认所有工具都需要审批
     if all_tool_names:
+        logger.info(f"[HITL] 所有工具默认需要审批: {all_tool_names}")
         dynamic_config = {}
         for tool_name in all_tool_names:
             user_policy = user_approvals.get(tool_name)
@@ -318,6 +338,7 @@ def build_dynamic_interrupt_on(
                         "description": f"{tool_name} 需要审批",
                     }
 
+        logger.info(f"[HITL] 最终中断配置 (需要审批的工具): {list(dynamic_config.keys())}")
         return dynamic_config
 
     # 传统模式：只审批 base_tools 中的工具
@@ -455,13 +476,16 @@ def get_standard_middleware(
                     enable_summarization, summarization_model is not None)
 
     if enable_hitl:
+        logger.info("HITL 已启用，正在添加 HumanInTheLoopMiddleware, all_tool_names=%s", hitl_all_tool_names)
         middleware.append(get_human_in_the_loop_middleware(
             interrupt_on=hitl_tools,
             user=hitl_user,
             session_id=hitl_session_id,
             all_tool_names=hitl_all_tool_names,
         ))
-        logger.debug("已添加 HumanInTheLoopMiddleware (all_tools=%s)", bool(hitl_all_tool_names))
+        logger.info("已添加 HumanInTheLoopMiddleware (all_tools=%s)", bool(hitl_all_tool_names))
+    else:
+        logger.info("HITL 未启用，跳过 HumanInTheLoopMiddleware")
 
     return middleware
 

@@ -280,13 +280,11 @@ const replaceDocImgPlaceholders = (content: string): string => {
   });
 };
 
-
-
-// 去除 ANSI 转义序列（终端颜色代码等）
-const stripAnsiCodes = (text: string): string => {
-  // 匹配所有 ANSI 转义序列：ESC[...m 格式
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/\x1b\[[0-9;]*m/g, '');
+// HTML转义函数
+const escapeHtml = (text: string): string => {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 };
 
 // 格式化消息内容
@@ -294,8 +292,14 @@ const formattedContent = computed(() => {
   try {
     let processedContent = props.message.content;
 
-    // 首先去除 ANSI 转义序列（终端颜色代码）
-    processedContent = stripAnsiCodes(processedContent);
+    // 用户消息（human类型）：先转义HTML，确保用户发送的HTML代码能正确显示
+    if (props.message.isUser || props.message.messageType === 'human') {
+      // 转义HTML标签，使其显示为文本
+      processedContent = escapeHtml(processedContent);
+      // 将换行符转换为<br>标签，保持换行
+      processedContent = processedContent.replace(/\n/g, '<br>');
+      return processedContent;
+    }
 
     // 将需求文档图片占位符转换为可访问的图片URL（用于Markdown渲染）
     processedContent = replaceDocImgPlaceholders(processedContent);

@@ -248,3 +248,43 @@ export async function getActiveLlmConfig(): Promise<ApiResponse<LlmConfig | null
     errors: response.errors
   };
 }
+
+/**
+ * 从 LLM API 获取可用模型列表
+ * @param apiUrl API URL
+ * @param apiKey API Key（可选，编辑模式下可从数据库获取）
+ * @param configId 配置ID（可选，用于编辑模式从数据库获取 API Key）
+ */
+export async function fetchModels(
+  apiUrl: string,
+  apiKey?: string,
+  configId?: number
+): Promise<ApiResponse<{ models: string[] }>> {
+  const response = await request<{ status: string; models?: string[]; message?: string }>({
+    url: `${API_BASE_URL}/fetch_models/`,
+    method: 'POST',
+    data: {
+      api_url: apiUrl,
+      api_key: apiKey,
+      config_id: configId,
+    },
+  });
+
+  if (response.success && response.data?.status === 'success') {
+    return {
+      status: 'success',
+      code: 200,
+      message: 'Models fetched successfully',
+      data: { models: response.data.models || [] },
+      errors: null,
+    };
+  } else {
+    return {
+      status: 'error',
+      code: 400,
+      message: response.data?.message || response.error || '获取模型列表失败',
+      data: null,
+      errors: { detail: response.error },
+    };
+  }
+}

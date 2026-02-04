@@ -269,6 +269,29 @@ const rules = {
 const deleteModalVisible = ref(false);
 const selectedApiKey = ref<ApiKeyItem | null>(null);
 
+// 确认删除
+const confirmDelete = async () => {
+  if (!selectedApiKey.value) return;
+  
+  loading.value = true;
+  try {
+    const deleteResponse = await deleteApiKeyRequest(selectedApiKey.value.id);
+    if (deleteResponse.success) {
+      Message.success('删除成功');
+      deleteModalVisible.value = false;
+      selectedApiKey.value = null;
+      fetchApiKeyList();
+    } else {
+      Message.error(deleteResponse.error || '删除失败');
+    }
+  } catch (error: any) {
+    console.error('删除Key错误:', error);
+    Message.error(`删除失败: ${error.message || '未知错误'}`);
+  } finally {
+    loading.value = false;
+  }
+};
+
 // 新创建的API Key（仅在创建成功后显示一次）
 const newApiKey = ref<string>('');
 

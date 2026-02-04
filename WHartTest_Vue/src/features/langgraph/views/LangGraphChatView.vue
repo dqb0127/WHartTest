@@ -261,10 +261,32 @@ const currentInterrupt = computed<InterruptEvent | null>(() => {
 });
 
 // 监听中断状态，自动弹出/关闭审批对话框
-watch(currentInterrupt, (interrupt) => {
+watch(currentInterrupt, async (interrupt) => {
   console.log('[LangGraphChatView] currentInterrupt watch triggered:', interrupt);
   if (interrupt) {
-    toolApprovalDialogVisible.value = true;
+    // 检查是否所有工具都需要自动拒绝
+    const actionRequests = interrupt.action_requests || [];
+    const allAutoReject = actionRequests.length > 0 &&
+      actionRequests.every((ar) => ar.auto_reject === true);
+
+    if (allAutoReject) {
+      // 所有工具都设为"始终拒绝"，自动发送拒绝响应
+      console.log('[LangGraphChatView] All tools marked as auto_reject, sending auto-reject');
+      const toolNames = actionRequests.map((ar) => ar.name || 'unknown').join(', ');
+      Message.warning(`工具 ${toolNames} 已被设为始终拒绝，自动拒绝执行`);
+
+      // 延迟自动拒绝，等待当前 SSE 流完全结束
+      // 避免 clearStreamState 删除 activeStreams 后 resumeAgentLoop 无法正常工作
+      setTimeout(async () => {
+        await handleToolDecision({
+          interruptId: interrupt.interrupt_id || interrupt.id || '',
+          type: 'reject',
+        });
+      }, 100);
+    } else {
+      // 有需要用户审批的工具，显示对话框
+      toolApprovalDialogVisible.value = true;
+    }
   } else {
     // 当 interrupt 变为 null 时，自动关闭对话框
     toolApprovalDialogVisible.value = false;
@@ -405,7 +427,7 @@ const loadSessionsFromServer = async () => {
     isLoading.value = true;
     const response = await getChatSessions(projectStore.currentProjectId);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       // 优先使用 sessions_detail（包含标题和时间），避免 N+1 查询
       const sessionsDetail = response.data.sessions_detail;
       
@@ -546,26 +568,27 @@ const loadChatHistory = async () => {
     isLoading.value = true;
     const response = await getChatHistory(storedSessionId, projectStore.currentProjectId);
 
-    if (response.status === 'success') {
-      sessionId.value = response.data.session_id;
+    if (response.status === 'success' && response.data) {
+      const data = response.data;
+      sessionId.value = data.session_id;
 
       // 🆕 恢复该会话的Token使用信息
-      if (response.data.context_token_count !== undefined) {
-        const tokenCount = response.data.context_token_count || 0;
-        const limit = response.data.context_limit || 128000;
-        latestContextUsage.value[response.data.session_id] = { tokenCount, limit };
+      if (data.context_token_count !== undefined) {
+        const tokenCount = data.context_token_count || 0;
+        const limit = data.context_limit || 128000;
+        latestContextUsage.value[data.session_id] = { tokenCount, limit };
         console.log(`🔄 恢复会话Token使用: ${tokenCount}/${limit}`);
       }
 
       // 🆕 恢复该会话关联的提示词
-      if (response.data.prompt_id !== null && response.data.prompt_id !== undefined) {
-        selectedPromptId.value = response.data.prompt_id;
-        localStorage.setItem(PROMPT_STORAGE_KEY, String(response.data.prompt_id));
-        console.log(`🔄 恢复会话提示词: ${response.data.prompt_name} (ID: ${response.data.prompt_id})`);
+      if (data.prompt_id !== null && data.prompt_id !== undefined) {
+        selectedPromptId.value = data.prompt_id;
+        localStorage.setItem(PROMPT_STORAGE_KEY, String(data.prompt_id));
+        console.log(`🔄 恢复会话提示词: ${data.prompt_name} (ID: ${data.prompt_id})`);
       }
 
       // ✅ 使用纯函数处理历史记录,自动插入步骤分隔符
-      const tempMessages = enrichMessagesWithSeparators(response.data.history, formatHistoryTime);
+      const tempMessages = enrichMessagesWithSeparators(data.history, formatHistoryTime);
       
       // 🎨 合并连续的思考过程消息
       messages.value = mergeThinkingProcessMessages(tempMessages);
@@ -574,10 +597,10 @@ const loadChatHistory = async () => {
       console.log('🔍 [Debug] 最终step_separator数量:', messages.value.filter(m => m.messageType === 'step_separator').length);
 
       // 只有在会话列表中不存在该会话时才添加（避免重复）
-      const existingSession = chatSessions.value.find(s => s.id === response.data.session_id);
+      const existingSession = chatSessions.value.find(s => s.id === data.session_id);
       if (!existingSession) {
-        const firstHumanMessage = response.data.history.find(msg => msg.type === 'human')?.content;
-        updateSessionInList(response.data.session_id, firstHumanMessage, false);
+        const firstHumanMessage = data.history.find(msg => msg.type === 'human')?.content;
+        updateSessionInList(data.session_id, firstHumanMessage, false);
       }
       
       console.log(`✅ 成功加载会话历史: ${sessionId.value}, ${messages.value.length} 条消息`);
@@ -831,7 +854,7 @@ const handleStopGeneration = async () => {
       if (sessionId.value && projectStore.currentProjectId) {
         try {
           const response = await getChatHistory(sessionId.value, projectStore.currentProjectId);
-          if (response.status === 'success' && response.data.history) {
+          if (response.status === 'success' && response.data?.history) {
             const tempMessages = enrichMessagesWithSeparators(response.data.history, formatHistoryTime);
             messages.value = mergeThinkingProcessMessages(tempMessages);
             console.log('[LangGraphChatView] History reloaded after stop:', messages.value.length, 'messages');
@@ -861,12 +884,10 @@ const handleRetry = async (message: ChatMessage) => {
   }
 
   let userMessage: ChatMessage;
-  let deleteFromIndex: number;
 
   if (message.messageType === 'human') {
-    // 用户消息重试：直接使用该消息，删除该消息及之后的所有内容
+    // 用户消息重试：直接使用该消息
     userMessage = message;
-    deleteFromIndex = msgIndex;
   } else {
     // AI消息重试：向前查找最近的用户消息
     let foundUser: ChatMessage | null = null;
@@ -882,13 +903,9 @@ const handleRetry = async (message: ChatMessage) => {
       return;
     }
     userMessage = foundUser;
-    deleteFromIndex = msgIndex;
   }
 
-  // 删除从指定位置开始的所有后续消息
-  messages.value = messages.value.slice(0, deleteFromIndex);
-
-  // 重新发送用户消息
+  // 不删除消息，直接重新发送用户消息（后端也不会删除历史，保持一致）
   await handleSendMessage({
     message: userMessage.content,
     image: userMessage.imageBase64,
@@ -1048,7 +1065,7 @@ const switchSession = async (id: string) => {
     isLoading.value = true;
     const response = await getChatHistory(id, projectStore.currentProjectId);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       // 🆕 恢复该会话的Token使用信息
       if (response.data.context_token_count !== undefined) {
         const tokenCount = response.data.context_token_count || 0;
@@ -1154,7 +1171,7 @@ const batchDeleteSessions = async (sessionIds: string[]) => {
     isLoading.value = true;
     const response = await batchDeleteChatHistory(sessionIds, projectStore.currentProjectId);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       const { processed_sessions, failed_sessions } = response.data;
       
       // 从列表中移除已删除的会话
@@ -1452,7 +1469,7 @@ const handleNormalMessage = async (requestData: ChatRequest, originalMessage: st
     // 移除loading消息
     messages.value.splice(loadingMessageIndex, 1);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       const data = response.data;
 
       // 保存会话ID
@@ -1503,6 +1520,7 @@ const handleNormalMessage = async (requestData: ChatRequest, originalMessage: st
             isWaitingForApproval: true,
             interrupt: {
               id: data.interrupt.interrupt_id,
+              interrupt_id: data.interrupt.interrupt_id,
               action_requests: data.interrupt.action_requests
             }
           };
@@ -1510,6 +1528,7 @@ const handleNormalMessage = async (requestData: ChatRequest, originalMessage: st
           activeStreams.value[data.session_id].isWaitingForApproval = true;
           activeStreams.value[data.session_id].interrupt = {
             id: data.interrupt.interrupt_id,
+            interrupt_id: data.interrupt.interrupt_id,
             action_requests: data.interrupt.action_requests
           };
         }
@@ -1562,7 +1581,7 @@ watch(() => projectStore.currentProjectId, async (newProjectId, oldProjectId) =>
 const loadCurrentLlmConfig = async () => {
   try {
     const response = await listLlmConfigs();
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       // 找到激活的配置
       const activeConfig = response.data.find(config => config.is_active);
       if (activeConfig) {

@@ -1,7 +1,8 @@
 /**
  * 提示词验证工具函数
  */
-import { PromptType, isProgramCallPromptType } from '../types/prompt';
+import type { PromptType } from '../types/prompt';
+import { isProgramCallPromptType } from '../types/prompt';
 
 /**
  * 验证提示词表单数据

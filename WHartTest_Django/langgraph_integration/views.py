@@ -62,7 +62,6 @@ def check_project_permission(user, project_id):
 # --- New Imports ---
 from typing import TypedDict, Annotated, List, Optional
 from langchain_core.messages import AnyMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
-from langchain_core.messages.utils import count_tokens_approximately
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages # Correct import for add_messages
@@ -1402,24 +1401,22 @@ class ChatHistoryAPIView(APIView):
                     logger.info(f"ChatHistoryAPIView: No checkpoints found for thread_id: {thread_id}")
             # By processing only the latest checkpoint, we get the final state of messages, avoiding duplicates.
 
-            # 计算上下文Token使用信息（使用 LangChain 的 count_tokens_approximately 保持一致性）
+            # 获取当前上下文Token使用信息（取最后一条 AI 消息的 usage_metadata）
             context_token_count = 0
             context_limit = 128000
             try:
                 active_config = LLMConfig.objects.get(is_active=True)
                 context_limit = active_config.context_limit or 128000
 
-                # 尝试使用原始 messages 列表（如果可用）
+                # 获取最后一次 LLM 调用的 token 使用量
+                # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
                 if 'messages' in locals() and messages:
-                    context_token_count = count_tokens_approximately(messages)
-                else:
-                    # 回退：从 history_messages 计算（不够精确，但作为备用）
-                    from requirements.context_limits import context_checker
-                    for msg_data in history_messages:
-                        content = msg_data.get('content', '')
-                        if content:
-                            content_str = content if isinstance(content, str) else str(content)
-                            context_token_count += context_checker.count_tokens(content_str, active_config.name or "gpt-4o")
+                    for msg in reversed(messages):
+                        if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
+                            input_tokens = msg.usage_metadata.get('input_tokens', 0)
+                            output_tokens = msg.usage_metadata.get('output_tokens', 0)
+                            context_token_count = input_tokens + output_tokens
+                            break  # 只取最后一条有 usage_metadata 的消息
             except Exception as e:
                 logger.warning(f"ChatHistoryAPIView: Failed to calculate token count: {e}")
 
@@ -2485,15 +2482,30 @@ class TokenUsageStatsAPIView(APIView):
 
         # 解析日期
         try:
+            # 使用本地时区的当前日期，避免 UTC 时区偏差
+            from django.utils import timezone as tz
+            local_now = tz.localtime(tz.now())
+            today = local_now.date()
+            
             if start_date_str:
                 start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
             else:
-                start_date = (timezone.now() - timedelta(days=30)).date()
+                # 根据 group_by 自动计算起始日期
+                if group_by == 'day':
+                    start_date = today
+                elif group_by == 'week':
+                    # 本周一
+                    start_date = today - timedelta(days=today.weekday())
+                elif group_by == 'month':
+                    # 本月1号
+                    start_date = today.replace(day=1)
+                else:
+                    start_date = (timezone.now() - timedelta(days=30)).date()
 
             if end_date_str:
                 end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
             else:
-                end_date = timezone.now().date()
+                end_date = today
         except ValueError:
             return Response(
                 {'error': '日期格式错误，请使用 YYYY-MM-DD'},
@@ -2501,18 +2513,28 @@ class TokenUsageStatsAPIView(APIView):
             )
 
         # 构建查询
+        import logging
+        logger = logging.getLogger('langgraph_integration')
+        logger.info(f"[TokenUsageStats] 查询日期范围: {start_date} ~ {end_date}, group_by={group_by}")
+        
         queryset = ChatSession.objects.filter(
             created_at__date__gte=start_date,
             created_at__date__lte=end_date
         )
+        
+        logger.info(f"[TokenUsageStats] 查询到 {queryset.count()} 个会话")
 
+        # 用于个人统计的查询（只看自己的数据）
         if target_user_id:
-            queryset = queryset.filter(user_id=target_user_id)
-        elif not user.is_superuser:
-            queryset = queryset.filter(user=user)
+            personal_queryset = queryset.filter(user_id=target_user_id)
+        else:
+            personal_queryset = queryset.filter(user=user)
+        
+        # 用户排行榜使用全部数据（所有人都能看到排行榜）
+        all_users_queryset = queryset
 
-        # 用户维度统计
-        user_stats = queryset.values('user__username', 'user_id').annotate(
+        # 用户维度统计（排行榜 - 使用全部数据）
+        user_stats = all_users_queryset.values('user__username', 'user_id').annotate(
             total_input=Sum('total_input_tokens'),
             total_output=Sum('total_output_tokens'),
             total_tokens=Sum('total_tokens'),
@@ -2520,14 +2542,14 @@ class TokenUsageStatsAPIView(APIView):
             session_count=Count('id')
         ).order_by('-total_tokens')
 
-        # 时间维度统计
+        # 时间维度统计（使用个人数据）
         trunc_func = {
             'day': TruncDate,
             'week': TruncWeek,
             'month': TruncMonth
         }.get(group_by, TruncDate)
 
-        time_stats = queryset.annotate(
+        time_stats = personal_queryset.annotate(
             period=trunc_func('created_at')
         ).values('period').annotate(
             total_input=Sum('total_input_tokens'),
@@ -2537,8 +2559,8 @@ class TokenUsageStatsAPIView(APIView):
             session_count=Count('id')
         ).order_by('period')
 
-        # 总计统计
-        total_stats = queryset.aggregate(
+        # 总计统计（使用个人数据）
+        total_stats = personal_queryset.aggregate(
             total_input=Sum('total_input_tokens'),
             total_output=Sum('total_output_tokens'),
             total_tokens=Sum('total_tokens'),

@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { Message, Modal } from '@arco-design/web-vue';
 import { IconSave } from '@arco-design/web-vue/es/icon';
 import {
@@ -84,7 +84,6 @@ import {
   updateUserPermissions,
   updateGroupPermissions,
   type Permission,
-  type PaginationParams
 } from '@/services/permissionService';
 
 // 权限树节点接口
@@ -264,24 +263,6 @@ const buildPermissionTree = (permissions: Permission[], userPerms: Permission[])
   });
 };
 
-// 获取应用子名称（在系统管理下的子分类）
-const getAppSubName = (appLabel: string): string => {
-  const subNames: Record<string, string> = {
-    'admin': '日志管理',
-    'auth': '认证授权',
-    'contenttypes': '内容类型',
-    'sessions': '会话管理',
-    'api_keys': 'API密钥',
-    'llm_config': 'LLM配置',
-    'llms': 'LLM服务',
-    'mcp_tools': 'MCP工具',
-  };
-
-  return subNames[appLabel] || appLabel;
-};
-
-// 注意：现在直接使用后端提供的中文名称，不需要前端映射
-
 // 获取所有权限
 const fetchAllPermissions = async () => {
   loading.value = true;
@@ -350,7 +331,7 @@ const onPermissionCheck = (checkedKeysValue: (string | number)[], info: any) => 
 };
 
 // 节点展开处理
-const onNodeExpand = (expandedKeysValue: (string | number)[], info: any) => {
+const onNodeExpand = (expandedKeysValue: (string | number)[]) => {
   expandedKeys.value = expandedKeysValue;
 };
 

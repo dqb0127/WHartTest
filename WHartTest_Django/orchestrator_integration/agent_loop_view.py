@@ -18,9 +18,6 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
-import httpx
-import openai
-
 from django.http import StreamingHttpResponse, JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -30,11 +27,10 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from asgiref.sync import sync_to_async
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.messages.utils import count_tokens_approximately
 from langchain.agents import create_agent
 from wharttest_django.checkpointer import get_async_checkpointer
 
-from .middleware_config import get_middleware_from_config
+from .middleware_config import get_middleware_from_config, get_user_tool_approvals
 from .playwright_instructions import PLAYWRIGHT_SCRIPT_INSTRUCTION
 from .stop_signal import should_stop, clear_stop_signal
 from langgraph_integration.models import ChatSession, LLMConfig
@@ -149,9 +145,6 @@ class AgentLoopStreamAPIView(View):
         """
         thread_id = f"{request.user.id}_{project_id}_{session_id}"
 
-        # 0. 清理上一次可能残留的停止信号（防止新对话被误停）
-        clear_stop_signal(session_id)
-
         # 1. 获取 LLM 配置
         try:
             active_config = await sync_to_async(LLMConfig.objects.get)(is_active=True)
@@ -239,32 +232,26 @@ class AgentLoopStreamAPIView(View):
             tools.extend(builtin_tools)
             logger.info(f"AgentLoopStreamAPI: Added {len(builtin_tools)} builtin tools")
 
-            # 7. 获取或创建 ChatSession
-            chat_session = await sync_to_async(
-                lambda: ChatSession.objects.filter(
-                    session_id=session_id,
-                    user=request.user,
-                    project_id=project_id
-                ).first()
-            )()
-            
-            if not chat_session:
-                prompt_obj = None
-                if prompt_id:
-                    try:
-                        prompt_obj = await sync_to_async(UserPrompt.objects.get)(
-                            id=prompt_id, user=request.user, is_active=True
-                        )
-                    except UserPrompt.DoesNotExist:
-                        pass
+            # 7. 获取或创建 ChatSession（使用 get_or_create 避免竞态条件）
+            prompt_obj = None
+            if prompt_id:
+                try:
+                    prompt_obj = await sync_to_async(UserPrompt.objects.get)(
+                        id=prompt_id, user=request.user, is_active=True
+                    )
+                except UserPrompt.DoesNotExist:
+                    pass
 
-                chat_session = await sync_to_async(ChatSession.objects.create)(
-                    user=request.user,
-                    session_id=session_id,
-                    project=project,
-                    prompt=prompt_obj,
-                    title=f"新对话 - {user_message[:30]}"
-                )
+            chat_session, created = await sync_to_async(ChatSession.objects.get_or_create)(
+                session_id=session_id,
+                defaults={
+                    'user': request.user,
+                    'project': project,
+                    'prompt': prompt_obj,
+                    'title': f"新对话 - {user_message[:30]}"
+                }
+            )
+            if created:
                 logger.info(f"AgentLoopStreamAPI: Created new ChatSession: {session_id}")
 
             # 8. 获取系统提示词
@@ -294,6 +281,7 @@ class AgentLoopStreamAPIView(View):
             yield create_sse_data({
                 'type': 'start',
                 'session_id': session_id,
+                'thread_id': thread_id,
                 'project_id': project_id,
                 'mode': 'agent_loop',
                 'created_at': chat_session.created_at.isoformat() if chat_session and chat_session.created_at else None
@@ -410,6 +398,14 @@ class AgentLoopStreamAPIView(View):
                                             })
 
                                 if action_requests:
+                                    # 获取用户工具偏好，为 always_reject 的工具添加 auto_reject 标记
+                                    user_approvals = await sync_to_async(get_user_tool_approvals)(request.user, session_id)
+                                    for ar in action_requests:
+                                        tool_name = ar.get('name', '')
+                                        if user_approvals.get(tool_name) == 'always_reject':
+                                            ar['auto_reject'] = True
+                                            logger.info(f"AgentLoopStreamAPI: Tool {tool_name} marked as auto_reject")
+
                                     interrupt_detected = True
                                     yield create_sse_data({
                                         'type': 'interrupt',
@@ -444,10 +440,14 @@ class AgentLoopStreamAPIView(View):
                                         tool_messages = node_output.get("messages", [])
                                         for tool_msg in tool_messages:
                                             if hasattr(tool_msg, 'content'):
-                                                content = tool_msg.content if isinstance(tool_msg.content, str) else str(tool_msg.content)
+                                                content = tool_msg.content
+                                                tool_name = getattr(tool_msg, 'name', None) or getattr(tool_msg, 'tool_name', 'unknown')
+                                                summary = content[:200] if isinstance(content, str) else str(content)[:200]
                                                 yield create_sse_data({
                                                     'type': 'tool_result',
-                                                    'content': content,
+                                                    'tool_name': tool_name,
+                                                    'tool_output': content,
+                                                    'summary': summary,
                                                     'step': step_count
                                                 })
                                         # 步骤完成
@@ -476,69 +476,44 @@ class AgentLoopStreamAPIView(View):
                                     yield create_sse_data({'type': 'stream', 'data': chunk.content})
 
                 except Exception as e:
-                    # 详细的错误分类和日志记录
-                    error_type = type(e).__name__
-                    error_msg = str(e)
-                    
-                    # 导入常见的网络/API异常类型
-                    import httpx
-                    import openai
-                    
-                    # 分类错误并提供详细诊断信息
-                    if isinstance(e, (httpx.TimeoutException, asyncio.TimeoutError)):
-                        user_msg = f'LLM请求超时: 模型响应时间过长，请检查模型服务状态或尝试缩短问题'
-                        logger.error(
-                            f"AgentLoopStreamAPI: LLM Timeout - session={session_id}, step={step_count}, "
-                            f"error={error_type}: {error_msg}",
-                            exc_info=True
-                        )
-                    elif isinstance(e, httpx.ConnectError):
-                        user_msg = f'LLM连接失败: 无法连接到模型服务，请检查API地址和网络'
-                        logger.error(
-                            f"AgentLoopStreamAPI: LLM Connection Failed - session={session_id}, "
-                            f"base_url可能不可达, error={error_type}: {error_msg}",
-                            exc_info=True
-                        )
-                    elif isinstance(e, httpx.HTTPStatusError):
-                        status_code = getattr(e.response, 'status_code', 'unknown')
-                        user_msg = f'LLM API错误 (HTTP {status_code}): {error_msg}'
-                        logger.error(
-                            f"AgentLoopStreamAPI: LLM HTTP Error - session={session_id}, "
-                            f"status={status_code}, error={error_msg}",
-                            exc_info=True
-                        )
-                    elif isinstance(e, openai.APIConnectionError):
-                        user_msg = f'LLM API连接错误: {error_msg}'
-                        logger.error(
-                            f"AgentLoopStreamAPI: OpenAI API Connection Error - session={session_id}, "
-                            f"error={error_type}: {error_msg}",
-                            exc_info=True
-                        )
-                    elif isinstance(e, openai.RateLimitError):
-                        user_msg = 'LLM API请求频率限制: 请稍后重试'
-                        logger.warning(
-                            f"AgentLoopStreamAPI: Rate Limited - session={session_id}, error={error_msg}"
-                        )
-                    elif isinstance(e, openai.APIStatusError):
-                        status_code = getattr(e, 'status_code', 'unknown')
-                        user_msg = f'LLM API状态错误 ({status_code}): {error_msg}'
-                        logger.error(
-                            f"AgentLoopStreamAPI: OpenAI API Status Error - session={session_id}, "
-                            f"status={status_code}, error={error_msg}",
-                            exc_info=True
-                        )
-                    else:
-                        # 未知错误，记录完整堆栈
-                        user_msg = f'流式处理错误 ({error_type}): {error_msg}'
-                        logger.error(
-                            f"AgentLoopStreamAPI: Unexpected Streaming Error - session={session_id}, "
-                            f"step={step_count}, type={error_type}, error={error_msg}",
-                            exc_info=True
-                        )
-                    
-                    yield create_sse_data({'type': 'error', 'message': user_msg})
+                    logger.error(f"AgentLoopStreamAPI: Streaming error: {e}", exc_info=True)
+                    yield create_sse_data({'type': 'error', 'message': f'Streaming error: {str(e)}'})
 
                 # 16. 处理结束状态
+                # 无论是否发生 interrupt，都需要计算和发送 context_update
+                try:
+                    current_state = await agent.aget_state(invoke_config)
+                    all_messages = current_state.values.get("messages", []) if current_state.values else []
+
+                    # 获取最后一次 LLM 调用的 token 使用量
+                    # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
+                    input_tokens = 0
+                    output_tokens = 0
+                    for msg in reversed(all_messages):
+                        if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
+                            input_tokens = msg.usage_metadata.get('input_tokens', 0)
+                            output_tokens = msg.usage_metadata.get('output_tokens', 0)
+                            # 调试日志：打印原始 usage_metadata
+                            logger.info(f"AgentLoopStreamAPI: Raw usage_metadata = {msg.usage_metadata}")
+                            break  # 只取最后一条有 usage_metadata 的消息
+
+                    total_tokens = input_tokens + output_tokens
+
+                    yield create_sse_data({
+                        'type': 'context_update',
+                        'context_token_count': total_tokens,
+                        'context_limit': context_limit
+                    })
+
+                    # 记录 Token 使用量到 ChatSession
+                    if input_tokens > 0 or output_tokens > 0:
+                        await sync_to_async(self._update_session_token_usage)(
+                            session_id, input_tokens, output_tokens
+                        )
+                        logger.info(f"AgentLoopStreamAPI: Token usage recorded - input={input_tokens}, output={output_tokens}")
+                except Exception as e:
+                    logger.warning(f"AgentLoopStreamAPI: Failed to calculate token count: {e}")
+
                 if user_stopped:
                     yield create_sse_data({
                         'type': 'complete',
@@ -548,35 +523,6 @@ class AgentLoopStreamAPIView(View):
                 elif interrupt_detected:
                     logger.info("AgentLoopStreamAPI: Interrupt detected, returning early")
                 else:
-                    # 正常完成
-                    # 计算 Token 使用量（使用 LangChain 的 count_tokens_approximately 保持一致性）
-                    try:
-                        current_state = await agent.aget_state(invoke_config)
-                        all_messages = current_state.values.get("messages", []) if current_state.values else []
-                        total_tokens = count_tokens_approximately(all_messages)
-
-                        yield create_sse_data({
-                            'type': 'context_update',
-                            'context_token_count': total_tokens,
-                            'context_limit': context_limit
-                        })
-
-                        # 记录 Token 使用量到 ChatSession
-                        input_tokens = 0
-                        output_tokens = 0
-                        for msg in all_messages:
-                            if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
-                                input_tokens += msg.usage_metadata.get('input_tokens', 0)
-                                output_tokens += msg.usage_metadata.get('output_tokens', 0)
-
-                        if input_tokens > 0 or output_tokens > 0:
-                            await sync_to_async(self._update_session_token_usage)(
-                                session_id, input_tokens, output_tokens
-                            )
-                            logger.info(f"AgentLoopStreamAPI: Token usage recorded - input={input_tokens}, output={output_tokens}")
-                    except Exception as e:
-                        logger.warning(f"AgentLoopStreamAPI: Failed to calculate token count: {e}")
-
                     complete_data = {
                         'type': 'complete',
                         'total_steps': step_count
@@ -591,40 +537,10 @@ class AgentLoopStreamAPIView(View):
                 yield "data: [DONE]\n\n"
 
         except Exception as e:
-            # 最外层异常捕获 - 详细分类和日志
-            error_type = type(e).__name__
-            error_msg = str(e)
-            
-            if isinstance(e, (httpx.TimeoutException, asyncio.TimeoutError)):
-                user_msg = f'请求超时: LLM服务响应时间过长'
-                logger.error(
-                    f"AgentLoopStreamAPI: Outer Timeout - session={session_id}, error={error_type}: {error_msg}",
-                    exc_info=True
-                )
-            elif isinstance(e, httpx.ConnectError):
-                user_msg = f'连接失败: 无法连接到LLM服务'
-                logger.error(
-                    f"AgentLoopStreamAPI: Outer Connection Error - session={session_id}, error={error_msg}",
-                    exc_info=True
-                )
-            elif isinstance(e, (openai.APIConnectionError, openai.APIStatusError)):
-                user_msg = f'LLM API错误: {error_msg}'
-                logger.error(
-                    f"AgentLoopStreamAPI: OpenAI API Error - session={session_id}, "
-                    f"type={error_type}, error={error_msg}",
-                    exc_info=True
-                )
-            else:
-                user_msg = f'执行错误 ({error_type}): {error_msg}'
-                logger.error(
-                    f"AgentLoopStreamAPI: Unexpected Error - session={session_id}, "
-                    f"type={error_type}, error={error_msg}",
-                    exc_info=True
-                )
-            
+            logger.error(f"AgentLoopStreamAPI: Error: {e}", exc_info=True)
             yield create_sse_data({
                 'type': 'error',
-                'message': user_msg
+                'message': f'执行错误: {str(e)}'
             })
 
     async def post(self, request, *args, **kwargs):
@@ -1096,6 +1012,14 @@ class AgentLoopResumeAPIView(View):
                                             })
 
                                 if action_requests:
+                                    # 获取用户工具偏好，为 always_reject 的工具添加 auto_reject 标记
+                                    user_approvals = await sync_to_async(get_user_tool_approvals)(user, session_id)
+                                    for ar in action_requests:
+                                        tool_name = ar.get('name', '')
+                                        if user_approvals.get(tool_name) == 'always_reject':
+                                            ar['auto_reject'] = True
+                                            logger.info(f"AgentLoopResumeAPI: Tool {tool_name} marked as auto_reject")
+
                                     interrupt_detected = True
                                     yield create_sse_data({
                                         'type': 'interrupt',
@@ -1129,10 +1053,14 @@ class AgentLoopResumeAPIView(View):
                                         tool_messages = node_output.get("messages", [])
                                         for tool_msg in tool_messages:
                                             if hasattr(tool_msg, 'content'):
-                                                content = tool_msg.content if isinstance(tool_msg.content, str) else str(tool_msg.content)
+                                                content = tool_msg.content
+                                                tool_name = getattr(tool_msg, 'name', None) or getattr(tool_msg, 'tool_name', 'unknown')
+                                                summary = content[:200] if isinstance(content, str) else str(content)[:200]
                                                 yield create_sse_data({
                                                     'type': 'tool_result',
-                                                    'content': content,
+                                                    'tool_name': tool_name,
+                                                    'tool_output': content,
+                                                    'summary': summary,
                                                     'step': step_count
                                                 })
                                         if step_count > 0:
@@ -1164,37 +1092,41 @@ class AgentLoopResumeAPIView(View):
                     yield create_sse_data({'type': 'error', 'message': f'Streaming error: {str(e)}'})
 
                 # 10. 处理结束状态
+                # 无论是否发生 interrupt，都需要计算和发送 context_update
+                try:
+                    current_state = await agent.aget_state(config)
+                    all_messages = current_state.values.get("messages", []) if current_state.values else []
+
+                    # 获取最后一次 LLM 调用的 token 使用量
+                    # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
+                    input_tokens = 0
+                    output_tokens = 0
+                    for msg in reversed(all_messages):
+                        if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
+                            input_tokens = msg.usage_metadata.get('input_tokens', 0)
+                            output_tokens = msg.usage_metadata.get('output_tokens', 0)
+                            break  # 只取最后一条有 usage_metadata 的消息
+
+                    total_tokens = input_tokens + output_tokens
+
+                    yield create_sse_data({
+                        'type': 'context_update',
+                        'context_token_count': total_tokens,
+                        'context_limit': context_limit
+                    })
+
+                    # 记录 Token 使用量到 ChatSession
+                    if input_tokens > 0 or output_tokens > 0:
+                        await sync_to_async(AgentLoopStreamAPIView()._update_session_token_usage)(
+                            session_id, input_tokens, output_tokens
+                        )
+                        logger.info(f"AgentLoopResumeAPI: Token usage recorded - input={input_tokens}, output={output_tokens}")
+                except Exception as e:
+                    logger.warning(f"AgentLoopResumeAPI: Failed to calculate token count: {e}")
+
                 if interrupt_detected:
                     logger.info("AgentLoopResumeAPI: New interrupt detected after resume")
                 else:
-                    # 正常完成 - 计算 Token 使用量（使用 LangChain 的 count_tokens_approximately 保持一致性）
-                    try:
-                        current_state = await agent.aget_state(config)
-                        all_messages = current_state.values.get("messages", []) if current_state.values else []
-                        total_tokens = count_tokens_approximately(all_messages)
-
-                        yield create_sse_data({
-                            'type': 'context_update',
-                            'context_token_count': total_tokens,
-                            'context_limit': context_limit
-                        })
-
-                        # 记录 Token 使用量到 ChatSession
-                        input_tokens = 0
-                        output_tokens = 0
-                        for msg in all_messages:
-                            if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
-                                input_tokens += msg.usage_metadata.get('input_tokens', 0)
-                                output_tokens += msg.usage_metadata.get('output_tokens', 0)
-
-                        if input_tokens > 0 or output_tokens > 0:
-                            await sync_to_async(AgentLoopStreamAPIView()._update_session_token_usage)(
-                                session_id, input_tokens, output_tokens
-                            )
-                            logger.info(f"AgentLoopResumeAPI: Token usage recorded - input={input_tokens}, output={output_tokens}")
-                    except Exception as e:
-                        logger.warning(f"AgentLoopResumeAPI: Failed to calculate token count: {e}")
-
                     yield create_sse_data({
                         'type': 'complete',
                         'total_steps': step_count,

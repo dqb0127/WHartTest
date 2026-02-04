@@ -27,7 +27,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { Button as AButton } from '@arco-design/web-vue';
-import { request } from '@/utils/request';
 
 const testResult = ref<any>(null);
 

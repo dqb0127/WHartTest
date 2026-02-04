@@ -275,7 +275,7 @@ const userData = ref<User[]>([]);
 // 用户权限管理相关
 const permissionsModalVisible = ref(false);
 const selectedUserId = ref<number>(0);
-const permissionTreeSelectorRef = ref<{ loadPermissions: () => Promise<void> } | null>(null);
+const permissionTreeSelectorRef = ref<{ loadPermissions: (userId?: number) => Promise<void> } | null>(null);
 
 // 查看用户权限
 const viewUserPermissions = async (user: User) => {

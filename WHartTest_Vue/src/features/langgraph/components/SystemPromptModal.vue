@@ -231,10 +231,6 @@ import {
   duplicateUserPrompt,
   initializeUserPrompts,
   getInitializationStatus,
-  // 新增需求评审相关方法
-  getRequirementPrompts,
-  getRequirementPrompt,
-  createRequirementPrompt
 } from '@/features/prompts/services/promptService';
 import type {
   UserPrompt,
@@ -242,8 +238,6 @@ import type {
 } from '@/features/prompts/types/prompt';
 import {
   PROMPT_TYPE_CHOICES,
-  isRequirementPromptType,
-  getPromptTypeDisplayName,
   isProgramCallPromptType
 } from '@/features/prompts/types/prompt';
 import { formatDateTime } from '@/utils/formatters';
@@ -332,7 +326,7 @@ const loadUserPrompts = async () => {
       getDefaultPrompt()
     ]);
 
-    if (promptsResponse.status === 'success') {
+    if (promptsResponse.status === 'success' && promptsResponse.data) {
       // 检查返回的数据格式
       let allPrompts: UserPrompt[] = [];
       if (Array.isArray(promptsResponse.data)) {
@@ -463,7 +457,7 @@ const editPrompt = async (prompt: UserPrompt) => {
   try {
     // 获取完整的提示词详情（包含content字段）
     const response = await getUserPrompt(prompt.id);
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       const fullPrompt = response.data;
       isEditingPrompt.value = true;
       currentEditingPrompt.value = fullPrompt;
@@ -636,25 +630,6 @@ const handlePromptTypeChange = (type: PromptType) => {
   // 如果切换到程序调用类型，则禁用默认设置
   if (isProgramCallPromptType(type)) {
     promptFormData.value.is_default = false;
-  }
-};
-
-// 获取提示词类型显示名称
-const getTypeDisplayName = (type: PromptType): string => {
-  const choice = PROMPT_TYPE_CHOICES.find(c => c.key === type);
-  return choice?.name || type;
-};
-
-// 加载需求评审提示词列表
-const loadRequirementPrompts = async () => {
-  try {
-    const response = await getRequirementPrompts();
-    if (response.status === 'success' && response.data) {
-      // 处理需求评审提示词列表
-      console.log('需求评审提示词列表:', response.data);
-    }
-  } catch (error) {
-    console.error('加载需求评审提示词失败:', error);
   }
 };
 </script>

@@ -95,11 +95,13 @@ export interface ActionRequest {
   name: string;
   args: Record<string, unknown>;
   description?: string;
+  auto_reject?: boolean;
 }
 
 /** Interrupt 事件 */
 export interface InterruptEvent {
   id: string;
+  interrupt_id?: string;
   action_requests: ActionRequest[];
 }
 

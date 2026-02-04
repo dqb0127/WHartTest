@@ -63,7 +63,7 @@ import {
   removeUsersFromOrganization,
   type OrganizationUser
 } from '@/services/organizationService';
-import { getUserList, type User } from '@/services/userService';
+import { getUserList } from '@/services/userService';
 
 const props = defineProps<{
   organizationId: number;
