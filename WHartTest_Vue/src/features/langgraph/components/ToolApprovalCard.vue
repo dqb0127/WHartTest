@@ -12,9 +12,6 @@
               <span class="tool-name">{{ actionRequest.name }}</span>
               <span class="approval-badge">需要审批</span>
             </div>
-            <div class="tool-args" v-if="hasArgs">
-              <code>{{ formatArgsInline(actionRequest.args) }}</code>
-            </div>
           </div>
         </div>
 

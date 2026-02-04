@@ -1,32 +1,29 @@
 <template>
-  <a-tooltip :content="tooltipContent" position="top">
-    <div class="token-indicator" :class="statusClass">
-      <svg viewBox="0 0 36 36" class="circular-chart">
-        <!-- 背景圆环 -->
-        <path
-          class="circle-bg"
-          d="M18 2.0845
-            a 15.9155 15.9155 0 0 1 0 31.831
-            a 15.9155 15.9155 0 0 1 0 -31.831"
-        />
-        <!-- 进度圆环 -->
-        <path
-          class="circle-progress"
-          :stroke-dasharray="`${percentage}, 100`"
-          d="M18 2.0845
-            a 15.9155 15.9155 0 0 1 0 31.831
-            a 15.9155 15.9155 0 0 1 0 -31.831"
-        />
-      </svg>
-      <!-- 中心百分比文字 -->
-      <span class="percentage-text">{{ displayPercentage }}</span>
-    </div>
-  </a-tooltip>
+  <div class="token-indicator" :class="statusClass">
+    <svg viewBox="0 0 36 36" class="circular-chart">
+      <!-- 背景圆环 -->
+      <path
+        class="circle-bg"
+        d="M18 2.0845
+          a 15.9155 15.9155 0 0 1 0 31.831
+          a 15.9155 15.9155 0 0 1 0 -31.831"
+      />
+      <!-- 进度圆环 -->
+      <path
+        class="circle-progress"
+        :stroke-dasharray="`${percentage}, 100`"
+        d="M18 2.0845
+          a 15.9155 15.9155 0 0 1 0 31.831
+          a 15.9155 15.9155 0 0 1 0 -31.831"
+      />
+    </svg>
+    <!-- 中心百分比文字 -->
+    <span class="percentage-text">{{ displayPercentage }}</span>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { Tooltip as ATooltip } from '@arco-design/web-vue';
 
 interface Props {
   currentTokens: number;
@@ -57,16 +54,6 @@ const statusClass = computed(() => {
   if (percentage.value >= 80) return 'status-critical';
   if (percentage.value >= 50) return 'status-warning';
   return 'status-safe';
-});
-
-const formatNumber = (num: number): string => {
-  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
-  if (num >= 1000) return `${(num / 1000).toFixed(0)}K`;
-  return num.toString();
-};
-
-const tooltipContent = computed(() => {
-  return `上下文使用: ${formatNumber(props.currentTokens)} / ${formatNumber(props.maxTokens)} tokens`;
 });
 </script>
 
