@@ -721,6 +721,11 @@ defineExpose({
   flex-direction: column;
 }
 
+/* 强制显示单元格下边框 */
+:deep(.test-case-table .arco-table-td) {
+  border-bottom: 1px solid var(--color-neutral-3) !important;
+}
+
 :deep(.test-case-table .arco-table-header) {
   flex-shrink: 0;
 }
