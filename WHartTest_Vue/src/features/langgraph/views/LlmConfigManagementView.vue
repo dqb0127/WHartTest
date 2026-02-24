@@ -31,6 +31,7 @@
       :form-loading="isFormLoading"
       @submit="handleSubmitConfig"
       @cancel="handleCloseModal"
+      @auto-saved="handleAutoSaved"
     />
 
     <!-- 提示词管理弹窗 -->
@@ -63,7 +64,9 @@ import {
 import type { PaginationProps } from '@arco-design/web-vue';
 import { useProjectStore } from '@/store/projectStore';
 import { useLlmConfigRefresh } from '@/composables/useLlmConfigRefresh';
+import { useRouter } from 'vue-router';
 
+const router = useRouter();
 const projectStore = useProjectStore();
 const { triggerLlmConfigRefresh } = useLlmConfigRefresh();
 
@@ -251,6 +254,16 @@ const handleToggleActive = async (configId: number, isActive: boolean) => {
 const handleCloseModal = () => {
   isModalVisible.value = false;
   currentConfig.value = null; // 清除当前编辑项
+};
+
+// 处理自动保存后刷新列表（测试连接时自动保存）
+const handleAutoSaved = async (closeModal = false) => {
+  if (closeModal) {
+    isModalVisible.value = false;
+    currentConfig.value = null;
+  }
+  await fetchLlmConfigs();
+  triggerLlmConfigRefresh();
 };
 
 // 监听项目变化，重新加载数据

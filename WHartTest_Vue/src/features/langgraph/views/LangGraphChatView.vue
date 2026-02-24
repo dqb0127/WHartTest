@@ -16,7 +16,6 @@
       <ChatHeader
         ref="chatHeaderRef"
         :session-id="sessionId"
-        :is-stream-mode="isStreamMode"
         :has-messages="messages.length > 0"
         :project-id="projectStore.currentProjectId"
         :use-knowledge-base="useKnowledgeBase"
@@ -24,10 +23,9 @@
         :similarity-threshold="similarityThreshold"
         :top-k="topK"
         :selected-prompt-id="selectedPromptId"
-        :brain-mode="isBrainMode"
-        @update:is-stream-mode="isStreamMode = $event"
         @clear-chat="clearChat"
         @show-system-prompt="showSystemPromptModal"
+        @show-tool-approval-settings="isToolApprovalSettingsVisible = true"
         @update:use-knowledge-base="useKnowledgeBase = $event"
         @update:selected-knowledge-base-id="selectedKnowledgeBaseId = $event"
         @update:similarity-threshold="similarityThreshold = $event"
@@ -45,14 +43,21 @@
         @delete="handleDeleteMessage"
       />
 
+      <!-- ⭐ HITL 工具审批卡片（输入框上方） -->
+      <ToolApprovalCard
+        :visible="toolApprovalDialogVisible"
+        :interrupt="currentInterrupt"
+        :session-id="sessionId"
+        @update:visible="toolApprovalDialogVisible = $event"
+        @decision="handleToolDecision"
+      />
+
       <ChatInput
         :is-loading="isLoading"
-        :has-prompts="hasPrompts"
         :supports-vision="currentLlmConfig?.supports_vision || false"
         :context-token-count="contextTokenInfo.tokenCount"
         :context-limit="contextTokenInfo.limit"
         :quoted-message="quotedMessage"
-        v-model:brain-mode="isBrainMode"
         @send-message="handleSendMessage"
         @clear-quote="handleClearQuote"
         @stop-generation="handleStopGeneration"
@@ -68,6 +73,12 @@
       @cancel="closeSystemPromptModal"
       @prompts-updated="handlePromptsUpdated"
     />
+
+    <!-- ⭐工具审批设置弹窗 -->
+    <ToolApprovalSettingsModal
+      v-model:visible="isToolApprovalSettingsVisible"
+      :session-id="sessionId"
+    />
   </div>
 </template>
 
@@ -75,7 +86,7 @@
 import { ref, onMounted, onActivated, watch, onUnmounted, computed, nextTick } from 'vue';
 import { Message, Modal } from '@arco-design/web-vue';
 import {
-  sendChatMessage,
+  sendChatMessageNonStream,
   sendChatMessageStream,
   getChatHistory,
   deleteChatHistory,
@@ -85,16 +96,11 @@ import {
   activeStreams,
   clearStreamState,
   latestContextUsage,
-  stopAgentLoop
+  stopAgentLoop,
+  resumeAgentLoop
 } from '@/features/langgraph/services/chatService';
 import { listLlmConfigs, partialUpdateLlmConfig } from '@/features/langgraph/services/llmConfigService';
 import { getUserPrompts } from '@/features/prompts/services/promptService';
-import { 
-  sendOrchestratorStreamMessage, 
-  activeOrchestratorStreams,
-  clearOrchestratorStreamState,
-  latestOrchestratorContextUsage
-} from '@/features/langgraph/services/orchestratorService';
 import type { ChatRequest, ChatHistoryMessage } from '@/features/langgraph/types/chat';
 import type { LlmConfig } from '@/features/langgraph/types/llmConfig';
 import { useProjectStore } from '@/store/projectStore';
@@ -107,6 +113,9 @@ import ChatHeader from '../components/ChatHeader.vue';
 import ChatMessages from '../components/ChatMessages.vue';
 import ChatInput from '../components/ChatInput.vue';
 import SystemPromptModal from '../components/SystemPromptModal.vue';
+import ToolApprovalCard from '../components/ToolApprovalCard.vue';
+import ToolApprovalSettingsModal from '../components/ToolApprovalSettingsModal.vue';
+import type { InterruptEvent } from '../components/ToolApprovalCard.vue';
 
 // 配置marked
 marked.setOptions({
@@ -150,14 +159,9 @@ const isLoading = ref(false);
 const sessionId = ref<string>('');
 const chatSessions = ref<ChatSession[]>([]);
 const chatMessagesRef = ref<InstanceType<typeof ChatMessages> | null>(null);
-const isStreamMode = ref(true); // 流式模式开关，默认开启
 
-// ⭐大脑模式开关 - 从localStorage加载
-const loadBrainModeState = (): boolean => {
-  const saved = localStorage.getItem('langgraph_brain_mode');
-  return saved === 'true';
-};
-const isBrainMode = ref(loadBrainModeState());
+// 流式模式：从 LLM 配置读取（computed）
+const isStreamMode = computed(() => currentLlmConfig.value?.enable_streaming ?? true);
 
 // 知识库相关
 const useKnowledgeBase = ref(false); // 是否启用知识库功能
@@ -204,25 +208,19 @@ const isSystemPromptModalVisible = ref(false);
 const isSystemPromptLoading = ref(false);
 const currentLlmConfig = ref<LlmConfig | null>(null);
 
+// ⭐工具审批设置弹窗
+const isToolApprovalSettingsVisible = ref(false);
+
 // 项目store
 const projectStore = useProjectStore();
 const { getRefreshTrigger } = useLlmConfigRefresh();
 
-// 上下文Token使用信息（从流式状态中获取 - 支持普通聊天和Brain模式）
+// 上下文Token使用信息（从流式状态中获取）
 const contextTokenInfo = computed(() => {
   const defaultLimit = currentLlmConfig.value?.context_limit || 128000;
   const id = sessionId.value;
   if (!id) return { tokenCount: 0, limit: defaultLimit };
-  
-  // 优先检查Brain模式的流状态
-  const orchestratorStream = activeOrchestratorStreams.value[id];
-  if (orchestratorStream && orchestratorStream.contextTokenCount !== undefined) {
-    return {
-      tokenCount: orchestratorStream.contextTokenCount || 0,
-      limit: orchestratorStream.contextLimit || defaultLimit
-    };
-  }
-  
+
   // 检查普通聊天模式的流状态
   const chatStream = activeStreams.value[id];
   if (chatStream && chatStream.contextTokenCount !== undefined) {
@@ -231,16 +229,8 @@ const contextTokenInfo = computed(() => {
       limit: chatStream.contextLimit || defaultLimit
     };
   }
-  
-  // Fallback: 优先使用Brain模式缓存，其次使用普通聊天缓存
-  const orchestratorCache = latestOrchestratorContextUsage.value[id];
-  if (orchestratorCache) {
-    return {
-      tokenCount: orchestratorCache.tokenCount,
-      limit: orchestratorCache.limit || defaultLimit
-    };
-  }
-  
+
+  // Fallback: 使用普通聊天缓存
   const chatCache = latestContextUsage.value[id];
   if (chatCache) {
     return {
@@ -248,9 +238,115 @@ const contextTokenInfo = computed(() => {
       limit: chatCache.limit || defaultLimit
     };
   }
-  
+
   return { tokenCount: 0, limit: defaultLimit };
 });
+
+// ⭐ HITL 工具审批相关
+const toolApprovalDialogVisible = ref(false);
+const currentInterrupt = computed<InterruptEvent | null>(() => {
+  const id = sessionId.value;
+  if (!id) return null;
+  const stream = activeStreams.value[id];
+  console.log('[LangGraphChatView] currentInterrupt computed:', {
+    sessionId: id,
+    hasStream: !!stream,
+    isWaitingForApproval: stream?.isWaitingForApproval,
+    interrupt: stream?.interrupt
+  });
+  if (stream?.isWaitingForApproval && stream?.interrupt) {
+    return stream.interrupt as InterruptEvent;
+  }
+  return null;
+});
+
+// 监听中断状态，自动弹出/关闭审批对话框
+watch(currentInterrupt, async (interrupt) => {
+  console.log('[LangGraphChatView] currentInterrupt watch triggered:', interrupt);
+  if (interrupt) {
+    // 检查是否所有工具都需要自动拒绝
+    const actionRequests = interrupt.action_requests || [];
+    const allAutoReject = actionRequests.length > 0 &&
+      actionRequests.every((ar) => ar.auto_reject === true);
+
+    if (allAutoReject) {
+      // 所有工具都设为"始终拒绝"，自动发送拒绝响应
+      console.log('[LangGraphChatView] All tools marked as auto_reject, sending auto-reject');
+      const toolNames = actionRequests.map((ar) => ar.name || 'unknown').join(', ');
+      Message.warning(`工具 ${toolNames} 已被设为始终拒绝，自动拒绝执行`);
+
+      // 延迟自动拒绝，等待当前 SSE 流完全结束
+      // 避免 clearStreamState 删除 activeStreams 后 resumeAgentLoop 无法正常工作
+      setTimeout(async () => {
+        await handleToolDecision({
+          interruptId: interrupt.interrupt_id || interrupt.id || '',
+          type: 'reject',
+        });
+      }, 100);
+    } else {
+      // 有需要用户审批的工具，显示对话框
+      toolApprovalDialogVisible.value = true;
+    }
+  } else {
+    // 当 interrupt 变为 null 时，自动关闭对话框
+    toolApprovalDialogVisible.value = false;
+  }
+});
+
+// 处理工具审批决策
+const handleToolDecision = async (decision: {
+  interruptId: string;
+  type: 'approve' | 'reject';
+  rememberChoice?: boolean;
+  rememberScope?: string;
+  toolName?: string;
+}) => {
+  console.log('[LangGraphChatView] handleToolDecision called:', decision);
+
+  const projectId = projectStore.currentProjectId;
+  if (!projectId || !sessionId.value) {
+    console.error('[LangGraphChatView] Missing projectId or sessionId:', { projectId, sessionId: sessionId.value });
+    Message.error('无法获取项目或会话信息');
+    return;
+  }
+
+  console.log('[LangGraphChatView] Calling resumeAgentLoop with:', {
+    sessionId: sessionId.value,
+    interruptId: decision.interruptId,
+    decision: decision.type,
+    projectId,
+    knowledgeBaseId: selectedKnowledgeBaseId.value,
+    useKnowledgeBase: useKnowledgeBase.value
+  });
+
+  toolApprovalDialogVisible.value = false;
+
+  // 显示操作提示
+  Message.info(decision.type === 'approve' ? '正在执行工具...' : '已拒绝执行');
+
+  // 获取工具调用数量
+  const actionCount = currentInterrupt.value?.action_requests?.length || 1;
+
+  try {
+    // resumeAgentLoop 现在是 SSE 流式的，它会直接更新 activeStreams 状态
+    // 不需要检查返回值，流会自动处理后续的工具执行和 LLM 响应
+    await resumeAgentLoop(
+      sessionId.value,
+      decision.interruptId,
+      decision.type,
+      projectId,
+      undefined, // signal
+      selectedKnowledgeBaseId.value,
+      useKnowledgeBase.value,
+      actionCount
+    );
+    // SSE 流结束后，如果没有新的中断，会话会标记为完成
+    // 如果有新的中断，interrupt 状态会被更新，触发新的审批对话框
+  } catch (error) {
+    console.error('Resume agent loop failed:', error);
+    Message.error('操作失败，请重试');
+  }
+};
 
 // 组件引用
 const chatHeaderRef = ref<{ refreshPrompts: () => Promise<void> } | null>(null);
@@ -314,11 +410,8 @@ const safeStopLoading = () => {
   // 检查普通聊天流
   const stream = id ? activeStreams.value[id] : null;
   const hasActiveStream = stream && !stream.isComplete;
-  // 检查 Brain 模式流
-  const orchestratorStream = id ? activeOrchestratorStreams.value[id] : null;
-  const hasActiveOrchestratorStream = orchestratorStream && !orchestratorStream.isComplete;
 
-  if (!hasActiveStream && !hasActiveOrchestratorStream) {
+  if (!hasActiveStream) {
     isLoading.value = false;
   }
 };
@@ -334,7 +427,7 @@ const loadSessionsFromServer = async () => {
     isLoading.value = true;
     const response = await getChatSessions(projectStore.currentProjectId);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       // 优先使用 sessions_detail（包含标题和时间），避免 N+1 查询
       const sessionsDetail = response.data.sessions_detail;
       
@@ -475,28 +568,27 @@ const loadChatHistory = async () => {
     isLoading.value = true;
     const response = await getChatHistory(storedSessionId, projectStore.currentProjectId);
 
-    if (response.status === 'success') {
-      sessionId.value = response.data.session_id;
+    if (response.status === 'success' && response.data) {
+      const data = response.data;
+      sessionId.value = data.session_id;
 
       // 🆕 恢复该会话的Token使用信息
-      if (response.data.context_token_count !== undefined) {
-        const tokenCount = response.data.context_token_count || 0;
-        const limit = response.data.context_limit || 128000;
-        // 同时设置两个缓存，确保普通聊天和Brain模式都能显示
-        latestContextUsage.value[response.data.session_id] = { tokenCount, limit };
-        latestOrchestratorContextUsage.value[response.data.session_id] = { tokenCount, limit };
+      if (data.context_token_count !== undefined) {
+        const tokenCount = data.context_token_count || 0;
+        const limit = data.context_limit || 128000;
+        latestContextUsage.value[data.session_id] = { tokenCount, limit };
         console.log(`🔄 恢复会话Token使用: ${tokenCount}/${limit}`);
       }
 
       // 🆕 恢复该会话关联的提示词
-      if (response.data.prompt_id !== null && response.data.prompt_id !== undefined) {
-        selectedPromptId.value = response.data.prompt_id;
-        localStorage.setItem(PROMPT_STORAGE_KEY, String(response.data.prompt_id));
-        console.log(`🔄 恢复会话提示词: ${response.data.prompt_name} (ID: ${response.data.prompt_id})`);
+      if (data.prompt_id !== null && data.prompt_id !== undefined) {
+        selectedPromptId.value = data.prompt_id;
+        localStorage.setItem(PROMPT_STORAGE_KEY, String(data.prompt_id));
+        console.log(`🔄 恢复会话提示词: ${data.prompt_name} (ID: ${data.prompt_id})`);
       }
 
       // ✅ 使用纯函数处理历史记录,自动插入步骤分隔符
-      const tempMessages = enrichMessagesWithSeparators(response.data.history, formatHistoryTime);
+      const tempMessages = enrichMessagesWithSeparators(data.history, formatHistoryTime);
       
       // 🎨 合并连续的思考过程消息
       messages.value = mergeThinkingProcessMessages(tempMessages);
@@ -505,10 +597,10 @@ const loadChatHistory = async () => {
       console.log('🔍 [Debug] 最终step_separator数量:', messages.value.filter(m => m.messageType === 'step_separator').length);
 
       // 只有在会话列表中不存在该会话时才添加（避免重复）
-      const existingSession = chatSessions.value.find(s => s.id === response.data.session_id);
+      const existingSession = chatSessions.value.find(s => s.id === data.session_id);
       if (!existingSession) {
-        const firstHumanMessage = response.data.history.find(msg => msg.type === 'human')?.content;
-        updateSessionInList(response.data.session_id, firstHumanMessage, false);
+        const firstHumanMessage = data.history.find(msg => msg.type === 'human')?.content;
+        updateSessionInList(data.session_id, firstHumanMessage, false);
       }
       
       console.log(`✅ 成功加载会话历史: ${sessionId.value}, ${messages.value.length} 条消息`);
@@ -544,10 +636,16 @@ const solidifyStreamContent = () => {
   // 固化普通LLM聊天的流式内容
   const stream = activeStreams.value[sessionId.value];
   if (stream && stream.isComplete && stream.content && stream.content.trim()) {
+    // ⭐ HITL：如果正在等待审批，不要清理流状态
+    if (stream.isWaitingForApproval) {
+      console.log('⏸️ 流正在等待 HITL 审批，跳过固化和清理');
+      return;
+    }
+
     // 检查是否已经固化过（避免重复）
     const lastMsg = messages.value[messages.value.length - 1];
     const alreadySolidified = lastMsg && !lastMsg.isUser && lastMsg.content === stream.content;
-    
+
     if (!alreadySolidified) {
       // 先添加工具消息和中间消息
       if (stream.messages && stream.messages.length > 0) {
@@ -584,39 +682,6 @@ const solidifyStreamContent = () => {
       console.log('✅ 已固化LLM流式内容到messages.value');
     }
     clearStreamState(sessionId.value);
-  }
-
-  // 固化大脑模式的流式内容
-  const orchestratorStream = activeOrchestratorStreams.value[sessionId.value];
-  if (orchestratorStream && orchestratorStream.isComplete && orchestratorStream.content && orchestratorStream.content.trim()) {
-    const lastMsg = messages.value[messages.value.length - 1];
-    const alreadySolidified = lastMsg && !lastMsg.isUser && lastMsg.content === orchestratorStream.content;
-    
-    if (!alreadySolidified) {
-      // 先添加工具消息和中间消息
-      if (orchestratorStream.messages && orchestratorStream.messages.length > 0) {
-        orchestratorStream.messages.forEach(msg => {
-          messages.value.push({
-            content: msg.content,
-            isUser: false,
-            time: msg.time,
-            messageType: msg.type as ChatMessage['messageType'],
-            isExpanded: msg.isExpanded,
-            isThinkingProcess: msg.isThinkingProcess,
-            isThinkingExpanded: msg.isThinkingExpanded
-          });
-        });
-      }
-      // 添加AI回复内容
-      messages.value.push({
-        content: orchestratorStream.content,
-        isUser: false,
-        time: getCurrentTime(),
-        messageType: 'ai'
-      });
-      console.log('✅ 已固化大脑模式流式内容到messages.value');
-    }
-    clearOrchestratorStreamState(sessionId.value);
   }
 };
 
@@ -782,7 +847,6 @@ const handleStopGeneration = async () => {
 
     // ⭐ 强制清除流状态，避免重新加载历史时消息重复
     clearStreamState(sessionId.value);
-    clearOrchestratorStreamState(sessionId.value);
 
     // ⭐ 延迟一小段时间后重新加载历史，确保后端已保存完整记录
     // 后端在收到停止信号后会保存包含 [用户中断] 的完整历史
@@ -790,7 +854,7 @@ const handleStopGeneration = async () => {
       if (sessionId.value && projectStore.currentProjectId) {
         try {
           const response = await getChatHistory(sessionId.value, projectStore.currentProjectId);
-          if (response.status === 'success' && response.data.history) {
+          if (response.status === 'success' && response.data?.history) {
             const tempMessages = enrichMessagesWithSeparators(response.data.history, formatHistoryTime);
             messages.value = mergeThinkingProcessMessages(tempMessages);
             console.log('[LangGraphChatView] History reloaded after stop:', messages.value.length, 'messages');
@@ -820,12 +884,10 @@ const handleRetry = async (message: ChatMessage) => {
   }
 
   let userMessage: ChatMessage;
-  let deleteFromIndex: number;
 
   if (message.messageType === 'human') {
-    // 用户消息重试：直接使用该消息，删除该消息及之后的所有内容
+    // 用户消息重试：直接使用该消息
     userMessage = message;
-    deleteFromIndex = msgIndex;
   } else {
     // AI消息重试：向前查找最近的用户消息
     let foundUser: ChatMessage | null = null;
@@ -841,13 +903,9 @@ const handleRetry = async (message: ChatMessage) => {
       return;
     }
     userMessage = foundUser;
-    deleteFromIndex = msgIndex;
   }
 
-  // 删除从指定位置开始的所有后续消息
-  messages.value = messages.value.slice(0, deleteFromIndex);
-
-  // 重新发送用户消息
+  // 不删除消息，直接重新发送用户消息（后端也不会删除历史，保持一致）
   await handleSendMessage({
     message: userMessage.content,
     image: userMessage.imageBase64,
@@ -936,50 +994,6 @@ const handleDeleteMessage = async (message: ChatMessage) => {
   });
 };
 
-// ⭐大脑模式消息处理
-const handleBrainModeMessage = async (message: string) => {
-  // 添加用户消息
-  messages.value.push({
-    content: message,
-    isUser: true,
-    time: getCurrentTime(),
-    messageType: 'human'
-  });
-
-  isLoading.value = true;
-  let brainSessionId: string | null = null;
-
-  // onStart 回调
-  const handleStart = (newSessionId: string) => {
-    brainSessionId = newSessionId;
-    // 保存sessionId到全局状态和localStorage以保持上下文连续性
-    saveSessionId(newSessionId);
-    console.log(`Brain mode session started: ${brainSessionId}`);
-    
-    // 🔧 修复：不在这里停止loading，保持转圈直到流完成
-    // isLoading.value = false;
-    
-    // 不再创建占位符，由watch在检测到第一个流式内容时创建
-  };
-
-  try {
-    await sendOrchestratorStreamMessage(
-      message,
-      projectStore.currentProjectId!,
-      handleStart,
-      undefined,  // signal参数
-      sessionId.value || undefined  // 传递session_id以保持上下文
-    );
-
-    // sendOrchestratorStreamMessage 现在使用全局状态管理
-    // 需要监听 activeOrchestratorStreams 的变化来实时更新界面
-  } catch (error) {
-    console.error('Brain mode error:', error);
-    Message.error('消息发送失败');
-    isLoading.value = false;
-  }
-};
-
 // 添加或更新会话到列表
 const updateSessionInList = (id: string, firstMessage?: string, updateTime: boolean = true) => {
   if (!id) {
@@ -1051,14 +1065,12 @@ const switchSession = async (id: string) => {
     isLoading.value = true;
     const response = await getChatHistory(id, projectStore.currentProjectId);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       // 🆕 恢复该会话的Token使用信息
       if (response.data.context_token_count !== undefined) {
         const tokenCount = response.data.context_token_count || 0;
         const limit = response.data.context_limit || 128000;
-        // 同时设置两个缓存，确保普通聊天和Brain模式都能显示
         latestContextUsage.value[id] = { tokenCount, limit };
-        latestOrchestratorContextUsage.value[id] = { tokenCount, limit };
         console.log(`🔄 切换会话时恢复Token使用: ${tokenCount}/${limit}`);
       }
 
@@ -1159,7 +1171,7 @@ const batchDeleteSessions = async (sessionIds: string[]) => {
     isLoading.value = true;
     const response = await batchDeleteChatHistory(sessionIds, projectStore.currentProjectId);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       const { processed_sessions, failed_sessions } = response.data;
       
       // 从列表中移除已删除的会话
@@ -1267,12 +1279,6 @@ const handleSendMessage = async (data: { message: string; image?: string; imageD
     quotedMessage.value = null;
   }
 
-  // ⭐大脑模式使用orchestrator流式接口
-  if (isBrainMode.value) {
-    await handleBrainModeMessage(finalMessage);
-    return;
-  }
-
   // 添加用户消息（保存图片数据以便显示）
   messages.value.push({
     content: finalMessage,
@@ -1378,7 +1384,7 @@ const displayedMessages = computed(() => {
           combined.push(chatMsg);
         });
       }
-      
+
       // 然后处理AI消息
       if (stream.error) {
         // 如果有错误，显示错误消息
@@ -1445,7 +1451,7 @@ const handleStreamMessage = async (requestData: ChatRequest, userMessage: string
   // 使用 watch 监视 isComplete 状态
 };
 
-// 处理非流式消息
+// 处理非流式消息（使用统一的 Agent Loop 接口）
 const handleNormalMessage = async (requestData: ChatRequest, originalMessage: string) => {
   // 添加loading占位消息
   const loadingMessageIndex = messages.value.length;
@@ -1458,32 +1464,75 @@ const handleNormalMessage = async (requestData: ChatRequest, originalMessage: st
   });
 
   try {
-    const response = await sendChatMessage(requestData);
+    const response = await sendChatMessageNonStream(requestData);
 
     // 移除loading消息
     messages.value.splice(loadingMessageIndex, 1);
 
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
+      const data = response.data;
+
       // 保存会话ID
-      if (response.data.session_id) {
-        saveSessionId(response.data.session_id);
-        // 🔧 修复：统一使用 updateSessionInList 更新会话信息，避免重复
-        // 获取用户的第一条消息作为标题
-        const firstUserMessage = originalMessage;
-        updateSessionInList(response.data.session_id, firstUserMessage, true);
+      if (data.session_id) {
+        saveSessionId(data.session_id);
+        updateSessionInList(data.session_id, originalMessage, true);
       }
 
-      // 处理conversation_flow中的新消息
-      if (response.data.conversation_flow && response.data.conversation_flow.length > 0) {
-        handleConversationFlow(response.data.conversation_flow, originalMessage);
-      } else {
-        // 如果没有conversation_flow，使用原来的方式添加AI回复
+      // 更新 Token 使用信息
+      if (data.context_token_count !== undefined && data.session_id) {
+        latestContextUsage.value[data.session_id] = {
+          tokenCount: data.context_token_count,
+          limit: data.context_limit || 128000
+        };
+      }
+
+      // 添加工具结果消息（如果有）
+      if (data.tool_results && data.tool_results.length > 0) {
+        for (const toolResult of data.tool_results) {
+          messages.value.push({
+            content: toolResult.summary,
+            isUser: false,
+            time: getCurrentTime(),
+            messageType: 'tool',
+            isExpanded: false
+          });
+        }
+      }
+
+      // 添加 AI 回复
+      if (data.content) {
         messages.value.push({
-          content: response.data.llm_response,
+          content: data.content,
           isUser: false,
           time: getCurrentTime(),
           messageType: 'ai'
         });
+      }
+
+      // 处理 HITL 中断（如果有）
+      if (data.interrupt) {
+        // 初始化 activeStreams 以支持 HITL
+        if (!activeStreams.value[data.session_id]) {
+          activeStreams.value[data.session_id] = {
+            content: data.content || '',
+            isComplete: false,
+            messages: [],
+            isWaitingForApproval: true,
+            interrupt: {
+              id: data.interrupt.interrupt_id,
+              interrupt_id: data.interrupt.interrupt_id,
+              action_requests: data.interrupt.action_requests
+            }
+          };
+        } else {
+          activeStreams.value[data.session_id].isWaitingForApproval = true;
+          activeStreams.value[data.session_id].interrupt = {
+            id: data.interrupt.interrupt_id,
+            interrupt_id: data.interrupt.interrupt_id,
+            action_requests: data.interrupt.action_requests
+          };
+        }
+        console.log('[LangGraphChatView] HITL interrupt received in non-stream mode:', data.interrupt);
       }
     } else {
       const errorMessages = response.errors ? Object.values(response.errors).flat().join('; ') : '';
@@ -1514,55 +1563,6 @@ const handleNormalMessage = async (requestData: ChatRequest, originalMessage: st
   }
 };
 
-// 处理conversation_flow
-const handleConversationFlow = (conversationFlow: any[], originalMessage: string, skipAiIndex?: number) => {
-  // 找到当前用户消息在conversation_flow中的位置
-  let userMessageIndex = -1;
-
-  // 从后往前找，找到最后一个匹配的用户消息
-  for (let i = conversationFlow.length - 1; i >= 0; i--) {
-    if (conversationFlow[i].type === 'human' &&
-        conversationFlow[i].content === originalMessage) {
-      userMessageIndex = i;
-      break;
-    }
-  }
-
-  // 如果找到了用户消息，添加该消息之后的所有新消息
-  if (userMessageIndex >= 0) {
-    const newMessages = conversationFlow.slice(userMessageIndex + 1);
-
-    // 添加新消息到界面
-    newMessages.forEach((flowItem, index) => {
-      // 如果是流式模式，跳过已经在流式处理中添加的消息
-      if (skipAiIndex !== undefined) {
-        // 跳过最后一个AI消息（已经在流式处理中添加了）
-        if (flowItem.type === 'ai' && index === newMessages.length - 1) {
-          return;
-        }
-        // 跳过工具消息（已经在流式处理中添加了）
-        if (flowItem.type === 'tool') {
-          return;
-        }
-      }
-
-      const message: ChatMessage = {
-        content: flowItem.content,
-        isUser: flowItem.type === 'human',
-        time: getCurrentTime(),
-        messageType: flowItem.type
-      };
-
-      // 如果是工具消息，设置默认折叠状态
-      if (flowItem.type === 'tool') {
-        message.isExpanded = false;
-      }
-
-      messages.value.push(message);
-    });
-  }
-};
-
 // 监听项目变化，重新加载数据
 watch(() => projectStore.currentProjectId, async (newProjectId, oldProjectId) => {
   if (newProjectId && newProjectId !== oldProjectId) {
@@ -1581,7 +1581,7 @@ watch(() => projectStore.currentProjectId, async (newProjectId, oldProjectId) =>
 const loadCurrentLlmConfig = async () => {
   try {
     const response = await listLlmConfigs();
-    if (response.status === 'success') {
+    if (response.status === 'success' && response.data) {
       // 找到激活的配置
       const activeConfig = response.data.find(config => config.is_active);
       if (activeConfig) {
@@ -1743,13 +1743,19 @@ watch(
   () => (sessionId.value ? activeStreams.value[sessionId.value] : null),
   async (stream) => {
     if (stream && stream.isComplete) {
+      // ⭐ HITL：如果正在等待审批，不触发流完成逻辑
+      if (stream.isWaitingForApproval) {
+        console.log(`⏸️ 会话 ${sessionId.value} 等待 HITL 审批，暂不处理流完成`);
+        return;
+      }
+
       console.log(`会话 ${sessionId.value} 的流已完成。`);
-      
+
       const currentSessionId = sessionId.value;
-      
+
       // 🔧 流完成后立即固化内容到messages.value，避免清理后内容丢失
       solidifyStreamContent();
-      
+
       // 更新会话列表
       if (currentSessionId) {
         const existingSession = chatSessions.value.find(s => s.id === currentSessionId);
@@ -1794,176 +1800,9 @@ watch(() => projectStore.currentProjectId, async (newProjectId, oldProjectId) =>
   }
 });
 
-// 监听 Brain 模式的流式输出,实时更新消息
-watch(
-  () => {
-    const streams = activeOrchestratorStreams.value;
-    return Object.keys(streams).length > 0 ? streams : null;
-  },
-  async (streams) => {
-    if (!streams) return;
-    
-    const sessionIds = Object.keys(streams);
-    if (sessionIds.length === 0) return;
-    
-    const latestSessionId = sessionIds[sessionIds.length - 1];
-    const stream = streams[latestSessionId];
-    
-    if (!stream) return;
-    
-    // 1. 追加 stream.messages（Brain决策、工具消息等）
-    if (stream.messages && stream.messages.length > 0) {
-      if (!stream.processedMessageCount) {
-        stream.processedMessageCount = 0;
-      }
-      
-      const newMessages = stream.messages.slice(stream.processedMessageCount);
-      if (newMessages.length > 0) {
-        // 🎨 直接追加消息，不立即合并（保持对象引用稳定）
-        newMessages.forEach(msg => {
-          messages.value.push({
-            content: msg.content,
-            isUser: false,
-            time: msg.time,
-            messageType: msg.type,
-            toolName: msg.toolName,
-            isExpanded: msg.isExpanded,
-            isThinkingProcess: msg.isThinkingProcess,
-            isThinkingExpanded: msg.isThinkingExpanded
-          });
-        });
-        
-        stream.processedMessageCount = stream.messages.length;
-        console.log('[Brain Watch] Appended', newMessages.length, 'structured messages');
-      }
-    }
-    
-    // 2. 管理流式内容占位符
-    // 查找当前的流式内容占位符（标记为 isStreaming=true）
-    let streamingMessageIndex = -1;
-    for (let i = messages.value.length - 1; i >= 0; i--) {
-      if (messages.value[i].isStreaming === true) {
-        streamingMessageIndex = i;
-        break;
-      }
-    }
-    
-    if (stream.content && stream.content.trim()) {
-      // 有流式内容
-      if (streamingMessageIndex === -1) {
-        // 没有占位符，创建一个新的
-        messages.value.push({
-          content: stream.content,
-          isUser: false,
-          time: getCurrentTime(),
-          messageType: 'ai',
-          isStreaming: true // 使用isStreaming标记来识别流式内容占位符
-        });
-        console.log('[Brain Watch] Created streaming placeholder');
-      } else {
-        // 更新现有占位符
-        messages.value[streamingMessageIndex].content = stream.content;
-      }
-    }
-    
-    // 3. 流完成时的处理
-    if (stream.isComplete) {
-      console.log('[Brain Watch] Stream complete, reloading history');
-      
-      // 关闭流式状态
-      if (streamingMessageIndex !== -1) {
-        messages.value[streamingMessageIndex].isStreaming = false;
-      }
-      
-      // 重新加载完整历史，确保包含所有后端保存的消息
-      if (latestSessionId && projectStore.currentProjectId) {
-        try {
-          // 🎨 保存当前的展开状态（根据内容匹配）
-          const expandedStates = new Map<string, boolean>();
-          messages.value.forEach(msg => {
-            if (msg.isThinkingProcess && msg.isThinkingExpanded) {
-              // 使用内容的前100个字符作为key
-              const key = msg.content.substring(0, 100);
-              expandedStates.set(key, true);
-            }
-          });
-          
-          const response = await getChatHistory(latestSessionId, projectStore.currentProjectId);
-          if (response.status === 'success') {
-            // 清空当前消息并重新加载
-            messages.value = [];
-            
-            const tempMessages: ChatMessage[] = [];
-            response.data.history.forEach(historyItem => {
-              if (historyItem.type === 'system') return;
-              
-              const message: ChatMessage = {
-                content: historyItem.content,
-                isUser: historyItem.type === 'human',
-                time: formatHistoryTime(historyItem.timestamp),
-                messageType: historyItem.type
-              };
-              
-              if (historyItem.type === 'tool') {
-                message.isExpanded = false;
-              }
-              
-              // 🎨 如果是思考过程消息，设置折叠状态
-              if (historyItem.is_thinking_process) {
-                message.isThinkingProcess = true;
-                message.isThinkingExpanded = false;
-              }
-              
-              if (historyItem.image) {
-                message.imageDataUrl = historyItem.image;
-              }
-              
-              tempMessages.push(message);
-            });
-            
-            // 🎨 合并连续的思考过程消息
-            messages.value = mergeThinkingProcessMessages(tempMessages);
-            
-            // 🎨 恢复展开状态
-            messages.value.forEach(msg => {
-              if (msg.isThinkingProcess) {
-                const key = msg.content.substring(0, 100);
-                if (expandedStates.has(key)) {
-                  msg.isThinkingExpanded = true;
-                }
-              }
-            });
-            
-            // 更新会话列表
-            const firstUserMessage = messages.value.find(m => m.isUser);
-            if (firstUserMessage) {
-              updateSessionInList(latestSessionId, firstUserMessage.content, true);
-            }
-            
-            console.log('[Brain Watch] History reloaded:', messages.value.length, 'messages');
-          }
-        } catch (error) {
-          console.error('[Brain Watch] Failed to reload history:', error);
-        }
-      }
-      
-      // 清理流状态
-      clearOrchestratorStreamState(latestSessionId);
-      isLoading.value = false;
-    }
-  },
-  { deep: true }
-);
-
 watch([useKnowledgeBase, selectedKnowledgeBaseId, similarityThreshold, topK], () => {
   saveKnowledgeBaseSettings();
 }, { deep: true });
-
-// 监听Brain模式状态，保存到localStorage
-watch(isBrainMode, (newValue) => {
-  localStorage.setItem('langgraph_brain_mode', newValue.toString());
-  console.log('💾 Brain mode state saved:', newValue);
-});
 
 onMounted(async () => {
   // ⭐加载保存的提示词ID

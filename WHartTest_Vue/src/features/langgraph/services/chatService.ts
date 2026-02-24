@@ -41,6 +41,18 @@ interface StreamState {
     playwrightSteps: number;
     message: string;
   };
+  // ⭐ HITL 中断信息
+  interrupt?: {
+    id: string;
+    interrupt_id?: string;
+    action_requests: Array<{
+      name: string;
+      args: Record<string, unknown>;
+      description?: string;
+      auto_reject?: boolean;
+    }>;
+  };
+  isWaitingForApproval?: boolean; // 是否正在等待用户审批
 }
 
 // Agent Loop SSE 事件类型定义（供文档和类型参考）
@@ -156,7 +168,8 @@ function getApiBaseUrl() {
 }
 
 /**
- * 发送对话消息
+ * 发送对话消息（旧版 API，已废弃）
+ * @deprecated 请使用 sendChatMessageNonStream 调用统一的 Agent Loop 接口
  */
 export async function sendChatMessage(
   data: ChatRequest
@@ -182,6 +195,143 @@ export async function sendChatMessage(
       message: response.error || 'Failed to send chat message',
       data: {} as ChatResponseData,
       errors: { detail: [response.error || 'Unknown error'] }
+    };
+  }
+}
+
+/**
+ * Agent Loop 非流式响应数据类型
+ */
+export interface AgentLoopNonStreamResponse {
+  session_id: string;
+  content: string;
+  total_steps: number;
+  tool_results: Array<{ summary: string; step: number }>;
+  context_token_count: number;
+  context_limit: number;
+  interrupt?: {
+    interrupt_id: string;
+    action_requests: Array<{
+      name: string;
+      args: Record<string, unknown>;
+      description?: string;
+    }>;
+  };
+  script_generation?: {
+    enabled: boolean;
+    message: string;
+  };
+}
+
+/**
+ * 发送非流式对话消息（统一 Agent Loop 接口）
+ *
+ * 使用 Agent Loop API 的 stream=false 模式，获得与流式模式一致的功能：
+ * - HITL（人工审批）支持
+ * - 上下文摘要中间件
+ * - MCP 工具调用
+ */
+export async function sendChatMessageNonStream(
+  data: ChatRequest
+): Promise<ApiResponse<AgentLoopNonStreamResponse>> {
+  const authStore = useAuthStore();
+  const token = authStore.getAccessToken;
+
+  if (!token) {
+    return {
+      status: 'error',
+      code: 401,
+      message: '未登录或登录已过期',
+      data: null as unknown as AgentLoopNonStreamResponse,
+      errors: { detail: ['未登录'] }
+    };
+  }
+
+  try {
+    const requestData = {
+      ...data,
+      stream: false  // 关键：使用非流式模式
+    };
+
+    const response = await fetch(`${getApiBaseUrl()}${AGENT_LOOP_API_URL}/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(requestData)
+    });
+
+    if (response.status === 401) {
+      // Token 过期，尝试刷新
+      const newToken = await refreshAccessToken();
+      if (!newToken) {
+        return {
+          status: 'error',
+          code: 401,
+          message: '登录已过期，请重新登录',
+          data: null as unknown as AgentLoopNonStreamResponse,
+          errors: { detail: ['Token 刷新失败'] }
+        };
+      }
+
+      // 使用新 token 重试
+      const retryResponse = await fetch(`${getApiBaseUrl()}${AGENT_LOOP_API_URL}/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${newToken}`
+        },
+        body: JSON.stringify(requestData)
+      });
+
+      const retryData = await retryResponse.json();
+      if (retryData.status === 'success') {
+        return {
+          status: 'success',
+          code: 200,
+          message: retryData.message || 'success',
+          data: retryData.data,
+          errors: undefined
+        };
+      } else {
+        return {
+          status: 'error',
+          code: retryData.code || 500,
+          message: retryData.message || 'Request failed',
+          data: null as unknown as AgentLoopNonStreamResponse,
+          errors: retryData.errors || { detail: [retryData.message] }
+        };
+      }
+    }
+
+    const responseData = await response.json();
+
+    if (responseData.status === 'success') {
+      return {
+        status: 'success',
+        code: 200,
+        message: responseData.message || 'success',
+        data: responseData.data,
+        errors: undefined
+      };
+    } else {
+      return {
+        status: 'error',
+        code: responseData.code || 500,
+        message: responseData.message || 'Request failed',
+        data: null as unknown as AgentLoopNonStreamResponse,
+        errors: responseData.errors || { detail: [responseData.message] }
+      };
+    }
+  } catch (error: any) {
+    console.error('[ChatService] Non-stream request error:', error);
+    return {
+      status: 'error',
+      code: 500,
+      message: error.message || '请求失败',
+      data: null as unknown as AgentLoopNonStreamResponse,
+      errors: { detail: [error.message || 'Unknown error'] }
     };
   }
 }
@@ -355,7 +505,10 @@ export async function sendChatMessageStream(
         // ⚠️ 流结束但未收到 complete/[DONE] 事件 = 异常中断
         // 不自动设置 isComplete，让前端保持加载状态直到用户手动刷新
         // 这避免了网络波动导致停止按钮过早消失的问题
-        if (streamSessionId && activeStreams.value[streamSessionId] && !activeStreams.value[streamSessionId].isComplete) {
+        // HITL: 如果正在等待审批，不设置错误状态
+        if (streamSessionId && activeStreams.value[streamSessionId] && 
+            !activeStreams.value[streamSessionId].isComplete &&
+            !activeStreams.value[streamSessionId].isWaitingForApproval) {
             console.warn('[ChatService] Stream ended without complete event, possible network interruption');
             // 设置错误状态而非完成状态，让用户知道可能需要重试
             activeStreams.value[streamSessionId].error = '连接意外中断，请重试';
@@ -374,7 +527,10 @@ export async function sendChatMessageStream(
         const jsonData = line.slice(6);
         if (jsonData === '[DONE]') {
             if (streamSessionId && activeStreams.value[streamSessionId]) {
-                activeStreams.value[streamSessionId].isComplete = true;
+                // HITL: 如果正在等待审批，不设置 isComplete，让 resumeAgentLoop 处理后续流程
+                if (!activeStreams.value[streamSessionId].isWaitingForApproval) {
+                    activeStreams.value[streamSessionId].isComplete = true;
+                }
             }
             continue;
         }
@@ -557,6 +713,17 @@ export async function sendChatMessageStream(
             if (content) {
               activeStreams.value[streamSessionId].content += content;
             }
+          }
+
+          // ⭐ 处理 HITL 中断事件
+          if (parsed.type === 'interrupt' && streamSessionId && activeStreams.value[streamSessionId]) {
+            console.log('[ChatService] Interrupt event received:', parsed);
+            activeStreams.value[streamSessionId].interrupt = {
+              id: parsed.interrupt_id || parsed.id,
+              interrupt_id: parsed.interrupt_id,
+              action_requests: parsed.action_requests || [],
+            };
+            activeStreams.value[streamSessionId].isWaitingForApproval = true;
           }
 
           if (parsed.type === 'complete' && streamSessionId && activeStreams.value[streamSessionId]) {
@@ -796,21 +963,21 @@ export async function stopAgentLoop(
 
     const data = await response.json();
 
-    if (response.ok && data.success) {
+    if (response.ok && data.status === 'success') {
       return {
         status: 'success',
         code: 200,
         message: data.message || '已停止生成',
-        data: data,
+        data: data.data,
         errors: undefined
       };
     } else {
       return {
         status: 'error',
         code: response.status,
-        message: data.error || data.message || '停止失败',
+        message: data.message || '停止失败',
         data: { success: false, session_id: sessionId, message: '' },
-        errors: { detail: [data.error || 'Unknown error'] }
+        errors: data.errors || { detail: ['Unknown error'] }
       };
     }
   } catch (error) {
@@ -822,5 +989,410 @@ export async function stopAgentLoop(
       data: { success: false, session_id: sessionId, message: '' },
       errors: { detail: [error instanceof Error ? error.message : 'Unknown error'] }
     };
+  }
+}
+
+/**
+ * 恢复被 HITL 中断的 Agent Loop 执行 (SSE 流式版本)
+ *
+ * 后端现在返回 SSE 流式响应，与主流格式一致。
+ * 这样 resume 后的工具执行结果、LLM 响应都能实时流式展示。
+ *
+ * @param sessionId 会话ID
+ * @param interruptId 中断事件ID
+ * @param decision 用户决策 ('approve' | 'reject')
+ * @param projectId 项目ID
+ * @param signal 可选的 AbortSignal 用于中断请求
+ */
+export async function resumeAgentLoop(
+  sessionId: string,
+  interruptId: string,
+  decision: 'approve' | 'reject',
+  projectId: number,
+  signal?: AbortSignal,
+  knowledgeBaseId?: string | null,
+  useKnowledgeBase?: boolean,
+  actionCount?: number
+): Promise<void> {
+  const authStore = useAuthStore();
+  let token = authStore.getAccessToken;
+
+  // 确保 activeStreams 存在，如果不存在则初始化
+  if (!activeStreams.value[sessionId]) {
+    activeStreams.value[sessionId] = {
+      content: '',
+      isComplete: false,
+      messages: [],
+      isWaitingForApproval: false,
+    };
+    console.log('[ChatService] Resume: Initialized activeStreams for session', sessionId);
+  } else {
+    // 在开始新的 resume 之前，将当前累积的 content 固化到 messages
+    // 这样拒绝后的新回复会显示为独立的消息框
+    if (activeStreams.value[sessionId].content?.trim()) {
+      activeStreams.value[sessionId].messages.push({
+        content: activeStreams.value[sessionId].content,
+        type: 'ai',
+        time: formatStreamTime(),
+        isExpanded: false
+      });
+      activeStreams.value[sessionId].content = '';
+    }
+    // 清除中断状态，准备接收新的流
+    activeStreams.value[sessionId].interrupt = undefined;
+    activeStreams.value[sessionId].isWaitingForApproval = false;
+    activeStreams.value[sessionId].isComplete = false;
+  }
+
+  // 错误处理函数
+  const handleError = (error: any) => {
+    const isAbortError = error?.name === 'AbortError' ||
+                         error?.message?.includes('aborted') ||
+                         error?.message?.includes('The user aborted');
+
+    if (isAbortError) {
+      console.log('[ChatService] Resume stream aborted by user');
+      if (activeStreams.value[sessionId]) {
+        activeStreams.value[sessionId].isComplete = true;
+      }
+      return;
+    }
+
+    console.error('[ChatService] Resume stream error:', error);
+    if (activeStreams.value[sessionId]) {
+      activeStreams.value[sessionId].error = error.message || '恢复执行失败';
+      activeStreams.value[sessionId].isComplete = true;
+    }
+  };
+
+  if (!token) {
+    handleError(new Error('未登录或登录已过期'));
+    return;
+  }
+
+  try {
+    // 构建 resume 数据（LangChain Command 格式）
+    const resumeData: Record<string, any> = {
+      session_id: sessionId,
+      project_id: projectId,
+      resume: {
+        [interruptId]: {
+          decisions: [{ type: decision }],
+          action_count: actionCount || 1  // 传递工具调用数量
+        }
+      }
+    };
+
+    // 添加知识库参数
+    if (knowledgeBaseId && useKnowledgeBase) {
+      resumeData.knowledge_base_id = knowledgeBaseId;
+      resumeData.use_knowledge_base = useKnowledgeBase;
+    }
+
+    let response = await fetch(`${getApiBaseUrl()}${AGENT_LOOP_API_URL}/resume/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(resumeData),
+      signal
+    });
+
+    // Token 过期重试
+    if (response.status === 401) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        token = newToken;
+        response = await fetch(`${getApiBaseUrl()}${AGENT_LOOP_API_URL}/resume/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(resumeData),
+          signal
+        });
+      } else {
+        handleError(new Error('登录已过期，请重新登录'));
+        return;
+      }
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+
+    if (!reader) {
+      throw new Error('Failed to get response reader');
+    }
+
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        // 流结束，处理剩余数据
+        if (buffer.trim()) {
+          const remainingLines = buffer.split('\n');
+          for (const line of remainingLines) {
+            if (line.trim() === '' || !line.startsWith('data: ')) continue;
+            const jsonData = line.slice(6);
+            if (jsonData === '[DONE]') continue;
+
+            try {
+              const parsed = JSON.parse(jsonData);
+              if (parsed.type === 'complete' && activeStreams.value[sessionId]) {
+                activeStreams.value[sessionId].isComplete = true;
+              }
+            } catch {
+              // Ignore
+            }
+          }
+        }
+
+        if (activeStreams.value[sessionId] && !activeStreams.value[sessionId].isComplete) {
+          console.warn('[ChatService] Resume stream ended without complete event');
+          activeStreams.value[sessionId].isComplete = true;
+        }
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.trim() === '' || !line.startsWith('data: ')) continue;
+
+        const jsonData = line.slice(6);
+        if (jsonData === '[DONE]') {
+          if (activeStreams.value[sessionId]) {
+            activeStreams.value[sessionId].isComplete = true;
+          }
+          continue;
+        }
+
+        try {
+          const parsed = JSON.parse(jsonData);
+
+          if (parsed.type === 'error') {
+            handleError(new Error(parsed.message || '恢复执行失败'));
+            return;
+          }
+
+          // resume_start 事件 - resume 开始
+          if (parsed.type === 'resume_start' && activeStreams.value[sessionId]) {
+            console.log('[ChatService] Resume started:', parsed.decision);
+          }
+
+          // 处理上下文 Token 更新
+          if (parsed.type === 'context_update' && activeStreams.value[sessionId]) {
+            const tokenCount = parsed.context_token_count ?? 0;
+            const limit = parsed.context_limit ?? 128000;
+            latestContextUsage.value[sessionId] = { tokenCount, limit };
+            activeStreams.value[sessionId].contextTokenCount = tokenCount;
+            activeStreams.value[sessionId].contextLimit = limit;
+          }
+
+          // 处理步骤开始事件
+          if (parsed.type === 'step_start' && activeStreams.value[sessionId]) {
+            const stepNumber = normalizeNumericField(parsed.step);
+            const maxSteps = normalizeNumericField(parsed.max_steps);
+            if (maxSteps !== undefined) {
+              activeStreams.value[sessionId].maxSteps = maxSteps;
+            }
+            if (stepNumber !== undefined) {
+              activeStreams.value[sessionId].currentStep = stepNumber;
+            }
+            activeStreams.value[sessionId].messages.push({
+              content: '',
+              type: 'agent_step',
+              time: formatStreamTime(),
+              stepNumber: stepNumber,
+              maxSteps: maxSteps,
+              stepStatus: 'start',
+              isThinkingProcess: true
+            });
+          }
+
+          // 处理步骤完成事件
+          if (parsed.type === 'step_complete' && activeStreams.value[sessionId]) {
+            const stepNumber = normalizeNumericField(parsed.step);
+            if (stepNumber !== undefined) {
+              activeStreams.value[sessionId].currentStep = stepNumber;
+            }
+          }
+
+          // 处理工具结果事件
+          if (parsed.type === 'tool_result' && activeStreams.value[sessionId]) {
+            const summary = parsed.summary;
+            const toolContent = safeStringify(summary);
+            if (toolContent) {
+              const time = formatStreamTime();
+              // 先固化当前 AI 内容
+              if (activeStreams.value[sessionId].content?.trim()) {
+                activeStreams.value[sessionId].messages.push({
+                  content: activeStreams.value[sessionId].content,
+                  type: 'ai',
+                  time: time,
+                  isExpanded: false
+                });
+                activeStreams.value[sessionId].content = '';
+              }
+              activeStreams.value[sessionId].messages.push({
+                content: toolContent,
+                type: 'tool',
+                time: time,
+                isExpanded: false
+              });
+            }
+          }
+
+          // 处理 LLM 流式输出
+          if (parsed.type === 'stream' && activeStreams.value[sessionId]) {
+            const content = parsed.data;
+            if (content) {
+              activeStreams.value[sessionId].content += content;
+            }
+          }
+
+          // 处理新的 HITL 中断（resume 后可能又触发新中断）
+          if (parsed.type === 'interrupt' && activeStreams.value[sessionId]) {
+            console.log('[ChatService] New interrupt after resume:', parsed);
+            activeStreams.value[sessionId].interrupt = {
+              id: parsed.interrupt_id || parsed.id,
+              interrupt_id: parsed.interrupt_id,
+              action_requests: parsed.action_requests || []
+            };
+            activeStreams.value[sessionId].isWaitingForApproval = true;
+          }
+
+          // 处理完成事件
+          if (parsed.type === 'complete' && activeStreams.value[sessionId]) {
+            activeStreams.value[sessionId].isComplete = true;
+          }
+        } catch (e) {
+          console.warn('[ChatService] Failed to parse resume SSE data:', jsonData);
+        }
+      }
+    }
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+/**
+ * 恢复被 HITL 中断的 LangGraph Chat 执行（SSE 流式响应）
+ * @param sessionId 会话ID
+ * @param decision 用户决策 ('approve' | 'reject')
+ * @param projectId 项目ID
+ * @param onMessage 消息回调
+ * @param onComplete 完成回调
+ * @param onError 错误回调
+ */
+export async function resumeChatStream(
+  sessionId: string,
+  decision: 'approve' | 'reject',
+  projectId: number,
+  onMessage?: (content: string) => void,
+  onComplete?: () => void,
+  onError?: (error: string) => void,
+  onInterrupt?: (interrupt: { id: string; action_requests: Array<{ name: string; args: Record<string, unknown>; description?: string }> }) => void
+): Promise<void> {
+  const authStore = useAuthStore();
+  const token = authStore.getAccessToken;
+
+  const resumeData = {
+    session_id: sessionId,
+    project_id: projectId,
+    decision: decision
+  };
+
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/lg/chat/resume/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(resumeData)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      onError?.(errorData.error || `Resume failed: ${response.status}`);
+      return;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      onError?.('No response body');
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const dataStr = line.slice(6).trim();
+          if (dataStr === '[DONE]') {
+            onComplete?.();
+            return;
+          }
+
+          try {
+            const parsed = JSON.parse(dataStr);
+
+            if (parsed.type === 'message' && parsed.data) {
+              onMessage?.(parsed.data);
+            } else if (parsed.type === 'interrupt') {
+              onInterrupt?.({
+                id: parsed.interrupt_id,
+                action_requests: parsed.action_requests || []
+              });
+            } else if (parsed.type === 'error') {
+              onError?.(parsed.message || 'Unknown error');
+            } else if (parsed.type === 'complete') {
+              onComplete?.();
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+      }
+    }
+
+    // 清除中断状态
+    clearInterruptState(sessionId);
+    onComplete?.();
+  } catch (error) {
+    console.error('[ChatService] Resume chat stream error:', error);
+    onError?.(error instanceof Error ? error.message : 'Resume failed');
+  }
+}
+
+/**
+ * 清除会话的中断状态
+ * @param sessionId 会话ID
+ */
+export function clearInterruptState(sessionId: string): void {
+  if (activeStreams.value[sessionId]) {
+    activeStreams.value[sessionId].interrupt = undefined;
+    activeStreams.value[sessionId].isWaitingForApproval = false;
   }
 }

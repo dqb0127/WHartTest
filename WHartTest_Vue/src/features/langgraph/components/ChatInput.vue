@@ -60,19 +60,6 @@
         :max-tokens="contextLimit"
       />
 
-      <!-- 大脑模式按钮 -->
-      <a-button
-        class="brain-button"
-        :type="isBrainMode ? 'primary' : 'outline'"
-        :disabled="isLoading"
-        @click="toggleBrainMode"
-        title="智能规划模式"
-      >
-        <template #icon>
-          <icon-mind-mapping />
-        </template>
-      </a-button>
-
       <!-- 发送/停止按钮 -->
       <a-button
         v-if="!isLoading"
@@ -108,7 +95,7 @@ import {
   Button as AButton,
   Message
 } from '@arco-design/web-vue';
-import { IconImage, IconClose, IconMindMapping, IconReply, IconSend, IconRecordStop } from '@arco-design/web-vue/es/icon';
+import { IconImage, IconClose, IconReply, IconSend, IconRecordStop } from '@arco-design/web-vue/es/icon';
 import TokenUsageIndicator from './TokenUsageIndicator.vue';
 
 interface ChatMessage {
@@ -123,7 +110,6 @@ interface ChatMessage {
 interface Props {
   isLoading: boolean;
   supportsVision?: boolean;
-  brainMode?: boolean;
   contextTokenCount?: number;
   contextLimit?: number;
   quotedMessage?: ChatMessage | null;
@@ -131,7 +117,6 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   supportsVision: false,
-  brainMode: false,
   contextTokenCount: 0,
   contextLimit: 128000,
   quotedMessage: null
@@ -139,7 +124,6 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'send-message': [data: { message: string; image?: string; imageDataUrl?: string; quotedMessage?: ChatMessage | null }];
-  'update:brain-mode': [value: boolean];
   'clear-quote': [];
   'stop-generation': [];
 }>();
@@ -155,13 +139,6 @@ const inputMessage = ref('');
 const imageFile = ref<File | null>(null);
 const imagePreview = ref<string>('');
 const isDragOver = ref(false);
-const isBrainMode = ref(props.brainMode);
-
-// 切换大脑模式
-const toggleBrainMode = () => {
-  isBrainMode.value = !isBrainMode.value;
-  emit('update:brain-mode', isBrainMode.value);
-};
 
 // 停止生成
 const handleStopGeneration = () => {
@@ -514,22 +491,6 @@ const handlePaste = (e: ClipboardEvent) => {
     opacity: 0.8;
     transform: scale(1.02);
   }
-}
-
-.brain-button {
-  flex-shrink: 0;
-  border-radius: 50%;
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 8px;
-  transition: all 0.3s ease;
-}
-
-.brain-button:hover {
-  transform: scale(1.1);
 }
 
 .send-button {

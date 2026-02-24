@@ -169,7 +169,7 @@ class AgentOrchestrator:
 
 ### 与现有架构的集成点
 
-1. **入口**：`ChatAPIView.post()` 和 `ChatStreamAPIView.post()`
+1. **入口**：`ChatAPIView.post()` 和 `AgentLoopStreamAPIView.post()`
 2. **判断模式**：
    - 如果请求简单（无工具调用），走现有路径
    - 如果请求复杂（需要工具），走 AgentOrchestrator
@@ -188,7 +188,7 @@ class AgentOrchestrator:
    - 工具结果摘要逻辑
 
 3. **Phase 3: 集成**
-   - 修改 ChatAPIView/ChatStreamAPIView
+   - 修改 ChatAPIView/AgentLoopStreamAPIView
    - 添加模式判断逻辑
 
 4. **Phase 4: 优化**

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from projects.models import Project # Assuming your Project model is in the 'projects' app
-from .models import RemoteMCPConfig # Import RemoteMCPConfig
+from .models import RemoteMCPConfig, MCPTool # Import RemoteMCPConfig
 import re
 from urllib.parse import urlparse
 
@@ -19,7 +19,8 @@ class MCPProjectListSerializer(serializers.ModelSerializer):
 class RemoteMCPConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = RemoteMCPConfig
-        fields = ['id', 'name', 'url', 'transport', 'headers', 'is_active', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'url', 'transport', 'headers', 'is_active',
+                  'require_hitl', 'hitl_tools', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
     
     def validate_url(self, value):
@@ -69,3 +70,17 @@ class RemoteMCPConfigSerializer(serializers.ModelSerializer):
             return value
         
         raise serializers.ValidationError("无效的主机名格式")
+
+
+class MCPToolSerializer(serializers.ModelSerializer):
+    """MCP 工具序列化器"""
+    mcp_name = serializers.CharField(source='mcp_config.name', read_only=True)
+    effective_require_hitl = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = MCPTool
+        fields = [
+            'id', 'name', 'description', 'input_schema',
+            'mcp_name', 'require_hitl', 'effective_require_hitl', 'synced_at'
+        ]
+        read_only_fields = ['synced_at']

@@ -9,10 +9,8 @@ import type {
   UserPromptListResponseData,
   BatchOperationResponseData,
   // 新增需求评审相关类型
-  PromptType,
   RequirementPromptsResponse,
   GetRequirementPromptParams,
-  RequirementPromptApiResponse
 } from '../types/prompt';
 
 const API_BASE_URL = '/prompts/user-prompts';
@@ -376,7 +374,7 @@ export async function getRequirementPrompt(
   } else {
     return {
       status: 'error',
-      code: response.status || 404,
+      code: 404,
       message: response.error || '未找到需求评审提示词',
       data: null,
       errors: { prompt: ['请先创建需求评审提示词'] }

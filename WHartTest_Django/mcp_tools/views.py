@@ -119,6 +119,8 @@ class MCPToolRunnerView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from asgiref.sync import async_to_sync
 
 class RemoteMCPConfigPingView(APIView):
     """
@@ -263,3 +265,85 @@ class RemoteMCPConfigViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return RemoteMCPConfig.objects.all().order_by('-created_at')
+
+    def perform_create(self, serializer):
+        """创建后自动同步工具（仅激活状态）"""
+        instance = serializer.save()
+        if instance.is_active:
+            self._sync_tools_async(instance)
+
+    def perform_update(self, serializer):
+        """更新后自动同步工具（仅激活状态）"""
+        instance = serializer.save()
+        if instance.is_active:
+            self._sync_tools_async(instance)
+
+    def _sync_tools_async(self, instance):
+        """异步同步工具（不阻塞请求）"""
+        from .services import sync_mcp_tools
+        import threading
+
+        def sync_in_background():
+            try:
+                asyncio.run(sync_mcp_tools(instance))
+            except Exception as e:
+                logger.error(f"后台同步 MCP {instance.name} 工具失败: {e}")
+
+        thread = threading.Thread(target=sync_in_background, daemon=True)
+        thread.start()
+
+    @action(detail=True, methods=['post'])
+    def sync_tools(self, request, pk=None):
+        """
+        手动同步指定 MCP 配置的工具列表
+
+        POST /api/mcp/configs/{id}/sync_tools/
+        """
+        from .services import sync_mcp_tools
+
+        instance = self.get_object()
+
+        try:
+            result = async_to_sync(sync_mcp_tools)(instance)
+
+            if result['success']:
+                return Response({
+                    'status': 'success',
+                    'message': f"工具同步成功: 共 {result['tools_count']} 个工具",
+                    'data': result
+                })
+            else:
+                return Response({
+                    'status': 'error',
+                    'message': f"工具同步失败: {result.get('error', '未知错误')}",
+                    'data': result
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except Exception as e:
+            logger.error(f"同步 MCP {instance.name} 工具失败: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f"同步失败: {str(e)}",
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['get'])
+    def tools(self, request, pk=None):
+        """
+        获取指定 MCP 配置的工具列表
+
+        GET /api/mcp/configs/{id}/tools/
+        """
+        from .models import MCPTool
+        from .serializers import MCPToolSerializer
+
+        instance = self.get_object()
+        tools = instance.tools.all()
+
+        return Response({
+            'status': 'success',
+            'data': {
+                'mcp_name': instance.name,
+                'tools_count': tools.count(),
+                'tools': MCPToolSerializer(tools, many=True).data
+            }
+        })

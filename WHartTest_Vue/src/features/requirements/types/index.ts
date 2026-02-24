@@ -5,7 +5,8 @@ export interface ApiResponse<T = any> {
   status: 'success' | 'error';
   code: number;
   message: string;
-  data: T;
+  data: T | null;
+  errors?: Record<string, any> | null;
 }
 
 // 分页响应类型
@@ -369,7 +370,8 @@ export const IssueTypeDisplay: Record<IssueType, string> = {
   clarity: '清晰度',
   completeness: '完整性',
   consistency: '一致性',
-  feasibility: '可行性'
+  feasibility: '可行性',
+  logic: '逻辑性'
 };
 
 export const IssuePriorityDisplay: Record<IssuePriority, string> = {

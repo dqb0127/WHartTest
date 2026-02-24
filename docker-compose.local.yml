@@ -263,3 +263,8 @@ volumes:
   qdrant-data:
     # db.sqlite3 和 media 改用本地目录挂载，不再需要 named volume
     # playwright-screenshots 改用本地目录挂载，不再需要 named volume
+
+
+# 升级构建命令（如有需要）:
+# docker-compose -f 'docker-compose.local.yml' build --no-cache 
+# docker-compose -f 'docker-compose.local.yml' up -d --force-recreate

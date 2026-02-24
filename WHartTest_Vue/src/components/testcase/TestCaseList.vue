@@ -79,7 +79,7 @@
       :data="testCaseData"
       :pagination="paginationConfig"
       :loading="loading"
-      :scroll="{ x: 900 }"
+      :scroll="tableScroll"
       :bordered="{ cell: true }"
       :sticky-header="true"
       class="test-case-table"
@@ -215,9 +215,18 @@ const exportModalRef = ref<InstanceType<typeof ExportModal> | null>(null);
 
 // 响应式屏幕宽度检测
 const isSmallScreen = ref(window.innerWidth < 1222);
+const tableContainerHeight = ref(400); // 默认高度
 const handleResize = () => {
   isSmallScreen.value = window.innerWidth < 1222;
+  // 计算表格容器高度：视口高度 - 头部(56) - 边距(86) - 搜索栏(60) - 分页(50) - 其他间距(40)
+  tableContainerHeight.value = Math.max(300, window.innerHeight - 56 - 86 - 60 - 50 - 40);
 };
+
+// 表格滚动配置
+const tableScroll = computed(() => ({
+  x: 900,
+  y: tableContainerHeight.value,
+}));
 
 const paginationConfig = reactive({
   total: 0,
@@ -551,6 +560,7 @@ const onImportSuccess = () => {
 };
 
 onMounted(() => {
+  handleResize(); // 初始化表格高度
   fetchTestCases();
   window.addEventListener('resize', handleResize);
 });
@@ -597,8 +607,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  position: relative;
-  padding-bottom: 60px;
+  min-height: 0;
 }
 
 .page-header {
@@ -684,13 +693,11 @@ defineExpose({
 }
 
 .test-case-table {
-  flex-grow: 1;
+  flex: 1;
   overflow: hidden;
-  height: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  max-height: calc(100% - 60px);
 }
 
 :deep(.test-case-table .arco-table) {
@@ -721,17 +728,8 @@ defineExpose({
 
 :deep(.test-case-table .arco-table-body) {
   flex: 1;
-  overflow-y: auto !important;
   min-height: 0;
   padding-bottom: 16px;
-}
-
-:deep(.test-case-table .arco-table-body tr:last-child td) {
-  border-bottom: none !important;
-  box-shadow: 0 8px 16px -4px rgba(0, 0, 0, 0.15) !important;
-  position: relative;
-  z-index: 9;
-  background-color: #fff;
 }
 
 :deep(.test-case-table .arco-pagination) {

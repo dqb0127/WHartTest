@@ -280,12 +280,26 @@ const replaceDocImgPlaceholders = (content: string): string => {
   });
 };
 
-
+// HTML转义函数
+const escapeHtml = (text: string): string => {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+};
 
 // 格式化消息内容
 const formattedContent = computed(() => {
   try {
     let processedContent = props.message.content;
+
+    // 用户消息（human类型）：先转义HTML，确保用户发送的HTML代码能正确显示
+    if (props.message.isUser || props.message.messageType === 'human') {
+      // 转义HTML标签，使其显示为文本
+      processedContent = escapeHtml(processedContent);
+      // 将换行符转换为<br>标签，保持换行
+      processedContent = processedContent.replace(/\n/g, '<br>');
+      return processedContent;
+    }
 
     // 将需求文档图片占位符转换为可访问的图片URL（用于Markdown渲染）
     processedContent = replaceDocImgPlaceholders(processedContent);
@@ -968,6 +982,12 @@ const formatToolMessage = (content: string) => {
   margin: 8px 0;
   padding-left: 12px;
   color: #666;
+}
+
+.message-bubble :deep(img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
 }
 
 /* 用户消息中的引用样式 - 适配蓝色背景 */

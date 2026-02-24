@@ -5,6 +5,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from django.db.models import Q
 from django.utils import timezone
+from django.views import View
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.exceptions import AuthenticationFailed
 from .models import LLMConfig, ChatSession, ChatMessage
 from .serializers import LLMConfigSerializer
 import logging
@@ -23,8 +28,36 @@ from wharttest_django.permissions import HasModelPermission
 # 导入提示词管理
 from prompts.models import UserPrompt
 
-# 导入上下文压缩模块
-from orchestrator_integration.context_compression import ConversationCompressor, CompressionSettings
+# v2.0.0: 导入中间件配置（已替代手动上下文压缩）
+from orchestrator_integration.middleware_config import get_standard_middleware, get_middleware_from_config
+
+
+# ============== 公共工具函数 ==============
+
+def check_project_permission(user, project_id):
+    """
+    检查用户是否有访问指定项目的权限
+
+    v2.0.1: 提取为公共函数，供多个 View 复用
+
+    Args:
+        user: 当前用户对象
+        project_id: 项目ID
+
+    Returns:
+        Project 对象（如果有权限），否则返回 None
+    """
+    try:
+        project = Project.objects.get(id=project_id)
+        # 超级用户可以访问所有项目
+        if user.is_superuser:
+            return project
+        # 检查用户是否是项目成员
+        if ProjectMember.objects.filter(project=project, user=user).exists():
+            return project
+        return None
+    except Project.DoesNotExist:
+        return None
 
 # --- New Imports ---
 from typing import TypedDict, Annotated, List, Optional
@@ -32,10 +65,9 @@ from langchain_core.messages import AnyMessage, HumanMessage, AIMessage, ToolMes
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages # Correct import for add_messages
-from langgraph.prebuilt import create_react_agent # For agent with tools
+from langchain.agents import create_agent # For agent with tools (v1 API)
 import os
 import uuid # Import uuid module
-import copy  # For deep copying checkpoint data
 import re
 import base64  # For requirement doc images (multimodal)
 # Knowledge base integration
@@ -565,20 +597,6 @@ class ChatAPIView(APIView):
     """
     permission_classes = [HasModelPermission]
 
-    def _check_project_permission(self, user, project_id):
-        """检查用户是否有访问指定项目的权限"""
-        try:
-            project = Project.objects.get(id=project_id)
-            # 超级用户可以访问所有项目
-            if user.is_superuser:
-                return project
-            # 检查用户是否是项目成员
-            if ProjectMember.objects.filter(project=project, user=user).exists():
-                return project
-            return None
-        except Project.DoesNotExist:
-            return None
-
     async def dispatch(self, request, *args, **kwargs):
         """
         Handles incoming requests and ensures that the view is treated as async.
@@ -634,7 +652,7 @@ class ChatAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # 检查项目权限
-        project = await sync_to_async(self._check_project_permission)(request.user, project_id)
+        project = await sync_to_async(check_project_permission)(request.user, project_id)
         if not project:
             return Response({
                 "status": "error", "code": status.HTTP_403_FORBIDDEN,
@@ -757,6 +775,18 @@ class ChatAPIView(APIView):
                 runnable_to_invoke = None
                 is_agent_with_tools = False
 
+                # v2.0.1: 提前获取系统提示词（用于 create_agent 的 system_prompt 参数）
+                # Determine thread_id first - 包含项目ID以实现项目隔离
+                thread_id_parts = [str(request.user.id), str(project_id)]
+                if session_id:
+                    thread_id_parts.append(str(session_id))
+                thread_id = "_".join(thread_id_parts)
+                logger.info(f"ChatAPIView: Using thread_id: {thread_id} for project: {project.name}")
+
+                # 获取有效的系统提示词（用户提示词优先，并注入项目凭据信息）
+                effective_prompt, prompt_source = await get_effective_system_prompt_async(request.user, prompt_id, project)
+                logger.info(f"ChatAPIView: Got effective prompt from {prompt_source}: {effective_prompt[:100] if effective_prompt else 'None'}...")
+
                 # 检查是否需要创建Agent（有MCP工具）
                 if mcp_tools_list:
                     logger.info(f"ChatAPIView: Attempting to create agent with {len(mcp_tools_list)} remote tools.")
@@ -776,13 +806,37 @@ class ChatAPIView(APIView):
 
                             # 将知识库工具添加到MCP工具列表
                             enhanced_tools = mcp_tools_list + [knowledge_tool]
-                            agent_executor = create_react_agent(llm, enhanced_tools, checkpointer=actual_memory_checkpointer)
+                            # 获取工具名列表用于 HITL
+                            tool_names = [t.name for t in enhanced_tools]
+                            # v2.0.1: 使用中间件创建 Agent，传入 system_prompt
+                            agent_executor = create_agent(
+                                llm,
+                                enhanced_tools,
+                                checkpointer=actual_memory_checkpointer,
+                                middleware=get_middleware_from_config(
+                                    active_config, llm, user=request.user,
+                                    session_id=session_id, all_tool_names=tool_names
+                                ),
+                                system_prompt=effective_prompt,
+                            )
                             runnable_to_invoke = agent_executor
                             is_agent_with_tools = True
                             logger.info(f"ChatAPIView: Knowledge-enhanced agent created with {len(enhanced_tools)} tools (including knowledge base)")
                         else:
                             # 只有MCP工具，创建普通Agent
-                            agent_executor = create_react_agent(llm, mcp_tools_list, checkpointer=actual_memory_checkpointer)
+                            # 获取工具名列表用于 HITL
+                            tool_names = [t.name for t in mcp_tools_list]
+                            # v2.0.1: 使用中间件创建 Agent，传入 system_prompt
+                            agent_executor = create_agent(
+                                llm,
+                                mcp_tools_list,
+                                checkpointer=actual_memory_checkpointer,
+                                middleware=get_middleware_from_config(
+                                    active_config, llm, user=request.user,
+                                    session_id=session_id, all_tool_names=tool_names
+                                ),
+                                system_prompt=effective_prompt,
+                            )
                             runnable_to_invoke = agent_executor
                             is_agent_with_tools = True
                             logger.info("ChatAPIView: Agent with remote tools created with checkpointer.")
@@ -855,22 +909,14 @@ class ChatAPIView(APIView):
                     runnable_to_invoke = graph_builder.compile(checkpointer=actual_memory_checkpointer) # Use actual checkpointer instance
                     logger.info("ChatAPIView: Knowledge-enhanced chatbot graph compiled.")
 
-                # Determine thread_id - 包含项目ID以实现项目隔离
-                thread_id_parts = [str(request.user.id), str(project_id)]
-                if session_id:
-                    thread_id_parts.append(str(session_id))
-                thread_id = "_".join(thread_id_parts)
-                logger.info(f"ChatAPIView: Using thread_id: {thread_id} for project: {project.name}")
+                # v2.0.1: thread_id 和 effective_prompt 已在前面获取（用于 create_agent 的 system_prompt）
 
-                # 构建消息列表，检查是否需要添加系统提示词
+                # 构建消息列表，检查是否需要添加系统提示词（仅用于非 Agent 模式）
                 messages_list = []
 
-                # 获取有效的系统提示词（用户提示词优先，并注入项目凭据信息）
-                effective_prompt, prompt_source = await get_effective_system_prompt_async(request.user, prompt_id, project)
-
-                # 检查当前会话是否已经有系统提示词
+                # 检查当前会话是否已经有系统提示词（仅用于 StateGraph chatbot 模式）
                 should_add_system_prompt = False
-                if effective_prompt:
+                if effective_prompt and not is_agent_with_tools:
                     try:
                         # 尝试获取当前会话的历史消息
                         with get_sync_checkpointer() as memory:
@@ -1068,20 +1114,6 @@ class ChatHistoryAPIView(APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
 
-    def _check_project_permission(self, user, project_id):
-        """检查用户是否有访问指定项目的权限"""
-        try:
-            project = Project.objects.get(id=project_id)
-            # 超级用户可以访问所有项目
-            if user.is_superuser:
-                return project
-            # 检查用户是否是项目成员
-            if ProjectMember.objects.filter(project=project, user=user).exists():
-                return project
-            return None
-        except Project.DoesNotExist:
-            return None
-
     def get(self, request, *args, **kwargs):
         session_id = request.query_params.get('session_id')
         project_id = request.query_params.get('project_id')
@@ -1101,7 +1133,7 @@ class ChatHistoryAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # 检查项目权限
-        project = self._check_project_permission(request.user, project_id)
+        project = check_project_permission(request.user, project_id)
         if not project:
             return Response({
                 "status": "error", "code": status.HTTP_403_FORBIDDEN,
@@ -1346,19 +1378,22 @@ class ChatHistoryAPIView(APIView):
                     logger.info(f"ChatHistoryAPIView: No checkpoints found for thread_id: {thread_id}")
             # By processing only the latest checkpoint, we get the final state of messages, avoiding duplicates.
 
-            # 计算上下文Token使用信息
+            # 获取当前上下文Token使用信息（取最后一条 AI 消息的 usage_metadata）
             context_token_count = 0
             context_limit = 128000
             try:
-                from requirements.context_limits import context_checker
                 active_config = LLMConfig.objects.get(is_active=True)
                 context_limit = active_config.context_limit or 128000
-                
-                for msg_data in history_messages:
-                    content = msg_data.get('content', '')
-                    if content:
-                        content_str = content if isinstance(content, str) else str(content)
-                        context_token_count += context_checker.count_tokens(content_str, active_config.name or "gpt-4o")
+
+                # 获取最后一次 LLM 调用的 token 使用量
+                # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
+                if 'messages' in locals() and messages:
+                    for msg in reversed(messages):
+                        if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
+                            input_tokens = msg.usage_metadata.get('input_tokens', 0)
+                            output_tokens = msg.usage_metadata.get('output_tokens', 0)
+                            context_token_count = input_tokens + output_tokens
+                            break  # 只取最后一条有 usage_metadata 的消息
             except Exception as e:
                 logger.warning(f"ChatHistoryAPIView: Failed to calculate token count: {e}")
 
@@ -1416,7 +1451,7 @@ class ChatHistoryAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # 检查项目权限
-        project = self._check_project_permission(request.user, project_id)
+        project = check_project_permission(request.user, project_id)
         if not project:
             return Response({
                 "status": "error", "code": status.HTTP_403_FORBIDDEN,
@@ -1500,7 +1535,7 @@ class ChatHistoryAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # 检查项目权限
-        project = self._check_project_permission(request.user, project_id)
+        project = check_project_permission(request.user, project_id)
         if not project:
             return Response({
                 "status": "error", "code": status.HTTP_403_FORBIDDEN,
@@ -1551,20 +1586,6 @@ class ChatBatchDeleteAPIView(APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
 
-    def _check_project_permission(self, user, project_id):
-        """检查用户是否有访问指定项目的权限"""
-        try:
-            project = Project.objects.get(id=project_id)
-            # 超级用户可以访问所有项目
-            if user.is_superuser:
-                return project
-            # 检查用户是否是项目成员
-            if ProjectMember.objects.filter(project=project, user=user).exists():
-                return project
-            return None
-        except Project.DoesNotExist:
-            return None
-
     def post(self, request, *args, **kwargs):
         """批量删除聊天会话"""
         session_ids = request.data.get('session_ids', [])
@@ -1585,7 +1606,7 @@ class ChatBatchDeleteAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # 检查项目权限
-        project = self._check_project_permission(request.user, project_id)
+        project = check_project_permission(request.user, project_id)
         if not project:
             return Response({
                 "status": "error", "code": status.HTTP_403_FORBIDDEN,
@@ -1660,20 +1681,6 @@ class UserChatSessionsAPIView(APIView):
     """
     permission_classes = [permissions.IsAuthenticated]
 
-    def _check_project_permission(self, user, project_id):
-        """检查用户是否有访问指定项目的权限"""
-        try:
-            project = Project.objects.get(id=project_id)
-            # 超级用户可以访问所有项目
-            if user.is_superuser:
-                return project
-            # 检查用户是否是项目成员
-            if ProjectMember.objects.filter(project=project, user=user).exists():
-                return project
-            return None
-        except Project.DoesNotExist:
-            return None
-
     def get(self, request, *args, **kwargs):
         user_id = str(request.user.id)
         project_id = request.query_params.get('project_id')
@@ -1686,7 +1693,7 @@ class UserChatSessionsAPIView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # 检查项目权限
-        project = self._check_project_permission(request.user, project_id)
+        project = check_project_permission(request.user, project_id)
         if not project:
             return Response({
                 "status": "error", "code": status.HTTP_403_FORBIDDEN,
@@ -1745,20 +1752,13 @@ class UserChatSessionsAPIView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-from django.views import View
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework.exceptions import AuthenticationFailed
-
 @method_decorator(csrf_exempt, name='dispatch')
-class ChatStreamAPIView(View):
+class ChatResumeAPIView(View):
     """
-    API endpoint for streaming chat with the currently active LLM using LangGraph,
-    with potential integration of remote MCP tools.
-    支持项目隔离，聊天记录按项目分组。
-    使用Server-Sent Events (SSE)实现流式响应。
-    使用Django原生View绕过DRF的渲染器系统。
+    HITL Resume API - 处理用户对工具调用的审批决定
+
+    当 AgentLoopStreamAPIView 返回 interrupt 事件后，前端调用此 API 恢复执行。
+    使用 LangGraph 的 Command(resume=...) 模式。
     """
 
     async def authenticate_request(self, request):
@@ -1771,60 +1771,33 @@ class ChatStreamAPIView(View):
         jwt_auth = JWTAuthentication()
 
         try:
-            # 在异步上下文中使用sync_to_async包装同步方法
             validated_token = await sync_to_async(jwt_auth.get_validated_token)(token)
             user = await sync_to_async(jwt_auth.get_user)(validated_token)
             return user
         except Exception as e:
             raise AuthenticationFailed(f'Invalid token: {str(e)}')
 
-    def _check_project_permission(self, user, project_id):
-        """检查用户是否有访问指定项目的权限"""
-        try:
-            project = Project.objects.get(id=project_id)
-            # 超级用户可以访问所有项目
-            if user.is_superuser:
-                return project
-            # 检查用户是否是项目成员
-            if ProjectMember.objects.filter(project=project, user=user).exists():
-                return project
-            return None
-        except Project.DoesNotExist:
-            return None
+    async def _create_resume_generator(self, request, thread_id, decision_type, session_id, project_id):
+        """创建恢复执行的 SSE 生成器"""
+        from langgraph.types import Command
 
-    async def _create_sse_generator(self, request, user_message_content, session_id, project_id, project,
-                                   knowledge_base_id=None, use_knowledge_base=True, similarity_threshold=0.7, top_k=5, prompt_id=None, image_base64=None):
-        """创建SSE数据生成器"""
         try:
-            # 获取活跃的LLM配置
             active_config = await sync_to_async(LLMConfig.objects.get)(is_active=True)
-            logger.info(f"ChatStreamAPIView: Using active LLMConfig: {active_config.name}")
+            logger.info(f"ChatResumeAPIView: Using active LLMConfig: {active_config.name}")
         except LLMConfig.DoesNotExist:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'No active LLM configuration found'})}\n\n"
-            return
-        except LLMConfig.MultipleObjectsReturned:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Multiple active LLM configurations found'})}\n\n"
-            return
-
-        # 验证图片输入是否支持
-        if image_base64 and not active_config.supports_vision:
-            logger.warning(f"ChatStreamAPIView: Image input rejected - model {active_config.name} does not support vision")
-            yield f"data: {json.dumps({'type': 'error', 'message': f'当前模型 {active_config.name} 不支持图片输入，请切换到支持多模态的模型（如 GPT-4V、Claude 3、Gemini Vision 或 Qwen-VL）'})}\n\n"
+            yield create_sse_data({'type': 'error', 'message': 'No active LLM configuration found'})
             return
 
         try:
-            # 使用新的LLM工厂函数，支持多供应商
             llm = create_llm_instance(active_config, temperature=0.7)
-            logger.info(f"ChatStreamAPIView: Initialized LLM with provider auto-detection")
 
             async with get_async_checkpointer() as actual_memory_checkpointer:
-                # 加载远程MCP工具
-                logger.info("ChatStreamAPIView: Attempting to load remote MCP tools.")
+                # 加载 MCP 工具（与 AgentLoopStreamAPIView 相同逻辑）
                 mcp_tools_list = []
                 try:
-                    active_remote_mcp_configs_qs = RemoteMCPConfig.objects.filter(is_active=True)
-                    active_remote_mcp_configs = await sync_to_async(list)(active_remote_mcp_configs_qs)
-
+                    active_remote_mcp_configs = await sync_to_async(list)(
+                        RemoteMCPConfig.objects.filter(is_active=True)
+                    )
                     if active_remote_mcp_configs:
                         client_mcp_config = {}
                         for r_config in active_remote_mcp_configs:
@@ -1833,565 +1806,223 @@ class ChatStreamAPIView(View):
                                 "url": r_config.url,
                                 "transport": (r_config.transport or "streamable_http").replace('-', '_'),
                             }
-                            if r_config.headers and isinstance(r_config.headers, dict) and r_config.headers:
+                            if r_config.headers:
                                 client_mcp_config[config_key]["headers"] = r_config.headers
 
                         if client_mcp_config:
-                            logger.info(f"ChatStreamAPIView: Initializing persistent MCP client with config: {client_mcp_config}")
-                            # 使用持久化MCP会话管理器，传递用户、项目和会话信息以支持跨对话轮次的状态保持
                             mcp_tools_list = await mcp_session_manager.get_tools_for_config(
                                 client_mcp_config,
                                 user_id=str(request.user.id),
                                 project_id=str(project_id),
-                                session_id=session_id  # 传递session_id以启用会话级别的工具缓存
+                                session_id=session_id
                             )
-                            logger.info(f"ChatStreamAPIView: Successfully loaded {len(mcp_tools_list)} persistent tools from remote MCP servers")
-                        else:
-                            logger.info("ChatStreamAPIView: No active remote MCP configurations to build client config.")
-                    else:
-                        logger.info("ChatStreamAPIView: No active RemoteMCPConfig found.")
                 except Exception as e:
-                    logger.error(f"ChatStreamAPIView: Error loading remote MCP tools: {e}", exc_info=True)
-                    yield f"data: {json.dumps({'type': 'warning', 'message': f'Failed to load MCP tools: {str(e)}'})}\n\n"
+                    logger.warning(f"ChatResumeAPIView: Error loading MCP tools: {e}")
 
-                # 准备LangGraph runnable
-                runnable_to_invoke = None
-
-                # 检查是否需要创建Agent（有MCP工具）
-                if mcp_tools_list:
-                    logger.info(f"ChatStreamAPIView: Attempting to create agent with {len(mcp_tools_list)} remote tools.")
-                    try:
-                        # 如果同时有知识库和MCP工具，创建知识库增强的Agent
-                        if knowledge_base_id and use_knowledge_base:
-                            logger.info(f"ChatStreamAPIView: Creating knowledge-enhanced agent with {len(mcp_tools_list)} tools and knowledge base {knowledge_base_id}")
-
-                            # 创建知识库工具
-                            from knowledge.langgraph_integration import create_knowledge_tool
-                            knowledge_tool = create_knowledge_tool(
-                                knowledge_base_id=knowledge_base_id,
-                                user=request.user,
-                                similarity_threshold=similarity_threshold,
-                                top_k=top_k
-                            )
-
-                            # 将知识库工具添加到MCP工具列表
-                            enhanced_tools = mcp_tools_list + [knowledge_tool]
-                            agent_executor = create_react_agent(llm, enhanced_tools, checkpointer=actual_memory_checkpointer)
-                            runnable_to_invoke = agent_executor
-                            logger.info(f"ChatStreamAPIView: Knowledge-enhanced agent created with {len(enhanced_tools)} tools (including knowledge base)")
-                            yield create_sse_data({'type': 'info', 'message': f'Knowledge-enhanced agent initialized with {len(enhanced_tools)} tools'})
-                        else:
-                            # 只有MCP工具，创建普通Agent
-                            agent_executor = create_react_agent(llm, mcp_tools_list, checkpointer=actual_memory_checkpointer)
-                            runnable_to_invoke = agent_executor
-                            logger.info("ChatStreamAPIView: Agent with remote tools created with checkpointer.")
-                            yield create_sse_data({'type': 'info', 'message': f'Agent initialized with {len(mcp_tools_list)} tools'})
-                    except Exception as e:
-                        logger.error(f"ChatStreamAPIView: Failed to create agent with remote tools: {e}. Falling back to knowledge-enhanced chatbot.", exc_info=True)
-                        yield create_sse_data({'type': 'warning', 'message': 'Failed to create agent with tools, using knowledge-enhanced chatbot'})
-
-                if not runnable_to_invoke:
-                    logger.info("ChatStreamAPIView: No remote tools or agent creation failed. Using knowledge-enhanced chatbot.")
-
-                    def knowledge_enhanced_chatbot_node(state: AgentState):
-                        """知识库增强的聊天机器人节点"""
-                        messages = state['messages']
-                        if not messages:
-                            return {"messages": []}
-
-                        # 获取最后一条用户消息
-                        last_message = messages[-1]
-                        if hasattr(last_message, 'content'):
-                            user_query = last_message.content
-                        else:
-                            user_query = str(last_message)
-
-                        # 检查是否需要使用知识库
-                        if knowledge_base_id and use_knowledge_base:
-                            try:
-                                # 使用知识库增强回答
-                                from knowledge.langgraph_integration import KnowledgeRAGService
-                                rag_service = KnowledgeRAGService(llm)
-                                rag_result = rag_service.query(
-                                    question=user_query,
-                                    knowledge_base_id=knowledge_base_id,
-                                    user=request.user,
-                                    similarity_threshold=similarity_threshold,
-                                    top_k=top_k
-                                )
-
-                                # 使用RAG结果作为上下文
-                                context_prompt = f"基于以下相关信息回答用户问题：\n\n{rag_result['context']}\n\n用户问题：{user_query}"
-                                enhanced_messages = messages[:-1] + [HumanMessage(content=context_prompt)]
-                                invoked_response = llm.invoke(enhanced_messages)
-                                logger.info(f"ChatStreamAPIView: Used knowledge base {knowledge_base_id} for enhanced response")
-
-                            except Exception as e:
-                                logger.warning(f"ChatStreamAPIView: Knowledge base query failed: {e}, falling back to normal response")
-                                invoked_response = llm.invoke(messages)
-                        else:
-                            # 普通聊天回复
-                            invoked_response = llm.invoke(messages)
-
-                        return {"messages": [invoked_response]}
-
-                    graph_builder = StateGraph(AgentState)
-                    graph_builder.add_node("chatbot", knowledge_enhanced_chatbot_node)
-                    graph_builder.set_entry_point("chatbot")
-                    graph_builder.add_edge("chatbot", END)
-                    runnable_to_invoke = graph_builder.compile(checkpointer=actual_memory_checkpointer)
-
-                    if knowledge_base_id and use_knowledge_base:
-                        logger.info(f"ChatStreamAPIView: Knowledge-enhanced chatbot initialized with KB: {knowledge_base_id}")
-                        yield create_sse_data({'type': 'info', 'message': f'Knowledge-enhanced chatbot initialized with knowledge base'})
-                    else:
-                        logger.info("ChatStreamAPIView: Basic chatbot initialized")
-                        yield create_sse_data({'type': 'info', 'message': 'Basic chatbot initialized'})
-
-                # 确定thread_id - 包含项目ID以实现项目隔离
-                thread_id_parts = [str(request.user.id), str(project_id)]
-                if session_id:
-                    thread_id_parts.append(str(session_id))
-                thread_id = "_".join(thread_id_parts)
-                logger.info(f"ChatStreamAPIView: Using thread_id: {thread_id} for project: {project.name}")
-
-                # 预加载 checkpoint 数据（供系统提示词检查和上下文压缩共用）
-                checkpoint_tuples_list = []
-                try:
-                    async for checkpoint_tuple in actual_memory_checkpointer.alist(config={"configurable": {"thread_id": thread_id}}):
-                        checkpoint_tuples_list.append(checkpoint_tuple)
-                except Exception as e:
-                    logger.warning(f"ChatStreamAPIView: Failed to load checkpoint history: {e}")
-                
-                # 构建消息列表，检查是否需要添加系统提示词
-                messages_list = []
-
-                # 获取有效的系统提示词（用户提示词优先，并注入项目凭据信息）
-                effective_prompt, prompt_source = await get_effective_system_prompt_async(request.user, prompt_id, project)
-                logger.info(f"ChatStreamAPIView: Using {prompt_source} prompt: {repr(effective_prompt[:100] if effective_prompt else None)}")
-
-                # 检查当前会话是否已经有系统提示词
-                should_add_system_prompt = False
-                if effective_prompt:
-                    try:
-                        # 使用预加载的 checkpoint 数据检查
-                        if checkpoint_tuples_list:
-                            # 检查最新checkpoint中是否已有系统提示词
-                            latest_checkpoint = checkpoint_tuples_list[0].checkpoint
-                            if (latest_checkpoint and 'channel_values' in latest_checkpoint
-                                and 'messages' in latest_checkpoint['channel_values']):
-                                existing_messages = latest_checkpoint['channel_values']['messages']
-                                # 检查第一条消息是否是系统消息
-                                if not existing_messages or not isinstance(existing_messages[0], SystemMessage):
-                                    should_add_system_prompt = True
-                            else:
-                                should_add_system_prompt = True
-                        else:
-                            # 新会话，需要添加系统提示词
-                            should_add_system_prompt = True
-                    except Exception as e:
-                        logger.warning(f"ChatStreamAPIView: Error checking existing messages: {e}")
-                        should_add_system_prompt = True
-
-                    if should_add_system_prompt:
-                        messages_list.append(SystemMessage(content=effective_prompt))
-                        logger.info(f"ChatStreamAPIView: Added {prompt_source} system prompt: {effective_prompt[:100]}...")
-                else:
-                    logger.info("ChatStreamAPIView: No system prompt available")
-
-                # 验证用户消息内容不为空
-                if not user_message_content or not user_message_content.strip():
-                    logger.error("ChatStreamAPIView: User message content is empty or whitespace only")
-                    yield create_sse_data({'type': 'error', 'message': 'User message content cannot be empty'})
+                if not mcp_tools_list:
+                    yield create_sse_data({'type': 'error', 'message': 'No tools available for resume'})
                     return
 
-                # 确保用户消息内容格式正确
-                clean_user_message = user_message_content.strip()
-                clean_user_message, req_image_data_urls, req_doc_id = await _extract_requirement_doc_images_for_message(
-                    clean_user_message,
-                    project,
+                # 获取工具名列表用于 HITL
+                tool_names = [t.name for t in mcp_tools_list]
+                # 重建 Agent（与原始聊天相同配置）
+                agent_executor = create_agent(
+                    llm,
+                    mcp_tools_list,
+                    checkpointer=actual_memory_checkpointer,
+                    middleware=get_middleware_from_config(
+                        active_config, llm, user=request.user,
+                        session_id=session_id, all_tool_names=tool_names
+                    ),
                 )
-                if not clean_user_message and not image_base64:
-                    logger.error("ChatStreamAPIView: User message is empty after stripping")
-                    yield create_sse_data({'type': 'error', 'message': 'User message cannot be empty'})
-                    return
 
-                # 构建用户消息（支持多模态）
-                if req_image_data_urls and not active_config.supports_vision:
-                    logger.warning(
-                        "ChatStreamAPIView: Requirement document images detected but model %s does not support vision; sending text only",
-                        active_config.name,
-                    )
-
-                if active_config.supports_vision and (image_base64 or req_image_data_urls):
-                    multimodal_parts = [{"type": "text", "text": clean_user_message}]
-
-                    # 需求文档图片（按占位符出现顺序）
-                    for data_url in req_image_data_urls:
-                        multimodal_parts.append({"type": "image_url", "image_url": {"url": data_url}})
-
-                    # 用户上传图片（最后追加）
-                    if image_base64:
-                        multimodal_parts.append({
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
-                        })
-
-                    additional_kwargs = {}
-                    if req_doc_id:
-                        additional_kwargs["requirement_document_id"] = req_doc_id
-                        additional_kwargs["image_source"] = "requirement_document"
-
-                    messages_list.append(HumanMessage(content=multimodal_parts, additional_kwargs=additional_kwargs))
-                    logger.info(
-                        "ChatStreamAPIView: Added multimodal message (doc_images=%s, uploaded_image=%s)",
-                        len(req_image_data_urls),
-                        bool(image_base64),
-                    )
-                else:
-                    # 纯文本消息
-                    messages_list.append(HumanMessage(content=clean_user_message))
-                logger.info(f"ChatStreamAPIView: Final messages list length: {len(messages_list)}")
-
-                # 验证消息列表不为空且所有消息都有有效内容
-                if not messages_list:
-                    logger.error("ChatStreamAPIView: Messages list is empty")
-                    yield create_sse_data({'type': 'error', 'message': 'No valid messages to process'})
-                    return
-
-                for i, msg in enumerate(messages_list):
-                    if not hasattr(msg, 'content') or not msg.content or not str(msg.content).strip():
-                        logger.error(f"ChatStreamAPIView: Message at index {i} has empty content: {msg}")
-                        yield create_sse_data({'type': 'error', 'message': f'Message at index {i} has invalid content'})
-                        return
-                    logger.info(f"ChatStreamAPIView: Message {i}: {type(msg).__name__} with content length {len(str(msg.content))}")
-
-                # 上下文检查与压缩
-                context_limit = active_config.context_limit or 128000
-                try:
-                    from requirements.context_limits import context_checker
-                    
-                    # 初始化压缩器
-                    compression_settings = CompressionSettings(
-                        max_context_tokens=context_limit,
-                        trigger_ratio=0.75
-                    )
-                    conversation_compressor = ConversationCompressor(
-                        llm=llm,
-                        model_name=active_config.name or getattr(llm, "model_name", "gpt-4o"),
-                        settings=compression_settings
-                    )
-                    
-                    # 从预加载的 checkpoint 获取历史消息和压缩状态
-                    latest_checkpoint_tuple = checkpoint_tuples_list[0] if checkpoint_tuples_list else None
-                    history_messages = []
-                    existing_metadata = {}
-                    summary_text = None
-                    summarized_count = 0
-                    
-                    if latest_checkpoint_tuple:
-                        latest_checkpoint = latest_checkpoint_tuple.checkpoint or {}
-                        history_messages = latest_checkpoint.get('channel_values', {}).get('messages', []) or []
-                        existing_metadata = latest_checkpoint_tuple.metadata or {}
-                        compression_state = dict(existing_metadata.get("context_compression") or {})
-                        summary_text = compression_state.get("context_summary")
-                        summarized_count = compression_state.get("summarized_message_count", 0)
-                    
-                    # 执行压缩检查
-                    compression_result = await conversation_compressor.prepare(
-                        messages=history_messages,
-                        summary_text=summary_text,
-                        summarized_count=summarized_count,
-                    )
-                    history_token_count = compression_result.token_count
-                    
-                    # 如果压缩被触发，更新 checkpoint
-                    if latest_checkpoint_tuple and (
-                        compression_result.triggered
-                        or "context_summary" in compression_result.state_updates
-                        or "summarized_message_count" in compression_result.state_updates
-                    ):
-                        updated_checkpoint = copy.deepcopy(latest_checkpoint_tuple.checkpoint)
-                        updated_channel_values = updated_checkpoint.setdefault("channel_values", {})
-                        if compression_result.triggered:
-                            updated_channel_values["messages"] = compression_result.messages
-                            logger.info(f"ChatStreamAPIView: Context compression triggered, messages reduced from {len(history_messages)} to {len(compression_result.messages)}")
-                        
-                        updated_metadata = copy.deepcopy(existing_metadata)
-                        compression_meta = dict(updated_metadata.get("context_compression") or {})
-                        if "context_summary" in compression_result.state_updates:
-                            compression_meta["context_summary"] = compression_result.state_updates["context_summary"]
-                        if "summarized_message_count" in compression_result.state_updates:
-                            compression_meta["summarized_message_count"] = compression_result.state_updates["summarized_message_count"]
-                        compression_meta["context_token_count"] = compression_result.state_updates.get("context_token_count", history_token_count)
-                        updated_metadata["context_compression"] = compression_meta
-                        
-                        # 写入更新后的 checkpoint
-                        checkpoint_config = latest_checkpoint_tuple.config.get("configurable", {})
-                        update_config = {
-                            "configurable": {
-                                "thread_id": checkpoint_config.get("thread_id"),
-                                "checkpoint_ns": checkpoint_config.get("checkpoint_ns", ""),
-                            }
-                        }
-                        parent_config = latest_checkpoint_tuple.parent_config
-                        if parent_config:
-                            parent_checkpoint_id = parent_config.get("configurable", {}).get("checkpoint_id")
-                            if parent_checkpoint_id:
-                                update_config["configurable"]["checkpoint_id"] = parent_checkpoint_id
-                        
-                        await actual_memory_checkpointer.aput(
-                            update_config,
-                            updated_checkpoint,
-                            updated_metadata,
-                            updated_checkpoint.get("channel_versions", {}),
-                        )
-                        logger.info(f"ChatStreamAPIView: Applied context compression for thread {thread_id}")
-                    
-                    # 计算总 token 数（历史 + 当前消息）
-                    total_tokens = history_token_count
-                    for msg in messages_list:
-                        if hasattr(msg, 'content') and msg.content:
-                            content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                            total_tokens += context_checker.count_tokens(content, active_config.name or "gpt-4o")
-                    
-                    usage_ratio = total_tokens / context_limit
-                    logger.info(f"ChatStreamAPIView: Context usage: {total_tokens}/{context_limit} ({usage_ratio*100:.1f}%)")
-                    
-                    # 压缩后仍超过95%时拒绝新消息
-                    if usage_ratio > 0.95:
-                        logger.warning(f"ChatStreamAPIView: Context limit exceeded after compression ({usage_ratio*100:.1f}%)")
-                        yield create_sse_data({
-                            'type': 'error', 
-                            'message': f'对话上下文已达上限（{total_tokens}/{context_limit} tokens），压缩后仍无法继续，请新建对话。'
-                        })
-                        return
-                    # 压缩后仍超过85%时发送警告
-                    elif usage_ratio > 0.85:
-                        yield create_sse_data({
-                            'type': 'warning', 
-                            'message': f'对话上下文即将达到上限（{int(usage_ratio*100)}%），建议尽快新建对话。'
-                        })
-                except Exception as e:
-                    logger.warning(f"ChatStreamAPIView: Context check/compression failed: {e}", exc_info=True)
-
-                input_messages = {"messages": messages_list}
                 invoke_config = {
                     "configurable": {"thread_id": thread_id},
-                    "recursion_limit": 1000  # 支持约500次工具调用
+                    "recursion_limit": 1000
                 }
-                logger.info(f"ChatStreamAPIView: Set recursion_limit to 1000 for thread_id: {thread_id}")
-                logger.info(f"ChatStreamAPIView: Input messages structure: {input_messages}")
 
-                # 详细记录每个消息的内容
-                for i, msg in enumerate(messages_list):
-                    logger.info(f"ChatStreamAPIView: Message {i}: type={type(msg).__name__}, content={repr(msg.content)}")
+                # 构建 resume 命令
+                if decision_type == "approve":
+                    resume_command = Command(resume={"decisions": [{"type": "approve"}]})
+                else:
+                    resume_command = Command(resume={"decisions": [{"type": "reject"}]})
 
-                # 发送开始信号
+                logger.info(f"ChatResumeAPIView: Resuming with decision={decision_type}, thread_id={thread_id}")
+
                 yield create_sse_data({
-                    'type': 'start', 
-                    'thread_id': thread_id, 
-                    'session_id': session_id, 
-                    'project_id': project_id,
-                    'context_limit': context_limit
+                    'type': 'resume_start',
+                    'thread_id': thread_id,
+                    'decision': decision_type
                 })
 
-                # 使用astream进行流式处理，支持多种模式
                 stream_modes = ["updates", "messages"]
 
+                # 用于跟踪是否检测到中断
+                interrupt_detected = False
+
                 try:
-                    async for stream_mode, chunk in runnable_to_invoke.astream(
-                        input_messages,
+                    async for stream_mode, chunk in agent_executor.astream(
+                        resume_command,
                         config=invoke_config,
                         stream_mode=stream_modes
                     ):
                         if stream_mode == "updates":
-                            # 代理进度更新 - 安全地序列化复杂对象
-                            try:
-                                # 尝试将chunk转换为可序列化的格式
-                                if hasattr(chunk, '__dict__'):
-                                    serializable_chunk = str(chunk)
-                                else:
-                                    serializable_chunk = chunk
-                                yield create_sse_data({'type': 'update', 'data': serializable_chunk})
-                            except (TypeError, ValueError) as e:
-                                yield create_sse_data({'type': 'update', 'data': f'Update: {str(chunk)}'})
+                            # 检查是否是中断事件 (HITL)
+                            if isinstance(chunk, dict) and "__interrupt__" in chunk:
+                                interrupt_info = chunk["__interrupt__"]
+                                logger.info(f"ChatResumeAPIView: HITL interrupt detected in stream: {interrupt_info}")
+
+                                # 解析中断信息
+                                action_requests = []
+                                interrupt_id = None
+
+                                # interrupt_info 可能是列表或单个对象
+                                interrupts_list = interrupt_info if isinstance(interrupt_info, list) else [interrupt_info]
+
+                                for intr in interrupts_list:
+                                    # 获取 interrupt ID
+                                    if hasattr(intr, 'id'):
+                                        interrupt_id = intr.id
+                                    elif isinstance(intr, dict) and 'id' in intr:
+                                        interrupt_id = intr['id']
+
+                                    # 获取 action_requests
+                                    intr_value = getattr(intr, 'value', intr) if hasattr(intr, 'value') else intr
+
+                                    if isinstance(intr_value, dict):
+                                        ars = intr_value.get('action_requests', [])
+                                    elif hasattr(intr_value, 'action_requests'):
+                                        ars = intr_value.action_requests
+                                    else:
+                                        ars = []
+
+                                    for ar in ars:
+                                        if isinstance(ar, dict):
+                                            action_requests.append({
+                                                'name': ar.get('name', ar.get('action_name', 'unknown')),
+                                                'args': ar.get('arguments', ar.get('args', {})),
+                                                'description': ar.get('description', ''),
+                                            })
+                                        else:
+                                            action_requests.append({
+                                                'name': getattr(ar, 'name', 'unknown'),
+                                                'args': getattr(ar, 'arguments', getattr(ar, 'args', {})),
+                                                'description': getattr(ar, 'description', ''),
+                                            })
+
+                                if action_requests:
+                                    interrupt_detected = True
+                                    yield create_sse_data({
+                                        'type': 'interrupt',
+                                        'interrupt_id': interrupt_id or str(id(interrupt_info)),
+                                        'action_requests': action_requests,
+                                        'session_id': session_id,
+                                        'thread_id': thread_id,
+                                    })
+                                    logger.info(f"ChatResumeAPIView: Sent interrupt event with {len(action_requests)} action requests")
+                            # 跳过普通 updates，只用于检测 interrupt（节省 token 和带宽）
+                            continue
                         elif stream_mode == "messages":
-                            # LLM令牌流式传输
                             if hasattr(chunk, 'content') and chunk.content:
                                 yield create_sse_data({'type': 'message', 'data': chunk.content})
                             else:
                                 yield create_sse_data({'type': 'message', 'data': str(chunk)})
 
-                        # 添加小延迟以确保流式传输效果
                         await asyncio.sleep(0.01)
 
                 except Exception as e:
-                    logger.error(f"ChatStreamAPIView: Error during streaming: {e}", exc_info=True)
-                    yield create_sse_data({'type': 'error', 'message': f'Streaming error: {str(e)}'})
+                    logger.error(f"ChatResumeAPIView: Error during resume streaming: {e}", exc_info=True)
+                    yield create_sse_data({'type': 'error', 'message': f'Resume streaming error: {str(e)}'})
 
-                # 计算并发送上下文Token使用信息
+                # 如果已经在流中检测到中断，直接返回
+                if interrupt_detected:
+                    logger.info("ChatResumeAPIView: Interrupt was detected in stream, returning early")
+                    yield "data: [DONE]\n\n"
+                    return
+
+                # 备用检查 - 通过 aget_state 检查是否有新的 interrupt
                 try:
-                    from requirements.context_limits import context_checker
-                    context_limit = active_config.context_limit or 128000
-                    
-                    # 获取当前会话的所有消息来计算token
-                    current_state = await runnable_to_invoke.aget_state(invoke_config)
-                    all_messages = current_state.values.get("messages", []) if current_state.values else []
-                    
-                    # 计算所有消息的token总数
-                    total_tokens = 0
-                    for msg in all_messages:
-                        if hasattr(msg, 'content') and msg.content:
-                            content = msg.content if isinstance(msg.content, str) else str(msg.content)
-                            total_tokens += context_checker.count_tokens(content, active_config.name or "gpt-4o")
-                    
-                    logger.info(f"[Context Update] Chat mode: {total_tokens}/{context_limit} tokens")
-                    yield create_sse_data({
-                        'type': 'context_update',
-                        'context_token_count': total_tokens,
-                        'context_limit': context_limit
-                    })
+                    current_state = await agent_executor.aget_state(invoke_config)
+                    if current_state and hasattr(current_state, 'tasks'):
+                        for task in current_state.tasks:
+                            if hasattr(task, 'interrupts') and task.interrupts:
+                                for interrupt in task.interrupts:
+                                    interrupt_value = interrupt.value if hasattr(interrupt, 'value') else interrupt
+                                    action_requests = []
+                                    if isinstance(interrupt_value, dict):
+                                        action_requests = interrupt_value.get('action_requests', [])
+                                    elif hasattr(interrupt_value, 'action_requests'):
+                                        action_requests = interrupt_value.action_requests
+
+                                    if action_requests:
+                                        interrupt_id = getattr(interrupt, 'id', None) or str(id(interrupt))
+                                        yield create_sse_data({
+                                            'type': 'interrupt',
+                                            'interrupt_id': interrupt_id,
+                                            'action_requests': [
+                                                {
+                                                    'name': ar.get('name', ar.get('action_name', 'unknown')) if isinstance(ar, dict) else getattr(ar, 'name', 'unknown'),
+                                                    'args': ar.get('arguments', ar.get('args', {})) if isinstance(ar, dict) else getattr(ar, 'arguments', {}),
+                                                    'description': ar.get('description', '') if isinstance(ar, dict) else getattr(ar, 'description', ''),
+                                                }
+                                                for ar in action_requests
+                                            ],
+                                            'session_id': session_id,
+                                            'thread_id': thread_id,
+                                        })
+                                        yield "data: [DONE]\n\n"
+                                        return
                 except Exception as e:
-                    logger.warning(f"ChatStreamAPIView: Failed to calculate token count: {e}")
+                    logger.warning(f"ChatResumeAPIView: Error checking interrupt state: {e}")
 
-                # 发送完成信号
                 yield create_sse_data({'type': 'complete'})
-
-                # 发送流结束标记
                 yield "data: [DONE]\n\n"
 
         except Exception as e:
-            logger.error(f"ChatStreamAPIView: Error in stream generator: {e}", exc_info=True)
-            yield create_sse_data({'type': 'error', 'message': f'Generator error: {str(e)}'})
+            logger.error(f"ChatResumeAPIView: Error in resume generator: {e}", exc_info=True)
+            yield create_sse_data({'type': 'error', 'message': f'Resume error: {str(e)}'})
 
     async def post(self, request, *args, **kwargs):
-        """处理流式聊天请求"""
+        """处理 HITL 恢复请求"""
         try:
-            # 手动认证（异步）
             user = await self.authenticate_request(request)
             request.user = user
-            logger.info(f"ChatStreamAPIView: Received POST request from user {user.id}")
+            logger.info(f"ChatResumeAPIView: Received resume request from user {user.id}")
         except AuthenticationFailed as e:
-            error_data = create_sse_data({
-                'type': 'error',
-                'message': str(e),
-                'code': 401
-            })
-            return StreamingHttpResponse(
-                iter([error_data]),
-                content_type='text/event-stream; charset=utf-8',
-                status=401
-            )
+            from django.http import JsonResponse
+            return JsonResponse({'error': str(e), 'code': 401}, status=401)
 
-        # 解析JSON数据
         try:
             import json as json_module
             body_data = json_module.loads(request.body.decode('utf-8'))
         except (json_module.JSONDecodeError, UnicodeDecodeError) as e:
-            error_data = create_sse_data({
-                'type': 'error',
-                'message': f'Invalid JSON data: {str(e)}',
-                'code': 400
-            })
-            return StreamingHttpResponse(
-                iter([error_data]),
-                content_type='text/event-stream; charset=utf-8',
-                status=400
-            )
+            from django.http import JsonResponse
+            return JsonResponse({'error': f'Invalid JSON: {str(e)}', 'code': 400}, status=400)
 
-        user_message_content = body_data.get('message')
         session_id = body_data.get('session_id')
         project_id = body_data.get('project_id')
-        image_base64 = body_data.get('image')  # 图片base64编码（不含前缀）
+        decision_type = body_data.get('decision', 'approve')  # 'approve' or 'reject'
 
-        # 知识库相关参数
-        knowledge_base_id = body_data.get('knowledge_base_id')
-        use_knowledge_base = body_data.get('use_knowledge_base', True)
-        similarity_threshold = body_data.get('similarity_threshold', 0.5)
-        top_k = body_data.get('top_k', 5)
-
-        # 提示词相关参数
-        prompt_id = body_data.get('prompt_id')  # 用户指定的提示词ID
-
-        # 验证项目ID是否提供
         if not project_id:
-            error_data = create_sse_data({
-                'type': 'error',
-                'message': 'project_id is required',
-                'code': status.HTTP_400_BAD_REQUEST
-            })
-            return StreamingHttpResponse(
-                iter([error_data]),
-                content_type='text/event-stream; charset=utf-8',
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            from django.http import JsonResponse
+            return JsonResponse({'error': 'project_id is required', 'code': 400}, status=400)
+
+        if not session_id:
+            from django.http import JsonResponse
+            return JsonResponse({'error': 'session_id is required', 'code': 400}, status=400)
 
         # 检查项目权限
-        project = await sync_to_async(self._check_project_permission)(request.user, project_id)
+        project = await sync_to_async(check_project_permission)(request.user, project_id)
         if not project:
-            error_data = create_sse_data({
-                'type': 'error',
-                'message': "You don't have permission to access this project or project doesn't exist",
-                'code': status.HTTP_403_FORBIDDEN
-            })
-            return StreamingHttpResponse(
-                iter([error_data]),
-                content_type='text/event-stream; charset=utf-8',
-                status=status.HTTP_403_FORBIDDEN
-            )
+            from django.http import JsonResponse
+            return JsonResponse({'error': 'Project access denied', 'code': 403}, status=403)
 
-        is_new_session = False
-        if not session_id:
-            session_id = uuid.uuid4().hex
-            is_new_session = True
-            logger.info(f"ChatStreamAPIView: Generated new session_id: {session_id}")
+        # 构建 thread_id
+        thread_id = f"{request.user.id}_{project_id}_{session_id}"
 
-        # 如果是新会话，立即创建ChatSession对象
-        if is_new_session:
-            try:
-                # 获取关联的提示词对象
-                prompt_obj = None
-                if prompt_id:
-                    try:
-                        prompt_obj = await sync_to_async(UserPrompt.objects.get)(
-                            id=prompt_id,
-                            user=request.user,
-                            is_active=True
-                        )
-                    except UserPrompt.DoesNotExist:
-                        logger.warning(f"ChatStreamAPIView: Prompt {prompt_id} not found or inactive")
-                
-                await sync_to_async(ChatSession.objects.create)(
-                    user=request.user,
-                    session_id=session_id,
-                    project=project,
-                    prompt=prompt_obj,
-                    title=f"新对话 - {user_message_content[:30]}"
-                )
-                logger.info(f"ChatStreamAPIView: Created new ChatSession entry for session_id: {session_id}, prompt_id: {prompt_id}")
-            except Exception as e:
-                logger.error(f"ChatStreamAPIView: Failed to create ChatSession entry: {e}", exc_info=True)
-
-
-        if not user_message_content:
-            logger.warning("ChatStreamAPIView: Message content is required but not provided.")
-            error_data = create_sse_data({
-                'type': 'error',
-                'message': 'Message content is required',
-                'code': status.HTTP_400_BAD_REQUEST
-            })
-            return StreamingHttpResponse(
-                iter([error_data]),
-                content_type='text/event-stream; charset=utf-8',
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # 创建异步生成器
         async def async_generator():
-            async for chunk in self._create_sse_generator(
-                request, user_message_content, session_id, project_id, project,
-                knowledge_base_id, use_knowledge_base, similarity_threshold, top_k, prompt_id, image_base64
+            async for chunk in self._create_resume_generator(
+                request, thread_id, decision_type, session_id, project_id
             ):
                 yield chunk
 
@@ -2515,3 +2146,439 @@ class KnowledgeRAGAPIView(APIView):
                 {'error': f'查询失败: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+# ============== 用户工具审批偏好 API ==============
+
+from .models import UserToolApproval
+from .serializers import UserToolApprovalSerializer, UserToolApprovalBatchSerializer
+
+
+class UserToolApprovalViewSet(viewsets.ModelViewSet):
+    """
+    用户工具审批偏好管理
+
+    支持"记住审批选择"功能：
+    - 用户在 HITL 审批时可选择"始终允许"或"始终拒绝"
+    - 后续相同工具的调用将自动应用已保存的决策
+    """
+    serializer_class = UserToolApprovalSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """只返回当前用户的审批偏好"""
+        return UserToolApproval.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        """创建时自动关联当前用户"""
+        serializer.save(user=self.request.user)
+
+    @action(detail=False, methods=['get'])
+    def available_tools(self, request):
+        """
+        获取可配置审批偏好的工具列表
+
+        返回所有工具及其当前用户的偏好设置，按 MCP 分组
+        数据来源：
+        1. DEFAULT_HIGH_RISK_TOOLS - 内置高风险工具
+        2. MCPTool - 从数据库读取的 MCP 工具
+        """
+        from mcp_tools.models import MCPTool
+
+        user = request.user
+        session_id = request.query_params.get('session_id')
+
+        # 获取用户当前的偏好
+        user_approvals = {}
+        approvals = UserToolApproval.objects.filter(user=user)
+        if session_id:
+            approvals = approvals.filter(
+                Q(scope='permanent') | Q(scope='session', session_id=session_id)
+            )
+        else:
+            approvals = approvals.filter(scope='permanent')
+
+        for approval in approvals:
+            user_approvals[approval.tool_name] = {
+                'policy': approval.policy,
+                'scope': approval.scope,
+            }
+
+        # 构建返回数据：分组展示
+        tool_groups = []
+
+        # 1. 内置工具组（按实际工具分类展示）
+        # Playwright 脚本管理工具
+        playwright_builtin_tools = [
+            {'tool_name': 'save_playwright_script', 'description': '保存 Playwright 自动化脚本到数据库'},
+            {'tool_name': 'list_playwright_scripts', 'description': '列出自动化脚本列表'},
+            {'tool_name': 'get_playwright_script', 'description': '获取脚本详细信息和代码'},
+            {'tool_name': 'update_playwright_script', 'description': '更新已有脚本内容'},
+            {'tool_name': 'execute_playwright_script', 'description': '执行自动化脚本（需审批）'},
+            {'tool_name': 'get_script_execution_result', 'description': '获取脚本执行结果'},
+        ]
+
+        # Skill 工具
+        skill_builtin_tools = [
+            {'tool_name': 'read_skill_content', 'description': '读取 Skill 的 SKILL.md 内容'},
+            {'tool_name': 'execute_skill_script', 'description': '执行 Skill 脚本命令（需审批）'},
+        ]
+
+        # Diagram 工具
+        diagram_builtin_tools = [
+            {'tool_name': 'display_diagram', 'description': '创建新的 drawio 图表'},
+            {'tool_name': 'edit_diagram', 'description': '编辑现有的 drawio 图表'},
+        ]
+
+        # 组装 Playwright 组
+        playwright_tools_for_display = []
+        for t in playwright_builtin_tools:
+            playwright_tools_for_display.append({
+                'tool_name': t['tool_name'],
+                'description': t['description'],
+                'allowed_decisions': ['approve', 'reject'],
+                'current_policy': user_approvals.get(t['tool_name'], {}).get('policy', 'ask_every_time'),
+                'current_scope': user_approvals.get(t['tool_name'], {}).get('scope', 'permanent'),
+            })
+        tool_groups.append({
+            'group_name': 'Playwright 脚本工具',
+            'group_id': 'builtin_playwright',
+            'tools': playwright_tools_for_display,
+        })
+
+        # 组装 Skill 组
+        skill_tools_for_display = []
+        for t in skill_builtin_tools:
+            skill_tools_for_display.append({
+                'tool_name': t['tool_name'],
+                'description': t['description'],
+                'allowed_decisions': ['approve', 'reject'],
+                'current_policy': user_approvals.get(t['tool_name'], {}).get('policy', 'ask_every_time'),
+                'current_scope': user_approvals.get(t['tool_name'], {}).get('scope', 'permanent'),
+            })
+        tool_groups.append({
+            'group_name': 'Skill 工具',
+            'group_id': 'builtin_skill',
+            'tools': skill_tools_for_display,
+        })
+
+        # 组装 Diagram 组
+        diagram_tools_for_display = []
+        for t in diagram_builtin_tools:
+            diagram_tools_for_display.append({
+                'tool_name': t['tool_name'],
+                'description': t['description'],
+                'allowed_decisions': ['approve', 'reject'],
+                'current_policy': user_approvals.get(t['tool_name'], {}).get('policy', 'ask_every_time'),
+                'current_scope': user_approvals.get(t['tool_name'], {}).get('scope', 'permanent'),
+            })
+        tool_groups.append({
+            'group_name': 'Diagram 工具',
+            'group_id': 'builtin_diagram',
+            'tools': diagram_tools_for_display,
+        })
+
+        # 2. MCP 工具组（从数据库读取，按 MCP 分组）
+        from mcp_tools.models import RemoteMCPConfig
+        mcp_configs = RemoteMCPConfig.objects.filter(is_active=True).prefetch_related('tools')
+
+        for mcp_config in mcp_configs:
+            mcp_tools = []
+            for tool in mcp_config.tools.all():
+                mcp_tools.append({
+                    'tool_name': tool.name,
+                    'description': tool.description or f"[{mcp_config.name}] {tool.name}",
+                    'allowed_decisions': ['approve', 'reject'],
+                    'current_policy': user_approvals.get(tool.name, {}).get('policy', 'ask_every_time'),
+                    'current_scope': user_approvals.get(tool.name, {}).get('scope', 'permanent'),
+                    'require_hitl': tool.effective_require_hitl,
+                })
+
+            if mcp_tools:
+                tool_groups.append({
+                    'group_name': mcp_config.name,
+                    'group_id': f'mcp_{mcp_config.id}',
+                    'tools': mcp_tools,
+                })
+
+        # 兼容旧版：扁平化的工具列表
+        all_tools = []
+        for group in tool_groups:
+            all_tools.extend(group['tools'])
+
+        return Response({
+            'tools': all_tools,  # 兼容旧版前端
+            'tool_groups': tool_groups,  # 新版分组数据
+            'policy_choices': [
+                {'value': 'always_allow', 'label': '始终允许'},
+                {'value': 'always_reject', 'label': '始终拒绝'},
+                {'value': 'ask_every_time', 'label': '每次询问'},
+            ],
+            'scope_choices': [
+                {'value': 'session', 'label': '仅本次会话'},
+                {'value': 'permanent', 'label': '永久生效'},
+            ],
+        })
+
+    @action(detail=False, methods=['post'])
+    def batch_update(self, request):
+        """
+        批量更新工具审批偏好
+
+        请求体示例：
+        {
+            "approvals": [
+                {"tool_name": "execute_script", "policy": "always_allow", "scope": "permanent"},
+                {"tool_name": "run_playwright", "policy": "ask_every_time", "scope": "session", "session_id": "xxx"}
+            ]
+        }
+        """
+        user = request.user
+        approvals_data = request.data.get('approvals', [])
+
+        if not approvals_data:
+            return Response(
+                {'error': '请提供要更新的审批偏好'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        updated = []
+        errors = []
+
+        for item in approvals_data:
+            serializer = UserToolApprovalBatchSerializer(data=item)
+            if not serializer.is_valid():
+                errors.append({
+                    'tool_name': item.get('tool_name', 'unknown'),
+                    'errors': serializer.errors
+                })
+                continue
+
+            data = serializer.validated_data
+            tool_name = data['tool_name']
+            policy = data['policy']
+            scope = data.get('scope', 'permanent')
+            session_id = data.get('session_id')
+
+            # 查找或创建偏好记录
+            if scope == 'permanent':
+                approval, created = UserToolApproval.objects.update_or_create(
+                    user=user,
+                    tool_name=tool_name,
+                    scope='permanent',
+                    defaults={'policy': policy, 'session_id': None}
+                )
+            else:
+                approval, created = UserToolApproval.objects.update_or_create(
+                    user=user,
+                    tool_name=tool_name,
+                    scope='session',
+                    session_id=session_id,
+                    defaults={'policy': policy}
+                )
+
+            updated.append({
+                'tool_name': tool_name,
+                'policy': policy,
+                'scope': scope,
+                'created': created
+            })
+
+        return Response({
+            'updated': updated,
+            'errors': errors if errors else None
+        })
+
+    @action(detail=False, methods=['post'])
+    def reset(self, request):
+        """
+        重置用户的工具审批偏好
+
+        可选参数：
+        - tool_name: 只重置指定工具的偏好
+        - scope: 只重置指定范围的偏好 (session/permanent)
+        - session_id: 只重置指定会话的偏好
+        """
+        user = request.user
+        tool_name = request.data.get('tool_name')
+        scope = request.data.get('scope')
+        session_id = request.data.get('session_id')
+
+        queryset = UserToolApproval.objects.filter(user=user)
+
+        if tool_name:
+            queryset = queryset.filter(tool_name=tool_name)
+        if scope:
+            queryset = queryset.filter(scope=scope)
+        if session_id:
+            queryset = queryset.filter(session_id=session_id)
+
+        count = queryset.count()
+        queryset.delete()
+
+        return Response({
+            'message': f'已重置 {count} 条审批偏好',
+            'deleted_count': count
+        })
+
+
+class TokenUsageStatsAPIView(APIView):
+    """
+    Token 使用统计 API
+
+    提供按用户和按时间维度的 Token 使用量统计。
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        获取 Token 使用统计
+
+        查询参数：
+        - start_date: 开始日期 (YYYY-MM-DD)
+        - end_date: 结束日期 (YYYY-MM-DD)
+        - group_by: 分组方式 (day/week/month)，默认 day
+        - user_id: 指定用户ID（仅管理员可用）
+        """
+        from django.db.models import Sum, Count
+        from django.db.models.functions import TruncDate, TruncWeek, TruncMonth
+        from datetime import datetime, timedelta
+
+        user = request.user
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        group_by = request.query_params.get('group_by', 'day')
+        target_user_id = request.query_params.get('user_id')
+
+        # 权限检查：只有管理员可以查看其他用户的统计
+        if target_user_id and not user.is_superuser:
+            return Response(
+                {'error': '无权查看其他用户的统计信息'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # 解析日期
+        try:
+            # 使用本地时区的当前日期，避免 UTC 时区偏差
+            from django.utils import timezone as tz
+            local_now = tz.localtime(tz.now())
+            today = local_now.date()
+            
+            if start_date_str:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            else:
+                # 根据 group_by 自动计算起始日期
+                if group_by == 'day':
+                    start_date = today
+                elif group_by == 'week':
+                    # 本周一
+                    start_date = today - timedelta(days=today.weekday())
+                elif group_by == 'month':
+                    # 本月1号
+                    start_date = today.replace(day=1)
+                else:
+                    start_date = (timezone.now() - timedelta(days=30)).date()
+
+            if end_date_str:
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            else:
+                end_date = today
+        except ValueError:
+            return Response(
+                {'error': '日期格式错误，请使用 YYYY-MM-DD'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 构建查询
+        import logging
+        logger = logging.getLogger('langgraph_integration')
+        logger.info(f"[TokenUsageStats] 查询日期范围: {start_date} ~ {end_date}, group_by={group_by}")
+        
+        queryset = ChatSession.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date
+        )
+        
+        logger.info(f"[TokenUsageStats] 查询到 {queryset.count()} 个会话")
+
+        # 用于个人统计的查询（只看自己的数据）
+        if target_user_id:
+            personal_queryset = queryset.filter(user_id=target_user_id)
+        else:
+            personal_queryset = queryset.filter(user=user)
+        
+        # 用户排行榜使用全部数据（所有人都能看到排行榜）
+        all_users_queryset = queryset
+
+        # 用户维度统计（排行榜 - 使用全部数据）
+        user_stats = all_users_queryset.values('user__username', 'user_id').annotate(
+            total_input=Sum('total_input_tokens'),
+            total_output=Sum('total_output_tokens'),
+            total_tokens=Sum('total_tokens'),
+            total_requests=Sum('request_count'),
+            session_count=Count('id')
+        ).order_by('-total_tokens')
+
+        # 时间维度统计（使用个人数据）
+        trunc_func = {
+            'day': TruncDate,
+            'week': TruncWeek,
+            'month': TruncMonth
+        }.get(group_by, TruncDate)
+
+        time_stats = personal_queryset.annotate(
+            period=trunc_func('created_at')
+        ).values('period').annotate(
+            total_input=Sum('total_input_tokens'),
+            total_output=Sum('total_output_tokens'),
+            total_tokens=Sum('total_tokens'),
+            total_requests=Sum('request_count'),
+            session_count=Count('id')
+        ).order_by('period')
+
+        # 总计统计（使用个人数据）
+        total_stats = personal_queryset.aggregate(
+            total_input=Sum('total_input_tokens'),
+            total_output=Sum('total_output_tokens'),
+            total_tokens=Sum('total_tokens'),
+            total_requests=Sum('request_count'),
+            session_count=Count('id')
+        )
+
+        return Response({
+            'period': {
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat(),
+                'group_by': group_by
+            },
+            'total': {
+                'input_tokens': total_stats['total_input'] or 0,
+                'output_tokens': total_stats['total_output'] or 0,
+                'total_tokens': total_stats['total_tokens'] or 0,
+                'request_count': total_stats['total_requests'] or 0,
+                'session_count': total_stats['session_count'] or 0
+            },
+            'by_user': [
+                {
+                    'user_id': item['user_id'],
+                    'username': item['user__username'],
+                    'input_tokens': item['total_input'] or 0,
+                    'output_tokens': item['total_output'] or 0,
+                    'total_tokens': item['total_tokens'] or 0,
+                    'request_count': item['total_requests'] or 0,
+                    'session_count': item['session_count'] or 0
+                }
+                for item in user_stats
+            ],
+            'by_time': [
+                {
+                    'period': item['period'].isoformat() if item['period'] else None,
+                    'input_tokens': item['total_input'] or 0,
+                    'output_tokens': item['total_output'] or 0,
+                    'total_tokens': item['total_tokens'] or 0,
+                    'request_count': item['total_requests'] or 0,
+                    'session_count': item['session_count'] or 0
+                }
+                for item in time_stats
+            ]
+        })

@@ -86,15 +86,15 @@
             <a-textarea
               v-model="formData.system_prompt"
               placeholder="设置模型的默认 System Prompt（可选）"
-              :auto-size="{ minRows: 3, maxRows: 6 }"
+              :auto-size="{ minRows: 1, maxRows: 6 }"
               :max-length="2000"
               show-word-limit
             />
           </a-form-item>
         </a-col>
 
-        <!-- 第五行：开关区域 + 上下文限制 -->
-        <a-col :span="8">
+        <!-- 第五行：上下文限制 + 基础开关 -->
+        <a-col :span="6">
           <a-form-item field="context_limit" label="上下文限制">
             <a-input-number
               v-model="formData.context_limit"
@@ -105,19 +105,45 @@
             />
           </a-form-item>
         </a-col>
-        <a-col :span="8">
-          <a-form-item field="supports_vision" label="图片">
+        <a-col :span="6">
+          <a-form-item field="supports_vision" label="多模态">
             <a-space>
               <a-switch v-model="formData.supports_vision" />
               <span class="switch-desc">Vision</span>
             </a-space>
           </a-form-item>
         </a-col>
-        <a-col :span="8">
-          <a-form-item field="is_active" label="配置状态">
+        <a-col :span="6">
+          <a-form-item field="enable_streaming" label="流式输出">
+            <a-space>
+              <a-switch v-model="formData.enable_streaming" checked-color="#722ed1" />
+              <span class="switch-desc">Stream</span>
+            </a-space>
+          </a-form-item>
+        </a-col>
+        <a-col :span="6">
+          <a-form-item field="is_active" label="状态">
             <a-space>
               <a-switch v-model="formData.is_active" checked-color="#00b42a" />
-              <span class="switch-desc">已激活</span>
+              <span class="switch-desc">激活</span>
+            </a-space>
+          </a-form-item>
+        </a-col>
+
+        <!-- 第六行：中间件配置 -->
+        <a-col :span="8">
+          <a-form-item field="enable_summarization" label="上下文摘要">
+            <a-space>
+              <a-switch v-model="formData.enable_summarization" checked-color="#165dff" />
+              <span class="switch-desc">超限时自动压缩对话历史</span>
+            </a-space>
+          </a-form-item>
+        </a-col>
+        <a-col :span="8">
+          <a-form-item field="enable_hitl" label="人工审批">
+            <a-space>
+              <a-switch v-model="formData.enable_hitl" checked-color="#f77234" />
+              <span class="switch-desc">高风险操作需确认</span>
             </a-space>
           </a-form-item>
         </a-col>
@@ -166,6 +192,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'submit', data: CreateLlmConfigRequest | PartialUpdateLlmConfigRequest, id?: number): void;
   (e: 'cancel'): void;
+  (e: 'auto-saved', closeModal?: boolean): void;
 }>();
 
 const formRef = ref<FormInstance | null>(null);
@@ -181,12 +208,18 @@ const defaultFormData: CreateLlmConfigRequest = {
   system_prompt: '',
   supports_vision: false,
   context_limit: 128000,
+  enable_summarization: true,
+  enable_hitl: false,
+  enable_streaming: true,
   is_active: false,
 };
 const formData = ref<CreateLlmConfigRequest>({ ...defaultFormData });
 const currentConfigId = ref<number | null>(null);
 
-const isEditing = computed(() => !!props.configData?.id);
+// 编辑模式：考虑 props.configData 或自动保存后的 currentConfigId
+const isEditing = computed(() => !!(props.configData?.id || currentConfigId.value));
+// 获取当前配置ID（优先 props，其次是自动保存后的 currentConfigId）
+const effectiveConfigId = computed(() => props.configData?.id || currentConfigId.value);
 
 const formRules: Record<string, FieldRule[]> = {
   config_name: [{ required: true, message: '配置名称不能为空' }],
@@ -214,6 +247,9 @@ watch(
           system_prompt: props.configData.system_prompt || '',
           supports_vision: props.configData.supports_vision || false,
           context_limit: props.configData.context_limit || 128000,
+          enable_summarization: props.configData.enable_summarization ?? true,
+          enable_hitl: props.configData.enable_hitl || false,
+          enable_streaming: props.configData.enable_streaming ?? true,
           is_active: props.configData.is_active,
         };
       } else {
@@ -239,8 +275,8 @@ const handleSubmit = async () => {
 
   let submitData: CreateLlmConfigRequest | PartialUpdateLlmConfigRequest;
 
-  if (isEditing.value && props.configData?.id) {
-    // 编辑模式
+  if (isEditing.value && effectiveConfigId.value) {
+    // 编辑模式（包括自动保存后的情况）
     const partialData: PartialUpdateLlmConfigRequest = {
       config_name: formData.value.config_name,
       provider: formData.value.provider,
@@ -260,8 +296,17 @@ const handleSubmit = async () => {
     if (formData.value.context_limit !== undefined) { // 包含上下文限制
       partialData.context_limit = formData.value.context_limit;
     }
+    if (formData.value.enable_summarization !== undefined) { // 包含上下文摘要
+      partialData.enable_summarization = formData.value.enable_summarization;
+    }
+    if (formData.value.enable_hitl !== undefined) { // 包含人工审批
+      partialData.enable_hitl = formData.value.enable_hitl;
+    }
+    if (formData.value.enable_streaming !== undefined) { // 包含流式输出
+      partialData.enable_streaming = formData.value.enable_streaming;
+    }
     submitData = partialData;
-    emit('submit', submitData, props.configData.id);
+    emit('submit', submitData, effectiveConfigId.value);
   } else {
     // 新增模式
     submitData = { ...formData.value };
@@ -334,6 +379,7 @@ const testLlmModel = async () => {
       configId = createResp.data.id;
       currentConfigId.value = configId;
       Message.success('配置已自动保存');
+      emit('auto-saved', false); // false 表示不关闭弹窗
     } else if (isEditing.value) {
       // 编辑模式：先保存更改
       const partialData: PartialUpdateLlmConfigRequest = {

@@ -12,7 +12,7 @@
 <script setup lang="ts">
 import PermissionTreeSelector from './PermissionTreeSelector.vue';
 
-const props = defineProps<{
+defineProps<{
   type: 'user' | 'group';
   id: number;
 }>();

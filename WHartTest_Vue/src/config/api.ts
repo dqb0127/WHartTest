@@ -81,7 +81,6 @@ export const API_ENDPOINTS = {
   // LangGraph相关
   LANGGRAPH: {
     CHAT: '/lg/chat/',
-    CHAT_STREAM: '/lg/chat/stream/',
     CHAT_HISTORY: '/lg/chat/history/',
     CHAT_SESSIONS: '/lg/chat/sessions/',
     LLM_CONFIGS: '/lg/llm-configs/',
