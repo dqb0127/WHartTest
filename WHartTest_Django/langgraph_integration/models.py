@@ -11,6 +11,7 @@ class LLMConfig(models.Model):
     
     PROVIDER_CHOICES = [
         ('openai_compatible', 'OpenAI 兼容'),
+        ('qwen', 'Qwen/通义千问'),
     ]
     
     # 配置标识字段（新增）

@@ -52,6 +52,10 @@ langchain==1.2.3
 # https://github.com/langchain-ai/langchain/blob/master/libs/partners/openai/LICENSE
 langchain-openai==1.1.7
 
+# LangChain Qwen集成 - MIT许可证
+# https://github.com/langchain-ai/langchain-qwq/blob/main/LICENSE
+langchain-qwq==0.3.4
+
 # LangChain Anthropic/Claude 支持（已移除 - 保留注释以便记录）
 # 如果将来需要使用 Anthropic/Claude，请取消注释以下依赖：
 # langchain-anthropic>=0.3.0

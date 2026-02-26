@@ -97,38 +97,67 @@ logger = logging.getLogger(__name__) # Initialize logger
 def create_llm_instance(active_config, temperature=0.7):
     """
     根据配置创建LLM实例
-    统一使用OpenAI兼容格式，支持所有兼容的服务商
+    支持多供应商：
+    - openai_compatible: ChatOpenAI（OpenAI兼容协议）
+    - qwen: ChatQwen（阿里云百炼通义千问）
     
     关键参数说明：
     - timeout: 请求超时时间（秒），防止无限期等待
     - max_retries: 最大重试次数，处理临时网络问题
     """
     model_identifier = active_config.name or "gpt-3.5-turbo"
+    provider = (getattr(active_config, "provider", None) or "openai_compatible").strip()
     
     # 从配置获取超时设置，默认120秒（LLM响应可能较慢）
     request_timeout = getattr(active_config, 'request_timeout', None) or 120
     # 重试次数，默认3次
     max_retries = getattr(active_config, 'max_retries', None) or 3
-    
-    llm_kwargs = {
-        "model": model_identifier,
-        "temperature": temperature,
-        "api_key": active_config.api_key,
-        "base_url": active_config.api_url,
-        "timeout": request_timeout,  # 单次请求超时
-        "max_retries": max_retries,  # 自动重试次数
-    }
-    
+
+    base_url = (active_config.api_url or "").strip() or None
+    api_key = (active_config.api_key or "").strip()
+
     try:
-        llm = ChatOpenAI(**llm_kwargs)
+        if provider == "qwen":
+            try:
+                from langchain_qwq import ChatQwen
+            except ImportError as e:
+                raise ImportError(
+                    "Qwen provider requires langchain-qwq. Please install dependencies from requirements.txt."
+                ) from e
+
+            llm_kwargs = {
+                "model": model_identifier,
+                "temperature": temperature,
+                "timeout": request_timeout,
+                "max_retries": max_retries,
+            }
+            if api_key:
+                llm_kwargs["api_key"] = api_key
+            if base_url:
+                llm_kwargs["base_url"] = base_url
+
+            llm = ChatQwen(**llm_kwargs)
+        else:
+            if provider != "openai_compatible":
+                logger.warning("Unknown provider '%s', fallback to openai_compatible", provider)
+            llm_kwargs = {
+                "model": model_identifier,
+                "temperature": temperature,
+                "api_key": api_key,
+                "base_url": base_url,
+                "timeout": request_timeout,  # 单次请求超时
+                "max_retries": max_retries,  # 自动重试次数
+            }
+            llm = ChatOpenAI(**llm_kwargs)
+
         logger.info(
-            f"Initialized LLM: model={model_identifier}, base_url={active_config.api_url}, "
-            f"timeout={request_timeout}s, max_retries={max_retries}"
+            "Initialized LLM: provider=%s, model=%s, base_url=%s, timeout=%ss, max_retries=%s",
+            provider, model_identifier, base_url, request_timeout, max_retries
         )
     except Exception as e:
         logger.error(
-            f"Failed to initialize LLM: model={model_identifier}, base_url={active_config.api_url}, "
-            f"error={type(e).__name__}: {e}",
+            "Failed to initialize LLM: provider=%s, model=%s, base_url=%s, error=%s: %s",
+            provider, model_identifier, base_url, type(e).__name__, e,
             exc_info=True
         )
         raise
@@ -294,33 +323,16 @@ class LLMConfigViewSet(BaseModelViewSet):
     @action(detail=True, methods=['post'])
     def test_connection(self, request, pk=None):
         """测试LLM配置连接"""
-        import requests as http_requests
         config = self.get_object()
-        api_url = config.api_url.rstrip('/')
-        headers = {'Content-Type': 'application/json'}
-        if config.api_key:
-            headers['Authorization'] = f'Bearer {config.api_key}'
+
         try:
-            resp = http_requests.post(
-                f'{api_url}/chat/completions',
-                json={'model': config.name, 'messages': [{'role': 'user', 'content': 'Hi'}], 'max_tokens': 5},
-                headers=headers,
-                timeout=30
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            if data.get('choices') and len(data['choices']) > 0:
+            llm = create_llm_instance(config, temperature=0.1)
+            response = llm.invoke("Hi")
+            if getattr(response, "content", None):
                 return Response({'status': 'success', 'message': '连接测试成功'})
             return Response({'status': 'warning', 'message': '响应格式异常'}, status=status.HTTP_200_OK)
-        except http_requests.Timeout:
-            return Response({'status': 'error', 'message': '请求超时'}, status=status.HTTP_408_REQUEST_TIMEOUT)
-        except http_requests.RequestException as e:
+        except Exception as e:
             msg = str(e)
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    msg = e.response.json().get('error', {}).get('message', str(e))
-                except Exception:
-                    msg = e.response.text[:200] if e.response.text else str(e)
             return Response({'status': 'error', 'message': f'连接失败: {msg}'}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['post'])
@@ -867,7 +879,45 @@ class ChatAPIView(APIView):
                         logger.error(f"ChatAPIView: Failed to create agent with remote tools: {e}. Falling back to knowledge-enhanced chatbot.", exc_info=True)
 
                 if not runnable_to_invoke:
-                    logger.info("ChatAPIView: No remote tools or agent creation failed. Using knowledge-enhanced chatbot.")
+                    logger.info("ChatAPIView: No remote tools or agent creation failed. Trying middleware-enabled agent fallback.")
+
+                    fallback_tools = []
+                    if knowledge_base_id and use_knowledge_base:
+                        try:
+                            from knowledge.langgraph_integration import create_knowledge_tool
+                            knowledge_tool = create_knowledge_tool(
+                                knowledge_base_id=knowledge_base_id,
+                                user=request.user,
+                                similarity_threshold=similarity_threshold,
+                                top_k=top_k
+                            )
+                            fallback_tools.append(knowledge_tool)
+                            logger.info("ChatAPIView: Added knowledge tool in fallback path")
+                        except Exception as e:
+                            logger.warning(f"ChatAPIView: Failed to create fallback knowledge tool: {e}", exc_info=True)
+
+                    try:
+                        fallback_tool_names = [t.name for t in fallback_tools] if fallback_tools else None
+                        agent_executor = create_agent(
+                            llm,
+                            fallback_tools,
+                            checkpointer=actual_memory_checkpointer,
+                            middleware=get_middleware_from_config(
+                                active_config, llm, user=request.user,
+                                session_id=session_id, all_tool_names=fallback_tool_names
+                            ),
+                            system_prompt=effective_prompt,
+                        )
+                        runnable_to_invoke = agent_executor
+                        # 使用 create_agent 路径时 system_prompt 由参数注入，不再走手动 SystemMessage 注入逻辑
+                        is_agent_with_tools = True
+                        logger.info("ChatAPIView: Middleware-enabled fallback agent created with %d tools", len(fallback_tools))
+                    except Exception as e:
+                        logger.error(f"ChatAPIView: Failed to create fallback agent: {e}", exc_info=True)
+
+                # 兜底：极端情况下 create_agent 失败，回退到旧 StateGraph（无中间件）
+                if not runnable_to_invoke:
+                    logger.info("ChatAPIView: Falling back to legacy knowledge-enhanced chatbot graph (without middleware).")
                     is_agent_with_tools = False # Ensure flag is false for basic chatbot
 
                     def knowledge_enhanced_chatbot_node(state: AgentState):

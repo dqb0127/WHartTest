@@ -72,6 +72,89 @@ def _create_token_counter(model_name: str) -> Callable[[Iterable], int]:
     return token_counter
 
 
+def _resolve_effective_context_limit(
+    llm_config,
+    llm=None,
+    model_name: str = "gpt-4o",
+    default_limit: int = 128000,
+) -> int:
+    """
+    解析最终有效的上下文限制（安全优先）
+
+    规则：
+    1. 用户配置 context_limit（若有效）
+    2. 模型检测上限（Model Profile / 后备映射）
+    3. 两者都存在时取更小值，避免配置值超过模型真实上限导致摘要触发过晚
+    4. 都不可用时使用默认值
+    """
+    config_context_limit = getattr(llm_config, 'context_limit', None)
+    config_limit = (
+        int(config_context_limit)
+        if isinstance(config_context_limit, int) and config_context_limit > 0
+        else None
+    )
+
+    # 是否存在可靠的模型 profile 上下文上限
+    profile_limit = None
+    if llm is not None:
+        profile = getattr(llm, 'profile', None)
+        if isinstance(profile, dict):
+            max_input_tokens = profile.get('max_input_tokens')
+            if isinstance(max_input_tokens, int) and max_input_tokens > 0:
+                profile_limit = max_input_tokens
+
+    detected_limit = None
+    if llm is not None:
+        try:
+            detected = get_context_limit_from_llm(llm, fallback_model_name=model_name)
+            if isinstance(detected, int) and detected > 0:
+                detected_limit = detected
+        except Exception as e:
+            logger.warning("获取模型上下文限制失败，回退到配置/默认值: %s", e)
+
+    normalized_name = (model_name or "").lower()
+    trusted_fallback_prefixes = ("gpt-", "o1", "o3", "claude", "gemini")
+    trusted_fallback = any(normalized_name.startswith(prefix) for prefix in trusted_fallback_prefixes)
+
+    # 1) 优先使用 profile（最可靠）
+    if profile_limit:
+        if config_limit:
+            effective_limit = min(config_limit, profile_limit)
+            if config_limit > profile_limit:
+                logger.warning(
+                    "配置的 context_limit(%d) 超过模型 profile 上限(%d)，已自动使用更安全值 %d",
+                    config_limit, profile_limit, effective_limit
+                )
+        else:
+            effective_limit = profile_limit
+        return int(effective_limit)
+
+    # 2) 无 profile：仅对可信族(gpt/claude/gemini)使用回退映射做安全钳制
+    if config_limit and detected_limit and trusted_fallback:
+        effective_limit = min(config_limit, detected_limit)
+        if config_limit > detected_limit:
+            logger.warning(
+                "配置的 context_limit(%d) 超过模型回退上限(%d)，已自动使用更安全值 %d",
+                config_limit, detected_limit, effective_limit
+            )
+        return int(effective_limit)
+
+    # 3) 无 profile 且非可信回退（如 qwen 的 OpenAI 兼容接入）：优先信任用户配置
+    if config_limit:
+        if detected_limit and not trusted_fallback and config_limit != detected_limit:
+            logger.info(
+                "模型 %s 无可靠 profile，使用配置 context_limit=%d（忽略回退估算=%d）",
+                model_name, config_limit, detected_limit
+            )
+        return int(config_limit)
+
+    # 4) 最后兜底
+    if detected_limit:
+        return int(detected_limit)
+
+    return int(default_limit)
+
+
 # ============== 重试中间件配置 ==============
 
 def get_model_retry_middleware(
@@ -625,22 +708,20 @@ def get_middleware_from_config(
     enable_hitl = getattr(llm_config, 'enable_hitl', False)
     model_name = getattr(llm_config, 'name', 'gpt-4o')
 
-    # 上下文限制：优先使用 LLMConfig 中用户配置的值
-    config_context_limit = getattr(llm_config, 'context_limit', None)
-    if config_context_limit and config_context_limit > 0:
-        context_limit = config_context_limit
-    elif llm is not None:
-        # 后备：从 LLM 的 Model Profile 获取
-        context_limit = get_context_limit_from_llm(llm, fallback_model_name=model_name)
-    else:
-        context_limit = 128000
+    # 上下文限制：用户配置值与模型检测值取更小值（安全优先）
+    context_limit = _resolve_effective_context_limit(
+        llm_config=llm_config,
+        llm=llm,
+        model_name=model_name,
+        default_limit=128000,
+    )
 
     # 自动化 Agent 强制启用 HITL
     if agent_type == "automation":
         enable_hitl = True
 
     # 计算摘要触发阈值（上下文限制的 75%）
-    trigger_tokens = int(context_limit * 0.75)
+    trigger_tokens = max(1, int(context_limit * 0.75))
 
     # 决定摘要模型
     summarization_model = llm if enable_summarization else None
@@ -876,18 +957,17 @@ async def get_middleware_from_config_async(
     enable_hitl = getattr(llm_config, 'enable_hitl', False)
     model_name = getattr(llm_config, 'name', 'gpt-4o')
 
-    config_context_limit = getattr(llm_config, 'context_limit', None)
-    if config_context_limit and config_context_limit > 0:
-        context_limit = config_context_limit
-    elif llm is not None:
-        context_limit = get_context_limit_from_llm(llm, fallback_model_name=model_name)
-    else:
-        context_limit = 128000
+    context_limit = _resolve_effective_context_limit(
+        llm_config=llm_config,
+        llm=llm,
+        model_name=model_name,
+        default_limit=128000,
+    )
 
     if agent_type == "automation":
         enable_hitl = True
 
-    trigger_tokens = int(context_limit * 0.75)
+    trigger_tokens = max(1, int(context_limit * 0.75))
     summarization_model = llm if enable_summarization else None
 
     hitl_tools = None

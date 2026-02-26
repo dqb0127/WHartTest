@@ -44,7 +44,7 @@ from projects.models import Project
 from prompts.models import UserPrompt
 from mcp_tools.models import RemoteMCPConfig
 from mcp_tools.persistent_client import mcp_session_manager
-from requirements.context_limits import context_checker
+from requirements.context_limits import context_checker, get_context_limit_from_llm
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,74 @@ def process_mcp_tool_output(content: Any) -> tuple:
             summary = str(content)[:200]
     
     return content, summary
+
+
+def calculate_context_tokens(messages: List[Any], model_name: str = "gpt-4o") -> tuple[int, int, int]:
+    """
+    计算当前上下文 Token
+
+    优先使用最后一条带 usage_metadata 的消息；
+    如果 provider 未返回 usage_metadata，则回退到内容估算（与中间件保持一致的 3x 系数）。
+    """
+    # 1) 优先使用 usage_metadata（最准确）
+    for msg in reversed(messages):
+        if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
+            usage = msg.usage_metadata
+            input_tokens = usage.get('input_tokens', 0) or 0
+            output_tokens = usage.get('output_tokens', 0) or 0
+            total_tokens = usage.get('total_tokens', 0) or (input_tokens + output_tokens)
+
+            if total_tokens > 0:
+                return input_tokens, output_tokens, total_tokens
+
+    # 2) 回退到内容估算（避免 context_update 始终为 0）
+    content_tokens = 0
+    for msg in messages:
+        if hasattr(msg, 'content') and msg.content:
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            content_tokens += context_checker.count_tokens(content, model_name)
+
+    estimated_total = content_tokens * 3
+    return 0, 0, estimated_total
+
+
+def resolve_runtime_context_limit(config_context_limit: Optional[int], llm, model_name: str) -> int:
+    """
+    运行时上下文限制（与 middleware_config 保持一致）：
+    - 有 profile 时：min(config, profile)
+    - 无 profile 且可信回退族(gpt/claude/gemini)：min(config, detected)
+    - 无 profile 且非可信回退族（如 qwen OpenAI 兼容接入）：优先 config
+    """
+    config_limit = config_context_limit if isinstance(config_context_limit, int) and config_context_limit > 0 else None
+    detected_limit = get_context_limit_from_llm(llm, fallback_model_name=model_name) if llm is not None else None
+
+    profile_limit = None
+    if llm is not None:
+        profile = getattr(llm, 'profile', None)
+        if isinstance(profile, dict):
+            max_input_tokens = profile.get('max_input_tokens')
+            if isinstance(max_input_tokens, int) and max_input_tokens > 0:
+                profile_limit = max_input_tokens
+
+    normalized_name = (model_name or "").lower()
+    trusted_fallback_prefixes = ("gpt-", "o1", "o3", "claude", "gemini")
+    trusted_fallback = any(normalized_name.startswith(prefix) for prefix in trusted_fallback_prefixes)
+
+    if profile_limit:
+        if config_limit:
+            return min(config_limit, profile_limit)
+        return profile_limit
+
+    if config_limit and isinstance(detected_limit, int) and detected_limit > 0 and trusted_fallback:
+        return min(config_limit, detected_limit)
+
+    if config_limit:
+        return config_limit
+
+    if isinstance(detected_limit, int) and detected_limit > 0:
+        return detected_limit
+
+    return 128000
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -203,6 +271,7 @@ class AgentLoopStreamAPIView(View):
         try:
             # 3. 初始化 LLM
             llm = await sync_to_async(create_llm_instance)(active_config, temperature=0.7)
+            context_limit = resolve_runtime_context_limit(active_config.context_limit, llm, model_name)
 
             # 4. 加载 MCP 工具
             tools: List[Any] = []
@@ -525,19 +594,10 @@ class AgentLoopStreamAPIView(View):
                     current_state = await agent.aget_state(invoke_config)
                     all_messages = current_state.values.get("messages", []) if current_state.values else []
 
-                    # 获取最后一次 LLM 调用的 token 使用量
-                    # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
-                    input_tokens = 0
-                    output_tokens = 0
-                    for msg in reversed(all_messages):
-                        if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
-                            input_tokens = msg.usage_metadata.get('input_tokens', 0)
-                            output_tokens = msg.usage_metadata.get('output_tokens', 0)
-                            # 调试日志：打印原始 usage_metadata
-                            logger.info(f"AgentLoopStreamAPI: Raw usage_metadata = {msg.usage_metadata}")
-                            break  # 只取最后一条有 usage_metadata 的消息
-
-                    total_tokens = input_tokens + output_tokens
+                    # 获取当前上下文 token 使用量（优先 usage_metadata，回退估算）
+                    input_tokens, output_tokens, total_tokens = calculate_context_tokens(
+                        all_messages, model_name
+                    )
 
                     yield create_sse_data({
                         'type': 'context_update',
@@ -913,6 +973,7 @@ class AgentLoopResumeAPIView(View):
                 context_limit = active_config.context_limit or 128000
                 model_name = active_config.name or "gpt-4o"
                 llm = await sync_to_async(create_llm_instance)(active_config)
+                context_limit = resolve_runtime_context_limit(active_config.context_limit, llm, model_name)
 
                 # 4. 加载工具
                 tools = []
@@ -1140,17 +1201,10 @@ class AgentLoopResumeAPIView(View):
                     current_state = await agent.aget_state(config)
                     all_messages = current_state.values.get("messages", []) if current_state.values else []
 
-                    # 获取最后一次 LLM 调用的 token 使用量
-                    # 注意：每次 LLM 返回的 input_tokens 已包含完整上下文，不能累加
-                    input_tokens = 0
-                    output_tokens = 0
-                    for msg in reversed(all_messages):
-                        if hasattr(msg, 'usage_metadata') and msg.usage_metadata:
-                            input_tokens = msg.usage_metadata.get('input_tokens', 0)
-                            output_tokens = msg.usage_metadata.get('output_tokens', 0)
-                            break  # 只取最后一条有 usage_metadata 的消息
-
-                    total_tokens = input_tokens + output_tokens
+                    # 获取当前上下文 token 使用量（优先 usage_metadata，回退估算）
+                    input_tokens, output_tokens, total_tokens = calculate_context_tokens(
+                        all_messages, model_name
+                    )
 
                     yield create_sse_data({
                         'type': 'context_update',
