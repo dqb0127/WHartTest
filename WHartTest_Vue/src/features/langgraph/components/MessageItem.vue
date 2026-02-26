@@ -37,7 +37,7 @@
         />
       </div>
       
-      <div class="message-bubble">
+      <div ref="messageBubbleRef" class="message-bubble">
         <div v-if="message.isLoading" class="typing-indicator">
           <span></span>
           <span></span>
@@ -95,6 +95,12 @@
           :class="{ 'streaming-content': isStreamingMessage }"
           v-html="formattedContent"
         ></div>
+        <div v-if="canPreviewHtml && message.messageType === 'ai'" class="diagram-preview-actions">
+          <a-button type="outline" size="mini" class="diagram-preview-btn" @click="handlePreviewHtml">
+            <template #icon><icon-eye /></template>
+            预览HTML
+          </a-button>
+        </div>
       </div>
 
       <!-- 消息操作按钮 -->
@@ -119,11 +125,6 @@
             <template #icon><icon-delete /></template>
           </a-button>
         </a-tooltip>
-        <a-tooltip v-if="canPreviewHtml && message.messageType !== 'tool'" content="预览HTML" mini>
-          <a-button type="text" size="mini" class="action-btn" @click="handlePreviewHtml">
-            <template #icon><icon-eye /></template>
-          </a-button>
-        </a-tooltip>
       </div>
 
       <div class="message-time">{{ message.time }}</div>
@@ -133,7 +134,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, nextTick, onUnmounted, onUpdated, ref } from 'vue';
 import { Button as AButton, Tooltip as ATooltip, Message } from '@arco-design/web-vue';
 import { IconCopy, IconReply, IconRefresh, IconDelete, IconEye } from '@arco-design/web-vue/es/icon';
 import DOMPurify from 'dompurify';
@@ -210,6 +211,8 @@ const htmlPreviewContent = computed(() => {
 const canPreviewHtml = computed(() => {
   return Boolean(htmlPreviewContent.value);
 });
+const messageBubbleRef = ref<HTMLElement | null>(null);
+let previewScrollRafId: number | null = null;
 
 // 复制到剪贴板（兼容HTTP环境）
 const handleCopy = async () => {
@@ -342,6 +345,7 @@ const handlePreviewHtml = () => {
 };
 
 const REQUIREMENT_DOC_ID_RE = /需求文档ID[:：]\s*([0-9a-fA-F-]{36})/;
+const CODE_LANG_CLASS_RE = /\blanguage-([a-zA-Z0-9_+-]+)\b/;
 
 const replaceDocImgPlaceholders = (content: string): string => {
   if (!content || !content.includes('docimg://')) return content;
@@ -358,6 +362,75 @@ const escapeHtml = (text: string): string => {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+};
+
+const getCodePreviewText = (preElement: HTMLElement, maxLines = 3, fromEnd = false): string => {
+  const codeElement = preElement.querySelector('code');
+  const rawCode = (codeElement?.textContent || preElement.textContent || '').replace(/\r\n/g, '\n');
+  const lines = rawCode.split('\n');
+  const previewLines = fromEnd ? lines.slice(-maxLines) : lines.slice(0, maxLines);
+  const preview = previewLines.join('\n').trimEnd();
+  return preview || '// ...';
+};
+
+const detectCodeLanguage = (preElement: HTMLElement): string => {
+  const codeElement = preElement.querySelector('code');
+  if (!codeElement?.className) return '';
+  const match = codeElement.className.match(CODE_LANG_CLASS_RE);
+  return match?.[1] || '';
+};
+
+const wrapCodeBlocksAsCollapsible = (html: string, isStreaming = false): string => {
+  if (!html || !html.includes('<pre')) return html;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div id="__code_root__">${html}</div>`, 'text/html');
+  const root = doc.getElementById('__code_root__');
+  if (!root) return html;
+
+  const preElements = root.querySelectorAll('pre');
+  preElements.forEach((preNode) => {
+    if (!(preNode instanceof HTMLElement)) return;
+    if (preNode.closest('details.message-code-collapse')) return;
+
+    const details = doc.createElement('details');
+    details.className = isStreaming ? 'message-code-collapse is-streaming' : 'message-code-collapse';
+
+    const summary = doc.createElement('summary');
+    summary.className = 'message-code-toggle';
+
+    const language = detectCodeLanguage(preNode);
+    const header = doc.createElement('span');
+    header.className = 'message-code-toggle-header';
+    header.textContent = language ? `代码块 (${language})` : '代码块';
+    summary.appendChild(header);
+
+    if (isStreaming) {
+      const previewViewport = doc.createElement('span');
+      previewViewport.className = 'message-code-preview-viewport';
+
+      const preview = doc.createElement('code');
+      preview.className = 'message-code-preview message-code-preview-stream';
+      preview.textContent = getCodePreviewText(preNode, 12, true);
+
+      previewViewport.appendChild(preview);
+      summary.appendChild(previewViewport);
+    } else {
+      const preview = doc.createElement('code');
+      preview.className = 'message-code-preview';
+      preview.textContent = getCodePreviewText(preNode, 3);
+      summary.appendChild(preview);
+    }
+
+    const parent = preNode.parentNode;
+    if (!parent) return;
+
+    parent.insertBefore(details, preNode);
+    details.appendChild(summary);
+    details.appendChild(preNode);
+  });
+
+  return root.innerHTML;
 };
 
 // 格式化消息内容
@@ -391,16 +464,51 @@ const formattedContent = computed(() => {
     }
 
     // 使用marked解析Markdown (同步版本)
-    const htmlContent = marked(processedContent) as string;
+    let htmlContent = marked(processedContent) as string;
+    htmlContent = wrapCodeBlocksAsCollapsible(htmlContent, Boolean(props.message.isStreaming));
 
     // 使用DOMPurify净化HTML防止XSS攻击
     return DOMPurify.sanitize(htmlContent, {
-      ADD_TAGS: ['img'],
-      ADD_ATTR: ['src', 'alt', 'title'],
+      ADD_TAGS: ['img', 'details', 'summary'],
+      ADD_ATTR: ['src', 'alt', 'title', 'class'],
     });
   } catch (error) {
     console.error('Error parsing markdown:', error);
     return props.message.content;
+  }
+});
+
+const scrollStreamingCodePreviewToBottom = () => {
+  if (!props.message.isStreaming || !messageBubbleRef.value) return;
+
+  const viewports = messageBubbleRef.value.querySelectorAll('.message-code-preview-viewport');
+  viewports.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    node.scrollTop = node.scrollHeight;
+  });
+};
+
+const scheduleStreamingPreviewScroll = () => {
+  if (previewScrollRafId !== null) {
+    cancelAnimationFrame(previewScrollRafId);
+  }
+  previewScrollRafId = requestAnimationFrame(() => {
+    scrollStreamingCodePreviewToBottom();
+    previewScrollRafId = null;
+  });
+};
+
+onUpdated(() => {
+  if (!props.message.isStreaming) return;
+  nextTick(() => {
+    scheduleStreamingPreviewScroll();
+  });
+});
+
+onUnmounted(() => {
+  if (previewScrollRafId !== null) {
+    cancelAnimationFrame(previewScrollRafId);
+    previewScrollRafId = null;
   }
 });
 
@@ -1048,6 +1156,140 @@ const formatToolMessage = (content: string) => {
   border-radius: 4px;
   overflow-x: auto;
   margin: 8px 0;
+}
+
+.message-bubble :deep(details.message-code-collapse) {
+  margin: 8px 0;
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+.message-bubble :deep(details.message-code-collapse > summary.message-code-toggle) {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding: 8px 58px 10px 10px;
+  font-size: 12px;
+  color: #4e5969;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.message-bubble :deep(details.message-code-collapse > summary.message-code-toggle::-webkit-details-marker) {
+  display: none;
+}
+
+.message-bubble :deep(details.message-code-collapse > summary.message-code-toggle::before) {
+  content: '▶';
+  position: absolute;
+  top: 11px;
+  left: 10px;
+  font-size: 10px;
+  color: #86909c;
+}
+
+.message-bubble :deep(details.message-code-collapse > summary.message-code-toggle::after) {
+  content: '展开';
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 12px;
+  color: #86909c;
+}
+
+.message-bubble :deep(.message-code-toggle-header) {
+  font-weight: 600;
+  padding-left: 16px;
+  line-height: 1.4;
+}
+
+.message-bubble :deep(.message-code-preview) {
+  display: block;
+  margin-left: 16px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.05);
+  white-space: pre;
+  line-height: 1.4;
+  max-height: calc(1.4em * 3 + 12px);
+  overflow: hidden;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  color: #4e5969;
+}
+
+.message-bubble :deep(.message-code-preview-viewport) {
+  display: block;
+  margin-left: 16px;
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.05);
+  max-height: calc(1.4em * 3 + 12px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.message-bubble :deep(.message-code-preview-viewport::-webkit-scrollbar) {
+  display: none;
+}
+
+.message-bubble :deep(.message-code-preview-stream) {
+  margin: 0;
+  border-radius: 0;
+  background-color: transparent;
+  min-height: auto;
+}
+
+.message-bubble :deep(details.message-code-collapse[open] > summary.message-code-toggle) {
+  border-bottom: 1px solid #e5e6eb;
+}
+
+.message-bubble :deep(details.message-code-collapse[open] > summary.message-code-toggle::before) {
+  content: '▼';
+}
+
+.message-bubble :deep(details.message-code-collapse[open] > summary.message-code-toggle::after) {
+  content: '收起';
+}
+
+.message-bubble :deep(details.message-code-collapse[open] > summary .message-code-preview) {
+  display: none;
+}
+
+.message-bubble :deep(details.message-code-collapse[open] > summary .message-code-preview-viewport) {
+  display: none;
+}
+
+.message-bubble :deep(details.message-code-collapse > pre) {
+  margin: 0;
+  border-radius: 0 0 8px 8px;
+  border: none;
+}
+
+.message-bubble :deep(details.message-code-collapse.is-streaming[open] > pre) {
+  position: relative;
+  overflow: hidden;
+}
+
+.message-bubble :deep(details.message-code-collapse.is-streaming[open] > pre::after) {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -100%;
+  height: 100%;
+  background: linear-gradient(to bottom, rgba(22, 93, 255, 0), rgba(22, 93, 255, 0.12), rgba(22, 93, 255, 0));
+  animation: code-streaming-sweep 1.8s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes code-streaming-sweep {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(200%); }
 }
 
 .ai-message .message-bubble :deep(pre) {

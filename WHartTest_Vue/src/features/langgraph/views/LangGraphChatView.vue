@@ -108,12 +108,25 @@
       :mask-closable="true"
       :unmount-on-close="true"
     >
-      <iframe
-        v-if="htmlPreviewContent"
-        class="diagram-preview-iframe"
-        :srcdoc="htmlPreviewContent"
-        sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
-      ></iframe>
+      <div v-if="htmlPreviewContent" ref="htmlPreviewContainerRef" class="html-preview-wrapper">
+        <a-button
+          class="html-preview-fullscreen-btn"
+          type="secondary"
+          shape="circle"
+          size="small"
+          @click="toggleHtmlPreviewFullscreen"
+        >
+          <template #icon>
+            <IconFullscreenExit v-if="isHtmlPreviewFullscreen" />
+            <IconFullscreen v-else />
+          </template>
+        </a-button>
+        <iframe
+          class="diagram-preview-iframe html-preview-iframe"
+          :srcdoc="htmlPreviewContent"
+          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+        ></iframe>
+      </div>
     </a-modal>
   </div>
 </template>
@@ -142,6 +155,7 @@ import type { LlmConfig } from '@/features/langgraph/types/llmConfig';
 import { useProjectStore } from '@/store/projectStore';
 import { useLlmConfigRefresh } from '@/composables/useLlmConfigRefresh';
 import { marked } from 'marked';
+import { IconFullscreen, IconFullscreenExit } from '@arco-design/web-vue/es/icon';
 
 // 导入子组件
 import ChatSidebar from '../components/ChatSidebar.vue';
@@ -223,6 +237,8 @@ const diagramPreviewIframeRef = ref<HTMLIFrameElement | null>(null);
 const diagramPreviewReady = ref(false);
 const htmlPreviewVisible = ref(false);
 const htmlPreviewContent = ref('');
+const htmlPreviewContainerRef = ref<HTMLElement | null>(null);
+const isHtmlPreviewFullscreen = ref(false);
 
 // 提示词相关
 const selectedPromptId = ref<number | null>(null); // 用户选择的提示词ID
@@ -971,6 +987,26 @@ const handlePreviewHtml = (payload: HtmlPreviewPayload) => {
   }
   htmlPreviewContent.value = payload.html;
   htmlPreviewVisible.value = true;
+};
+
+const syncHtmlPreviewFullscreenState = () => {
+  isHtmlPreviewFullscreen.value = document.fullscreenElement === htmlPreviewContainerRef.value;
+};
+
+const toggleHtmlPreviewFullscreen = async () => {
+  const container = htmlPreviewContainerRef.value;
+  if (!container) return;
+
+  try {
+    if (document.fullscreenElement === container) {
+      await document.exitFullscreen();
+      return;
+    }
+    await container.requestFullscreen();
+  } catch (error) {
+    console.error('切换HTML预览全屏失败:', error);
+    Message.warning('当前环境不支持全屏预览');
+  }
 };
 
 // 清除引用
@@ -1963,8 +1999,19 @@ watch(diagramPreviewVisible, (visible) => {
   }
 });
 
+watch(htmlPreviewVisible, async (visible) => {
+  if (!visible && document.fullscreenElement === htmlPreviewContainerRef.value) {
+    try {
+      await document.exitFullscreen();
+    } catch (error) {
+      console.error('退出HTML预览全屏失败:', error);
+    }
+  }
+});
+
 onMounted(async () => {
   window.addEventListener('message', handleDiagramPreviewMessage);
+  document.addEventListener('fullscreenchange', syncHtmlPreviewFullscreenState);
 
   // ⭐加载保存的提示词ID
   loadSavedPromptId();
@@ -2057,6 +2104,7 @@ onActivated(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('message', handleDiagramPreviewMessage);
+  document.removeEventListener('fullscreenchange', syncHtmlPreviewFullscreenState);
   // 组件卸载时，终止任何正在进行的流式请求
   abortController.abort();
 });
@@ -2093,5 +2141,22 @@ export default {
   border: 1px solid #e5e6eb;
   border-radius: 8px;
   background: #fff;
+}
+
+.html-preview-wrapper {
+  position: relative;
+}
+
+.html-preview-iframe {
+  display: block;
+}
+
+.html-preview-fullscreen-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  border: 1px solid #d9dce3 !important;
+  background-color: rgba(255, 255, 255, 0.95) !important;
 }
 </style>

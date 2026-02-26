@@ -3,6 +3,8 @@ type JsonLike = Record<string, unknown>;
 const DOCTYPE_RE = /<!doctype\s+html[^>]*>/i;
 const HTML_BLOCK_RE = /<html[\s\S]*?<\/html>/i;
 const CODE_BLOCK_RE = /```(?:html|HTML)?\s*([\s\S]*?)```/g;
+const OPEN_CODE_BLOCK_RE = /```(?:html|HTML)?\s*([\s\S]*)$/;
+const HTML_SNIPPET_TAG_RE = /<(html|head|body|div|section|article|main|header|footer|form|table|ul|ol|li|style|script|svg|canvas|p|h[1-6]|button|input|textarea|select)\b/i;
 const MAX_DEPTH = 4;
 
 const decodeHtmlEntities = (value: string): string => {
@@ -55,6 +57,26 @@ const decodeEscapedSequence = (value: string): string => {
     .replace(/\\\\/g, '\\');
 };
 
+const looksLikeHtmlSnippet = (value: string): boolean => {
+  if (!value) return false;
+  return HTML_SNIPPET_TAG_RE.test(value);
+};
+
+const wrapHtmlSnippet = (snippet: string): string => {
+  const trimmed = snippet.trim();
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HTML Preview</title>
+</head>
+<body>
+${trimmed}
+</body>
+</html>`;
+};
+
 const parseFromUnknown = (value: unknown, depth = 0): string | null => {
   if (depth > MAX_DEPTH || value === null || value === undefined) {
     return null;
@@ -85,11 +107,48 @@ const parseFromUnknown = (value: unknown, depth = 0): string | null => {
         const parsedUnescapedBlock = extractHtmlDocument(unescapedBlock);
         if (parsedUnescapedBlock) return parsedUnescapedBlock;
       }
+
+      if (looksLikeHtmlSnippet(block)) {
+        return wrapHtmlSnippet(block);
+      }
+      if (looksLikeHtmlSnippet(unescapedBlock)) {
+        return wrapHtmlSnippet(unescapedBlock);
+      }
+    }
+
+    // 兼容流式未闭合代码块
+    const openCodeMatch = decoded.match(OPEN_CODE_BLOCK_RE);
+    if (openCodeMatch?.[1]) {
+      const openBlock = openCodeMatch[1].trim();
+      if (openBlock) {
+        const parsedOpenBlock = extractHtmlDocument(openBlock);
+        if (parsedOpenBlock) return parsedOpenBlock;
+
+        const unescapedOpenBlock = decodeEscapedSequence(openBlock);
+        const parsedUnescapedOpenBlock = extractHtmlDocument(unescapedOpenBlock);
+        if (parsedUnescapedOpenBlock) return parsedUnescapedOpenBlock;
+
+        if (looksLikeHtmlSnippet(openBlock)) {
+          return wrapHtmlSnippet(openBlock);
+        }
+        if (looksLikeHtmlSnippet(unescapedOpenBlock)) {
+          return wrapHtmlSnippet(unescapedOpenBlock);
+        }
+      }
     }
 
     const asJson = safeJsonParse(decoded);
     if (asJson !== null) {
       return parseFromUnknown(asJson, depth + 1);
+    }
+
+    // 兜底：整段文本不是完整 HTML 文档，但看起来像 HTML 片段
+    if (looksLikeHtmlSnippet(decoded)) {
+      return wrapHtmlSnippet(decoded);
+    }
+    const unescapedDecoded = decodeEscapedSequence(decoded);
+    if (unescapedDecoded !== decoded && looksLikeHtmlSnippet(unescapedDecoded)) {
+      return wrapHtmlSnippet(unescapedDecoded);
     }
 
     return null;
