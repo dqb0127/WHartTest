@@ -123,7 +123,7 @@ import { IconPlus, IconEdit, IconDelete, IconEye } from '@arco-design/web-vue/es
 import { useProjectStore } from '@/store/projectStore'
 import { pageApi, moduleApi } from '../api'
 import type { UiPage, UiPageForm, UiModule } from '../types'
-import { extractListData, extractPaginationData } from '../types'
+import { extractPaginationData, extractResponseData } from '../types'
 import ElementList from './ElementList.vue'
 
 const props = defineProps<{
@@ -175,12 +175,14 @@ const formatDate = (dateStr: string) => {
   return new Date(dateStr).toLocaleString('zh-CN')
 }
 
-const flattenModules = (modules: UiModule[], level = 0): UiModule[] => {
+const flattenModules = (modules: UiModule[], level = 0, visited = new Set<number>()): UiModule[] => {
   const result: UiModule[] = []
   for (const mod of modules) {
-    result.push({ ...mod, name: '  '.repeat(level) + mod.name })
+    if (visited.has(mod.id)) continue
+    visited.add(mod.id)
+    result.push({ ...mod, name: '\u00A0\u00A0'.repeat(level) + mod.name })
     if (mod.children?.length) {
-      result.push(...flattenModules(mod.children as UiModule[], level + 1))
+      result.push(...flattenModules(mod.children as UiModule[], level + 1, visited))
     }
   }
   return result
@@ -189,8 +191,9 @@ const flattenModules = (modules: UiModule[], level = 0): UiModule[] => {
 const fetchModules = async () => {
   if (!projectId.value) return
   try {
-    const res = await moduleApi.list({ project: projectId.value })
-    moduleOptions.value = flattenModules(extractListData<UiModule>(res))
+    const res = await moduleApi.tree(projectId.value)
+    const modules = extractResponseData<UiModule[]>(res) || []
+    moduleOptions.value = flattenModules(modules)
   } catch (e) {
     console.error('获取模块列表失败:', e)
     Message.error('获取模块列表失败')
