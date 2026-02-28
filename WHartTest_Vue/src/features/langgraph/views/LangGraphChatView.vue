@@ -301,7 +301,7 @@ const startDrag = (e: MouseEvent) => {
 
 const handleToolImageDetected = (src: string) => {
   floatingToolImageSrc.value = src;
-  panelPos.value = null; // 新图片时重置位置
+  // 保持用户已拖动的位置，不重置 panelPos
 };
 const handleFloatToolImage = (src: string) => {
   if (floatingToolImageSrc.value === src) {
