@@ -363,8 +363,9 @@ const deletePageStep = async (record: UiPageSteps) => {
     await pageStepsApi.delete(record.id)
     Message.success('删除成功')
     fetchPageSteps()
-  } catch {
-    Message.error('删除失败')
+  } catch (error: unknown) {
+    const err = error as { error?: string }
+    Message.error(err?.error || '存在关联，无法删除。请先解除关联')
   }
 }
 

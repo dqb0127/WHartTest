@@ -192,8 +192,9 @@ const deleteModule = (node: UiModule) => {
           selectedKeys.value = []
           emit('select', null)
         }
-      } catch {
-        Message.error('删除失败')
+      } catch (error: unknown) {
+        const err = error as { error?: string }
+        Message.error(err?.error || '存在关联，无法删除。请先解除关联')
       }
     },
   })

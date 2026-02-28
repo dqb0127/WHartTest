@@ -235,8 +235,9 @@ const handleAction = async (value: string) => {
               selectedKeys.value = [];
               emit('updated');
               fetchModules();
-            } catch (error) {
-              Message.error('删除失败');
+            } catch (error: unknown) {
+              const err = error as { error?: string };
+              Message.error(err?.error || '存在关联，无法删除。请先解除关联');
             }
           }
         });
