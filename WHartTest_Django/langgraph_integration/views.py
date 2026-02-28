@@ -523,9 +523,30 @@ async def _format_project_skills(project):
         return ""
 
 
+def _build_project_scope_hint(project) -> str:
+    """
+    构建项目作用域提示词。
+
+    默认约束 LLM：如果用户未明确指定其他项目，所有操作均基于当前项目。
+    """
+    if not project:
+        return ""
+
+    project_name = getattr(project, 'name', '') or "未命名项目"
+    project_id = getattr(project, 'id', None)
+    project_label = f"{project_name} (ID: {project_id})" if project_id is not None else project_name
+
+    return (
+        "# 当前项目上下文\n"
+        f"- 当前项目：{project_label}\n"
+        "- 默认规则：如用户无特殊要求，所有操作均基于当前项目进行。\n"
+        "- 若用户明确指定了其他项目，再按用户要求切换。"
+    )
+
+
 async def _inject_project_context(prompt_content: str, project) -> str:
     """
-    注入项目上下文（凭据和 Skills）到提示词中
+    注入项目上下文（项目作用域、凭据和 Skills）到提示词中
 
     Args:
         prompt_content: 原始提示词内容
@@ -536,6 +557,15 @@ async def _inject_project_context(prompt_content: str, project) -> str:
     """
     if not project:
         return prompt_content
+
+    prompt_content = prompt_content or ""
+
+    # 注入项目作用域提示（可使用占位符 {project_scope_hint} 精确控制位置）
+    project_scope_hint = _build_project_scope_hint(project)
+    if '{project_scope_hint}' in prompt_content:
+        prompt_content = prompt_content.replace('{project_scope_hint}', project_scope_hint)
+    elif project_scope_hint and "默认规则：如用户无特殊要求，所有操作均基于当前项目进行。" not in prompt_content:
+        prompt_content = f"{project_scope_hint}\n\n{prompt_content}".strip()
 
     # 注入凭据信息
     if '{credentials_info}' in prompt_content:
@@ -559,7 +589,8 @@ async def get_effective_system_prompt_async(user, prompt_id=None, project=None):
     """
     获取有效的系统提示词（异步版本）
     优先级：用户指定的提示词 > 用户默认提示词 > 全局LLM配置的system_prompt
-    支持占位符: {credentials_info} 注入项目凭据, {skills_info} 注入项目 Skills 元数据
+    支持占位符: {project_scope_hint} 注入项目作用域, {credentials_info} 注入项目凭据,
+    {skills_info} 注入项目 Skills 元数据
     如果未使用 {skills_info} 占位符，活跃的 Skills 元数据将自动追加到提示词末尾
     （完整的 SKILL.md 内容通过 read_skill_content 工具按需获取）
 
@@ -571,7 +602,7 @@ async def get_effective_system_prompt_async(user, prompt_id=None, project=None):
     Returns:
         tuple: (prompt_content, prompt_source)
         prompt_content: 提示词内容（已注入项目上下文）
-        prompt_source: 提示词来源 ('user_specified', 'user_default', 'global', 'none')
+        prompt_source: 提示词来源 ('user_specified', 'user_default', 'global', 'project_context', 'none')
     """
     try:
         # 1. 如果指定了提示词ID，优先使用
@@ -609,7 +640,12 @@ async def get_effective_system_prompt_async(user, prompt_id=None, project=None):
         except LLMConfig.DoesNotExist:
             logger.warning("No active LLM configuration found")
 
-        # 4. 没有任何提示词
+        # 4. 没有任何提示词时，至少注入项目作用域提示，确保默认按当前项目执行
+        project_scope_hint = _build_project_scope_hint(project)
+        if project_scope_hint:
+            return project_scope_hint, 'project_context'
+
+        # 5. 仍无可用提示词
         return None, 'none'
 
     except Exception as e:
@@ -621,6 +657,9 @@ async def get_effective_system_prompt_async(user, prompt_id=None, project=None):
                 return active_config.system_prompt.strip(), 'global'
         except:
             pass
+        project_scope_hint = _build_project_scope_hint(project)
+        if project_scope_hint:
+            return project_scope_hint, 'project_context'
         return None, 'none'
 
 
