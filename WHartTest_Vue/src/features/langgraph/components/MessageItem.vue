@@ -30,12 +30,19 @@
       </div>
       <div class="message-content">
       <!-- 图片显示（在消息气泡之前） -->
-      <div v-if="message.imageDataUrl || message.imageBase64" class="message-image-container">
+      <div v-if="toolImageSrc && isThisImageFloating" class="tool-image-float-placeholder" @click="emit('float-tool-image', toolImageSrc)">
+        <img :src="toolImageSrc" alt="工具截图" class="float-placeholder-thumb" />
+        <span class="float-placeholder-label">悬浮预览中</span>
+      </div>
+      <div v-else-if="message.imageDataUrl || message.imageBase64" class="message-image-container">
         <img 
-          :src="message.imageDataUrl || `data:image/jpeg;base64,${message.imageBase64}`" 
+          :src="imageDisplaySrc" 
           alt="上传的图片" 
           class="message-image" 
         />
+        <div v-if="isToolImage" class="float-action-btn" @click="emit('float-tool-image', toolImageSrc!)">
+          悬浮
+        </div>
       </div>
       
       <div ref="messageBubbleRef" class="message-bubble">
@@ -135,7 +142,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, onUpdated, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, onUpdated, ref, watch } from 'vue';
 import { Button as AButton, Tooltip as ATooltip, Message } from '@arco-design/web-vue';
 import { IconCopy, IconReply, IconRefresh, IconDelete, IconEye, IconTool } from '@arco-design/web-vue/es/icon';
 import DOMPurify from 'dompurify';
@@ -181,9 +188,12 @@ interface ChatMessage {
 
 interface Props {
   message: ChatMessage;
+  floatingToolImageSrc?: string | null;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  floatingToolImageSrc: null,
+});
 
 const emit = defineEmits<{
   'toggle-expand': [message: ChatMessage];
@@ -192,7 +202,33 @@ const emit = defineEmits<{
   'delete': [message: ChatMessage];
   'preview-diagram': [payload: { xml: string; sourceMessage: ChatMessage }];
   'preview-html': [payload: { html: string; sourceMessage: ChatMessage }];
+  'tool-image-detected': [src: string];
+  'float-tool-image': [src: string];
 }>();
+
+// 工具图片相关
+const toolImageSrc = computed(() => {
+  if (props.message.messageType !== 'tool') return null;
+  return props.message.imageDataUrl || (props.message.imageBase64 ? `data:image/jpeg;base64,${props.message.imageBase64}` : null);
+});
+
+const isToolImage = computed(() => props.message.messageType === 'tool' && !!toolImageSrc.value);
+
+const isThisImageFloating = computed(() => {
+  return isToolImage.value && props.floatingToolImageSrc === toolImageSrc.value;
+});
+
+const imageDisplaySrc = computed(() => {
+  return props.message.imageDataUrl || `data:image/jpeg;base64,${props.message.imageBase64}`;
+});
+
+// 工具图片被检测到时通知父组件
+onMounted(() => {
+  if (toolImageSrc.value) emit('tool-image-detected', toolImageSrc.value);
+});
+watch(toolImageSrc, (src) => {
+  if (src) emit('tool-image-detected', src);
+});
 
 // 操作按钮可见性
 const showActions = computed(() => {
@@ -834,14 +870,58 @@ const formatToolMessage = (content: string) => {
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   display: flex;
-  justify-content: center; /* 居中显示图片 */
+  justify-content: center;
+  position: relative;
+}
+
+.float-action-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.message-image-container:hover .float-action-btn {
+  opacity: 1;
+}
+
+/* 悬浮预览中的占位 */
+.tool-image-float-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border: 1px dashed #c9cdd4;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #f7f8fa;
+  transition: background 0.2s;
+}
+.tool-image-float-placeholder:hover {
+  background: #e8f3ff;
+}
+.float-placeholder-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.float-placeholder-label {
+  font-size: 12px;
+  color: #86909c;
 }
 
 .message-image {
   width: auto;
   height: auto;
-  max-width: 100%;
-  max-width: min(100%, 600px); /* 限制图片最大宽度为600px或容器宽度，取较小值 */
+  max-width: min(100%, 300px);
   display: block;
   cursor: pointer;
   transition: transform 0.2s ease;
@@ -1372,7 +1452,7 @@ const formatToolMessage = (content: string) => {
 }
 
 .message-bubble :deep(img) {
-  max-width: 100%;
+  max-width: min(100%, 400px);
   height: auto;
   border-radius: 4px;
 }
@@ -1445,19 +1525,19 @@ const formatToolMessage = (content: string) => {
 /* 响应式图片尺寸调整 */
 @media (max-width: 768px) {
   .message-image {
-    max-width: min(100%, 400px); /* 在小屏幕上限制最大宽度为400px */
+    max-width: min(100%, 320px);
   }
 }
 
 @media (max-width: 480px) {
   .message-image {
-    max-width: min(100%, 300px); /* 在手机上限制最大宽度为300px */
+    max-width: min(100%, 240px);
   }
 }
 
 /* 确保消息气泡内的图片不会超出容器 */
 .message-bubble :deep(img) {
-  max-width: 100%;
+  max-width: min(100%, 400px);
   height: auto;
   display: block;
   margin: 8px 0;
@@ -1470,7 +1550,7 @@ const formatToolMessage = (content: string) => {
 }
 
 .user-message .message-image {
-  max-width: min(100%, 500px); /* 用户消息的图片稍微小一些 */
+  max-width: min(100%, 400px);
 }
 
 /* AI消息中的图片样式 */
