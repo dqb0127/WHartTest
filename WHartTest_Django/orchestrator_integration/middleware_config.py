@@ -20,9 +20,96 @@ from langchain.agents.middleware import (
     HumanInTheLoopMiddleware,
 )
 
-from requirements.context_limits import context_checker, get_context_limit_from_llm
+from requirements.context_limits import (
+    MODEL_CONTEXT_LIMITS,
+    context_checker,
+    get_context_limit_from_llm,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _format_exception_chain(exc: BaseException, max_depth: int = 4) -> str:
+    """格式化异常链路，便于定位被包装/重抛后的真实根因。"""
+    chain: List[str] = []
+    current: Optional[BaseException] = exc
+    depth = 0
+
+    while current is not None and depth < max_depth:
+        chain.append(f"{type(current).__name__}: {current}")
+        current = current.__cause__ or current.__context__
+        depth += 1
+
+    if current is not None:
+        chain.append("...")
+    return " <- ".join(chain)
+
+
+def _model_retry_should_retry(exc: Exception) -> bool:
+    """记录每次模型调用失败，可重试错误继续重试。"""
+    error_text = str(exc)
+    if isinstance(exc, ValueError) and "No generations found in stream" in error_text:
+        logger.warning(
+            "ModelRetryMiddleware: empty stream detected, will retry. "
+            "error_type=%s, error=%s, chain=%s",
+            type(exc).__name__,
+            exc,
+            _format_exception_chain(exc),
+        )
+        return True
+
+    logger.warning(
+        "ModelRetryMiddleware: model call attempt failed; retry if attempts remain. "
+        "error_type=%s, error=%s, chain=%s",
+        type(exc).__name__,
+        exc,
+        _format_exception_chain(exc),
+    )
+    return True
+
+
+def _build_model_retry_failure_handler(total_attempts: int) -> Callable[[Exception], str]:
+    """重试耗尽后的日志与返回文案（保持默认 continue 语义）。"""
+    def _on_failure(exc: Exception) -> str:
+        logger.error(
+            "ModelRetryMiddleware: model call failed after %d attempts. "
+            "error_type=%s, error=%s, chain=%s",
+            total_attempts,
+            type(exc).__name__,
+            exc,
+            _format_exception_chain(exc),
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        return (
+            f"Model call failed after {total_attempts} attempts "
+            f"with {type(exc).__name__}: {exc}"
+        )
+
+    return _on_failure
+
+
+def _is_unreliable_default_detected_limit(model_name: str, detected_limit: Optional[int]) -> bool:
+    """
+    判断检测到的上下文上限是否属于“不可靠默认回退”。
+
+    典型场景：未知模型名（如 gpt-5.x）在无 profile 时走到 default=128000。
+    这类值不应压制用户手动配置的 context_limit。
+    """
+    if not isinstance(detected_limit, int) or detected_limit <= 0:
+        return False
+
+    default_limit = int(MODEL_CONTEXT_LIMITS.get("default", 128000))
+    if detected_limit != default_limit:
+        return False
+
+    normalized_name = (model_name or "").lower()
+    for model_key in MODEL_CONTEXT_LIMITS.keys():
+        if model_key == "default":
+            continue
+        if model_key in normalized_name:
+            return False
+
+    return True
 
 
 def _create_token_counter(model_name: str) -> Callable[[Iterable], int]:
@@ -81,10 +168,10 @@ def _resolve_effective_context_limit(
     """
     解析最终有效的上下文限制（安全优先）
 
-    规则：
-    1. 用户配置 context_limit（若有效）
-    2. 模型检测上限（Model Profile / 后备映射）
-    3. 两者都存在时取更小值，避免配置值超过模型真实上限导致摘要触发过晚
+    规则（用户优先）：
+    1. 用户配置 context_limit（若有效）= 最高优先级，直接使用
+    2. 无用户配置时，优先模型 profile
+    3. profile 不可用时，使用可靠的后备映射
     4. 都不可用时使用默认值
     """
     config_context_limit = getattr(llm_config, 'context_limit', None)
@@ -115,42 +202,41 @@ def _resolve_effective_context_limit(
     normalized_name = (model_name or "").lower()
     trusted_fallback_prefixes = ("gpt-", "o1", "o3", "claude", "gemini")
     trusted_fallback = any(normalized_name.startswith(prefix) for prefix in trusted_fallback_prefixes)
+    unreliable_detected_limit = _is_unreliable_default_detected_limit(model_name, detected_limit)
 
-    # 1) 优先使用 profile（最可靠）
-    if profile_limit:
-        if config_limit:
-            effective_limit = min(config_limit, profile_limit)
-            if config_limit > profile_limit:
-                logger.warning(
-                    "配置的 context_limit(%d) 超过模型 profile 上限(%d)，已自动使用更安全值 %d",
-                    config_limit, profile_limit, effective_limit
-                )
-        else:
-            effective_limit = profile_limit
-        return int(effective_limit)
-
-    # 2) 无 profile：仅对可信族(gpt/claude/gemini)使用回退映射做安全钳制
-    if config_limit and detected_limit and trusted_fallback:
-        effective_limit = min(config_limit, detected_limit)
-        if config_limit > detected_limit:
-            logger.warning(
-                "配置的 context_limit(%d) 超过模型回退上限(%d)，已自动使用更安全值 %d",
-                config_limit, detected_limit, effective_limit
-            )
-        return int(effective_limit)
-
-    # 3) 无 profile 且非可信回退（如 qwen 的 OpenAI 兼容接入）：优先信任用户配置
+    # 1) 用户配置最高优先级
     if config_limit:
-        if detected_limit and not trusted_fallback and config_limit != detected_limit:
+        if profile_limit and config_limit != profile_limit:
+            logger.info(
+                "模型 %s 存在 profile 上限=%d，按用户配置优先使用 context_limit=%d",
+                model_name, profile_limit, config_limit
+            )
+        elif detected_limit and trusted_fallback and unreliable_detected_limit and config_limit != detected_limit:
+            logger.info(
+                "模型 %s 无可靠 profile，回退上限=%d 来自默认映射，使用配置 context_limit=%d",
+                model_name, detected_limit, config_limit
+            )
+        elif detected_limit and not trusted_fallback and config_limit != detected_limit:
             logger.info(
                 "模型 %s 无可靠 profile，使用配置 context_limit=%d（忽略回退估算=%d）",
                 model_name, config_limit, detected_limit
             )
         return int(config_limit)
 
-    # 4) 最后兜底
-    if detected_limit:
+    # 2) 无用户配置时，优先 profile（最可靠）
+    if profile_limit:
+        return int(profile_limit)
+
+    # 3) 使用可靠回退
+    if detected_limit and not unreliable_detected_limit:
         return int(detected_limit)
+
+    # 4) 最后兜底
+    if detected_limit and unreliable_detected_limit:
+        logger.info(
+            "模型 %s 无可靠 profile，回退上限=%d 来自默认映射，忽略该值并使用默认 context_limit=%d",
+            model_name, detected_limit, default_limit
+        )
 
     return int(default_limit)
 
@@ -178,6 +264,32 @@ def get_model_retry_middleware(
         max_delay: 最大延迟（秒）
         jitter: 是否添加随机抖动
     """
+    base_kwargs = {
+        "max_retries": max_retries,
+        "backoff_factor": backoff_factor,
+        "initial_delay": initial_delay,
+        "max_delay": max_delay,
+        "jitter": jitter,
+    }
+    total_attempts = max_retries + 1
+
+    try:
+        return ModelRetryMiddleware(
+            **base_kwargs,
+            retry_on=_model_retry_should_retry,
+            on_failure=_build_model_retry_failure_handler(total_attempts),
+        )
+    except TypeError as e:
+        # 兼容旧版 langchain：若不支持 retry_on/on_failure 参数，则回退基础配置
+        err_msg = str(e)
+        if "retry_on" not in err_msg and "on_failure" not in err_msg:
+            raise
+        logger.warning(
+            "ModelRetryMiddleware 当前版本不支持 retry_on/on_failure，"
+            "回退为基础重试配置。error=%s",
+            e,
+        )
+
     return ModelRetryMiddleware(
         max_retries=max_retries,
         backoff_factor=backoff_factor,

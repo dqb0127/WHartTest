@@ -37,13 +37,30 @@
         ref="chatMessagesRef"
         :messages="displayedMessages"
         :is-loading="isLoading && messages.length === 0"
+        :floating-tool-image-src="floatingToolImageSrc"
         @toggle-expand="toggleExpand"
         @quote="handleQuote"
         @retry="handleRetry"
         @delete="handleDeleteMessage"
         @preview-diagram="handlePreviewDiagram"
         @preview-html="handlePreviewHtml"
+        @tool-image-detected="handleToolImageDetected"
+        @float-tool-image="handleFloatToolImage"
       />
+
+      <!-- 工具图片悬浮面板（可拖动） -->
+      <div
+        v-if="floatingToolImageSrc"
+        ref="floatingPanelRef"
+        class="floating-tool-image-panel"
+        :style="floatingPanelStyle"
+      >
+        <div class="floating-panel-header" @mousedown="startDrag">
+          <span class="floating-panel-title">📷 工具截图</span>
+          <button class="floating-panel-close" @click="closeFloatingImage">&times;</button>
+        </div>
+        <img :src="floatingToolImageSrc" alt="工具截图" class="floating-panel-img" />
+      </div>
 
       <!-- ⭐ HITL 工具审批卡片（输入框上方） -->
       <ToolApprovalCard
@@ -239,6 +256,70 @@ const htmlPreviewVisible = ref(false);
 const htmlPreviewContent = ref('');
 const htmlPreviewContainerRef = ref<HTMLElement | null>(null);
 const isHtmlPreviewFullscreen = ref(false);
+
+// 工具图片悬浮预览（可拖动）
+const floatingToolImageSrc = ref<string | null>(null);
+const floatingPanelRef = ref<HTMLElement | null>(null);
+const panelPos = ref<{ x: number; y: number } | null>(null);
+const dragState = ref<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+
+const floatingPanelStyle = computed(() => {
+  if (!panelPos.value) return {};
+  return { top: `${panelPos.value.y}px`, right: 'auto', left: `${panelPos.value.x}px` };
+});
+
+const startDrag = (e: MouseEvent) => {
+  // 防止在关闭按钮上触发拖动
+  if ((e.target as HTMLElement).closest('.floating-panel-close')) return;
+  e.preventDefault();
+  const panel = floatingPanelRef.value;
+  if (!panel) return;
+
+  const rect = panel.getBoundingClientRect();
+  const containerRect = panel.offsetParent?.getBoundingClientRect() || { left: 0, top: 0 };
+  const currentX = panelPos.value?.x ?? rect.left - containerRect.left;
+  const currentY = panelPos.value?.y ?? rect.top - containerRect.top;
+
+  dragState.value = { startX: e.clientX, startY: e.clientY, origX: currentX, origY: currentY };
+  if (!panelPos.value) panelPos.value = { x: currentX, y: currentY };
+
+  const onMove = (ev: MouseEvent) => {
+    if (!dragState.value) return;
+    panelPos.value = {
+      x: dragState.value.origX + (ev.clientX - dragState.value.startX),
+      y: dragState.value.origY + (ev.clientY - dragState.value.startY),
+    };
+  };
+  const onUp = () => {
+    dragState.value = null;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+};
+
+const handleToolImageDetected = (src: string) => {
+  floatingToolImageSrc.value = src;
+  // 保持用户已拖动的位置，不重置 panelPos
+};
+const handleFloatToolImage = (src: string) => {
+  if (floatingToolImageSrc.value === src) {
+    floatingToolImageSrc.value = null;
+  } else {
+    floatingToolImageSrc.value = src;
+    panelPos.value = null;
+  }
+};
+const closeFloatingImage = () => {
+  floatingToolImageSrc.value = null;
+};
+
+// 切换会话时清除悬浮图片
+watch(sessionId, () => {
+  floatingToolImageSrc.value = null;
+  panelPos.value = null;
+});
 
 // 提示词相关
 const selectedPromptId = ref<number | null>(null); // 用户选择的提示词ID
@@ -799,7 +880,9 @@ const solidifyStreamContent = () => {
             isUser: false,
             time: msg.time,
             messageType: msg.type as ChatMessage['messageType'],
+            toolName: msg.toolName,
             isExpanded: msg.isExpanded,
+            imageDataUrl: msg.imageDataUrl,
             isThinkingProcess: msg.isThinkingProcess,
             isThinkingExpanded: msg.isThinkingExpanded
           };
@@ -1554,7 +1637,9 @@ const displayedMessages = computed(() => {
             isUser: false,
             time: msg.time,
             messageType: msg.type as ChatMessage['messageType'],
+            toolName: msg.toolName,
             isExpanded: msg.isExpanded,
+            imageDataUrl: msg.imageDataUrl,
             isThinkingProcess: msg.isThinkingProcess,
             isThinkingExpanded: msg.isThinkingExpanded
           };
@@ -2127,12 +2212,13 @@ export default {
 
 .chat-container {
   flex: 1;
-  min-height: 0; /* 关键：允许 flex 子元素收缩 */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   height: 100%;
   background-color: #f7f8fa;
   overflow: hidden;
+  position: relative;
 }
 
 .diagram-preview-iframe {
@@ -2158,5 +2244,61 @@ export default {
   z-index: 2;
   border: 1px solid #d9dce3 !important;
   background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+/* 工具图片悬浮面板 */
+.floating-tool-image-panel {
+  position: absolute;
+  top: 60px;
+  right: 16px;
+  z-index: 100;
+  width: 320px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  animation: float-in 0.25s ease;
+}
+@keyframes float-in {
+  from { opacity: 0; transform: translateY(-12px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.floating-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #f2f3f5;
+  border-bottom: 1px solid #e5e6eb;
+  cursor: grab;
+  user-select: none;
+}
+.floating-panel-header:active {
+  cursor: grabbing;
+}
+.floating-panel-title {
+  font-size: 12px;
+  color: #4e5969;
+  font-weight: 500;
+}
+.floating-panel-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  color: #86909c;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.floating-panel-close:hover {
+  color: #1d2129;
+}
+.floating-panel-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 60vh;
+  object-fit: contain;
+  cursor: pointer;
 }
 </style>

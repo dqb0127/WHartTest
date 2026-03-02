@@ -11,12 +11,15 @@
       v-for="(message, index) in messages"
       :key="index"
       :message="message"
+      :floating-tool-image-src="floatingToolImageSrc"
       @toggle-expand="$emit('toggle-expand', $event)"
       @quote="$emit('quote', $event)"
       @retry="$emit('retry', $event)"
       @delete="$emit('delete', $event)"
       @preview-diagram="$emit('preview-diagram', $event)"
       @preview-html="$emit('preview-html', $event)"
+      @tool-image-detected="$emit('tool-image-detected', $event)"
+      @float-tool-image="$emit('float-tool-image', $event)"
     />
   </div>
 </template>
@@ -50,9 +53,12 @@ interface ChatMessage {
 interface Props {
   messages: ChatMessage[];
   isLoading: boolean;
+  floatingToolImageSrc?: string | null;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  floatingToolImageSrc: null,
+});
 
 defineEmits<{
   'toggle-expand': [message: ChatMessage];
@@ -61,6 +67,8 @@ defineEmits<{
   'delete': [message: ChatMessage];
   'preview-diagram': [payload: { xml: string; sourceMessage: ChatMessage }];
   'preview-html': [payload: { html: string; sourceMessage: ChatMessage }];
+  'tool-image-detected': [src: string];
+  'float-tool-image': [src: string];
 }>();
 
 const messagesContainer = ref<HTMLElement | null>(null);

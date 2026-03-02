@@ -14,6 +14,8 @@ interface StreamMessage {
   content: string;
   type: 'human' | 'ai' | 'tool' | 'system' | 'agent_step';
   time: string;
+  toolName?: string;
+  imageDataUrl?: string;
   isExpanded?: boolean;
   isThinkingProcess?: boolean;
   isThinkingExpanded?: boolean;
@@ -129,6 +131,121 @@ const safeStringify = (value: unknown): string => {
   } catch {
     return '[无法序列化的数据]';
   }
+};
+
+interface ToolResultDisplayPayload {
+  content: string;
+  imageDataUrl?: string;
+}
+
+const tryParseJsonString = (value: string): unknown | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+};
+
+const toImageDataUrl = (item: Record<string, unknown>): string | undefined => {
+  const rawBase64 = item.base64;
+  if (typeof rawBase64 !== 'string' || !rawBase64.trim()) return undefined;
+  const base64 = rawBase64.trim();
+  if (base64.startsWith('data:image/')) return base64;
+
+  const mimeType =
+    (typeof item.mime_type === 'string' && item.mime_type.trim()) ||
+    (typeof item.mimeType === 'string' && item.mimeType.trim()) ||
+    'image/jpeg';
+
+  return `data:${mimeType};base64,${base64}`;
+};
+
+const buildToolResultDisplayPayload = (rawToolOutput: unknown): ToolResultDisplayPayload => {
+  let normalized: unknown = rawToolOutput;
+  if (typeof normalized === 'string') {
+    const parsed = tryParseJsonString(normalized);
+    if (parsed !== null) {
+      normalized = parsed;
+    }
+  }
+
+  if (Array.isArray(normalized)) {
+    let imageDataUrl: string | undefined;
+    const textParts: string[] = [];
+
+    normalized.forEach((item) => {
+      if (item && typeof item === 'object') {
+        const obj = item as Record<string, unknown>;
+        const itemType = typeof obj.type === 'string' ? obj.type.toLowerCase() : '';
+
+        if (!imageDataUrl && (itemType === 'image' || typeof obj.base64 === 'string')) {
+          imageDataUrl = toImageDataUrl(obj) || imageDataUrl;
+          if (itemType === 'image') {
+            return;
+          }
+        }
+
+        if (typeof obj.text === 'string' && obj.text.trim()) {
+          textParts.push(obj.text);
+          return;
+        }
+
+        if (itemType !== 'image' && !('base64' in obj)) {
+          const serialized = safeStringify(obj);
+          if (serialized) {
+            textParts.push(serialized);
+          }
+        }
+        return;
+      }
+
+      if (typeof item === 'string') {
+        textParts.push(item);
+      } else {
+        const serialized = safeStringify(item);
+        if (serialized) {
+          textParts.push(serialized);
+        }
+      }
+    });
+
+    const content = textParts.filter((part) => part && part.trim()).join('\n');
+    if (content || imageDataUrl) {
+      return {
+        content: content || '[工具返回了图片]',
+        imageDataUrl
+      };
+    }
+    return { content: safeStringify(normalized) };
+  }
+
+  if (normalized && typeof normalized === 'object') {
+    const obj = normalized as Record<string, unknown>;
+    const itemType = typeof obj.type === 'string' ? obj.type.toLowerCase() : '';
+    const imageDataUrl =
+      itemType === 'image' || typeof obj.base64 === 'string'
+        ? toImageDataUrl(obj)
+        : undefined;
+
+    const text =
+      typeof obj.text === 'string' && obj.text.trim()
+        ? obj.text
+        : '';
+
+    if (text || imageDataUrl) {
+      return {
+        content: text || '[工具返回了图片]',
+        imageDataUrl
+      };
+    }
+
+    return { content: safeStringify(normalized) };
+  }
+
+  return { content: safeStringify(normalized) };
 };
 
 // 上下文使用快照（独立缓存，不受clearStreamState影响）
@@ -631,8 +748,8 @@ export async function sendChatMessageStream(
           if (parsed.type === 'tool_result' && streamSessionId && activeStreams.value[streamSessionId]) {
             // 优先使用 tool_output（完整内容），fallback 到 summary（截断摘要）
             const toolOutput = parsed.tool_output || parsed.content || parsed.summary;
-            const toolContent = safeStringify(toolOutput);
-            if (toolContent) {
+            const toolPayload = buildToolResultDisplayPayload(toolOutput);
+            if (toolPayload.content || toolPayload.imageDataUrl) {
               const time = formatStreamTime();
               // 如果当前有AI流式内容,先将其固化为独立消息
               if (activeStreams.value[streamSessionId].content && activeStreams.value[streamSessionId].content.trim()) {
@@ -645,9 +762,11 @@ export async function sendChatMessageStream(
                 activeStreams.value[streamSessionId].content = '';
               }
               activeStreams.value[streamSessionId].messages.push({
-                content: toolContent,
+                content: toolPayload.content || '[工具返回了图片]',
                 type: 'tool',
                 time: time,
+                toolName: typeof parsed.tool_name === 'string' ? parsed.tool_name : undefined,
+                imageDataUrl: toolPayload.imageDataUrl,
                 isExpanded: false
               });
             }
@@ -1234,8 +1353,8 @@ export async function resumeAgentLoop(
           if (parsed.type === 'tool_result' && activeStreams.value[sessionId]) {
             // 优先使用 tool_output（完整内容），fallback 到 summary（截断摘要）
             const toolOutput = parsed.tool_output || parsed.content || parsed.summary;
-            const toolContent = safeStringify(toolOutput);
-            if (toolContent) {
+            const toolPayload = buildToolResultDisplayPayload(toolOutput);
+            if (toolPayload.content || toolPayload.imageDataUrl) {
               const time = formatStreamTime();
               // 先固化当前 AI 内容
               if (activeStreams.value[sessionId].content?.trim()) {
@@ -1248,9 +1367,11 @@ export async function resumeAgentLoop(
                 activeStreams.value[sessionId].content = '';
               }
               activeStreams.value[sessionId].messages.push({
-                content: toolContent,
+                content: toolPayload.content || '[工具返回了图片]',
                 type: 'tool',
                 time: time,
+                toolName: typeof parsed.tool_name === 'string' ? parsed.tool_name : undefined,
+                imageDataUrl: toolPayload.imageDataUrl,
                 isExpanded: false
               });
             }

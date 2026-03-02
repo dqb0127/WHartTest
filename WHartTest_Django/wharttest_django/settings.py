@@ -517,6 +517,43 @@ LOGGING = {
             'level': 'DEBUG',
             'propagate': False,
         },
+        # LangGraph集成日志
+        'langgraph_integration': {
+            'handlers': ['console', 'app_file', 'error_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        # 三方AI框架与SDK日志（排查模型调用失败）
+        'langchain': {
+            'handlers': ['console', 'app_file', 'error_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'langchain_core': {
+            'handlers': ['console', 'app_file', 'error_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'langchain_openai': {
+            'handlers': ['console', 'app_file', 'error_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'langgraph': {
+            'handlers': ['console', 'app_file', 'error_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'openai': {
+            'handlers': ['console', 'app_file', 'error_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'httpx': {
+            'handlers': ['console', 'app_file', 'error_file'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
     },
 }
 
