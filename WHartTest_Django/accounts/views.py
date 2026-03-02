@@ -1,6 +1,7 @@
 from django.contrib.auth.models import User, Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from django.shortcuts import get_object_or_404
+from django.db.utils import OperationalError
 from django.db.models import Q
 from rest_framework import generics, status, viewsets
 from rest_framework.decorators import action
@@ -686,3 +687,15 @@ class MyTokenObtainPairView(BaseTokenObtainPairView):
     includes user's basic information.
     """
     serializer_class = MyTokenObtainPairSerializer
+
+    def post(self, request, *args, **kwargs):
+        """
+        当数据库尚未就绪时，返回可识别的友好错误，避免直接暴露 500 traceback。
+        """
+        try:
+            return super().post(request, *args, **kwargs)
+        except OperationalError:
+            return Response(
+                {'detail': '认证服务正在启动，请稍后重试。'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
