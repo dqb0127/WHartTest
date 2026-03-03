@@ -4,6 +4,7 @@
  */
 
 import { ref, shallowRef } from 'vue'
+import { useAuthStore } from '@/store/authStore'
 
 /** 消息类型枚举 */
 export const UiSocketEnum = {
@@ -197,28 +198,46 @@ class UiWebSocketService {
   
   /** 执行测试用例 */
   runTestCase(caseId: number, envConfigId?: number, actuatorId?: string): boolean {
+    // 从auth store获取当前用户信息
+    const authStore = useAuthStore()
+    const currentUser = authStore.currentUser
+    
     return this.send(UiSocketEnum.TEST_CASE, {
       case_id: caseId,
       env_config_id: envConfigId,
       actuator_id: actuatorId,
+      executor_id: currentUser?.id,
+      executor_name: currentUser?.username,
     })
   }
   
   /** 批量执行测试用例 */
   runTestCases(caseIds: number[], envConfigId?: number, actuatorId?: string): boolean {
+    // 从auth store获取当前用户信息
+    const authStore = useAuthStore()
+    const currentUser = authStore.currentUser
+    
     return this.send(UiSocketEnum.TEST_CASE_BATCH, {
       case_ids: caseIds,
       env_config_id: envConfigId,
       actuator_id: actuatorId,
+      executor_id: currentUser?.id,
+      executor_name: currentUser?.username,
     })
   }
   
   /** 执行页面步骤 */
   runPageSteps(pageStepId: number, envConfigId?: number, actuatorId?: string): boolean {
+    // 从auth store获取当前用户信息
+    const authStore = useAuthStore()
+    const currentUser = authStore.currentUser
+    
     return this.send(UiSocketEnum.PAGE_STEPS, {
       page_step_id: pageStepId,
       env_config_id: envConfigId,
       actuator_id: actuatorId,
+      executor_id: currentUser?.id,
+      executor_name: currentUser?.username,
     })
   }
   

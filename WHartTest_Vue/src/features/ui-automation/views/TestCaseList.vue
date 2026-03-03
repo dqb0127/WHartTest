@@ -591,8 +591,16 @@ const fetchEnvConfigs = async () => {
   try {
     const res = await envConfigApi.list({ project: projectId.value })
     envConfigs.value = extractListData<UiEnvironmentConfig>(res)
-    const defaultEnv = envConfigs.value.find(e => e.is_default)
-    if (defaultEnv) selectedEnvConfig.value = defaultEnv.id
+    // 优先选择默认环境，如果没有默认环境则选择第一个环境配置
+    if (!selectedEnvConfig.value && envConfigs.value.length > 0) {
+      const defaultEnv = envConfigs.value.find(e => e.is_default)
+      if (defaultEnv) {
+        selectedEnvConfig.value = defaultEnv.id
+      } else {
+        // 如果没有默认环境，选择第一个环境配置
+        selectedEnvConfig.value = envConfigs.value[0].id
+      }
+    }
   } catch {
     // 静默失败
   }
@@ -624,12 +632,16 @@ watch(() => props.selectedModuleId, (newVal) => {
 })
 
 /** 监听项目变化，重新加载数据 */
-watch(projectId, (newVal) => {
+watch(projectId, async (newVal) => {
   if (newVal) {
     pagination.current = 1
     fetchModules()
     fetchTestCases()
-    fetchEnvConfigs()
+    // 同时获取环境配置和执行器列表，并自动选择默认值
+    await Promise.all([
+      fetchEnvConfigs(),
+      fetchActuators()
+    ])
   }
 }, { immediate: true })
 

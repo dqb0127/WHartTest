@@ -479,6 +479,7 @@ class UiAutomationConsumer(AsyncWebsocketConsumer):
     def save_execution_result(self, args: dict):
         """保存执行结果到数据库"""
         from .models import UiExecutionRecord, UiTestCase, UiBatchExecutionRecord
+        from django.contrib.auth.models import User
         from datetime import datetime, timedelta
 
         logger.info(f">>> save_execution_result 被调用, args: {args}")
@@ -504,12 +505,23 @@ class UiAutomationConsumer(AsyncWebsocketConsumer):
 
         # 提取 batch_id
         batch_id = args.get('batch_id')
+        
+        # 提取执行人信息
+        executor_id = args.get('executor_id')
+        executor = None
+        if executor_id:
+            try:
+                executor = User.objects.get(id=executor_id)
+                logger.info(f"找到执行人: id={executor_id}, username={executor.username}")
+            except User.DoesNotExist:
+                logger.warning(f"执行人不存在: id={executor_id}")
 
         case_id = args.get('case_id')
         try:
             record = UiExecutionRecord.objects.create(
                 test_case_id=case_id,
                 batch_id=batch_id,
+                executor=executor,
                 status=status,
                 trigger_type='manual',
                 step_results=steps,

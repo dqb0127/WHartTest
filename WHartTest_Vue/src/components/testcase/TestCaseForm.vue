@@ -684,6 +684,9 @@ const handleSubmit = async () => {
           updatePayload.review_status = formState.review_status;
           reviewStatusChanged = true; // 标记审核状态变更
         }
+        if (formState.test_type !== originalFormData.value.test_type) {
+          updatePayload.test_type = formState.test_type;
+        }
 
         // 比较步骤：检查是否有变更
         // 将原始步骤数据标准化为与 payloadSteps 相同的格式后再比较
@@ -702,6 +705,7 @@ const handleSubmit = async () => {
         updatePayload.name = formState.name;
         updatePayload.precondition = formState.precondition;
         updatePayload.level = formState.level;
+        updatePayload.test_type = formState.test_type;
         updatePayload.module_id = formState.module_id;
         updatePayload.steps = payloadSteps;
         updatePayload.notes = formState.notes;
@@ -726,6 +730,7 @@ const handleSubmit = async () => {
         name: formState.name,
         precondition: formState.precondition,
         level: formState.level,
+        test_type: formState.test_type,
         module_id: formState.module_id,
         steps: payloadSteps.map(({id, ...rest}) => rest), // 创建时不需要步骤id
         notes: formState.notes,
@@ -741,18 +746,8 @@ const handleSubmit = async () => {
 
       Message.success(isEditing.value ? '测试用例更新成功' : '测试用例创建成功');
 
-      if (isEditing.value) {
-        // 编辑模式：保存后刷新当前数据，不返回列表
-        await fetchDetailsAndSetForm(formState.id!);
-        newScreenshots.value = []; // 清空新上传的截图
-        // 如果审核状态变更，通知父组件刷新导航列表
-        if (reviewStatusChanged) {
-          emit('reviewStatusChanged');
-        }
-      } else {
-        // 新建模式：返回列表页并刷新
-        emit('submitSuccess');
-      }
+      // 无论是编辑还是新建，保存成功后都返回列表并刷新
+      emit('submitSuccess');
     } else {
       Message.error(response.error || (isEditing.value ? '更新失败' : '创建失败'));
     }

@@ -285,8 +285,24 @@ const handleSubmit = async (done: (closed: boolean) => void) => {
     const errors = err?.errors
     if (errors && typeof errors === 'object' && !('error' in errors) && !('message' in errors)) {
       // 字段验证错误格式: { name: ['xxx'], locator_value: ['xxx'] }
+      // 字段名到中文名称的映射
+      const fieldNameMap: Record<string, string> = {
+        name: '元素名称',
+        locator_value: '元素表达式',
+        locator_type: '定位类型',
+        locator_value_2: '备用定位表达式1',
+        locator_value_3: '备用定位表达式2',
+        wait_time: '等待时间',
+        is_iframe: 'iframe设置',
+        iframe_locator: 'iframe定位表达式',
+        description: '描述'
+      }
+      
       const messages = Object.entries(errors)
-        .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+        .map(([field, msgs]) => {
+          const chineseFieldName = fieldNameMap[field] || field
+          return `${chineseFieldName}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`
+        })
         .join('\n')
       Message.error({ content: messages, duration: 5000 })
     } else {
