@@ -2,7 +2,7 @@
   <div class="chat-messages" ref="messagesContainer">
     <div v-if="messages.length === 0" class="empty-chat">
       <div class="empty-icon">
-        <icon-message />
+        <img :src="brandLogoUrl" alt="" class="empty-logo" />
       </div>
       <p>开始与 WHartTest 的对话吧</p>
     </div>
@@ -26,8 +26,8 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { IconMessage } from '@arco-design/web-vue/es/icon';
 import MessageItem from './MessageItem.vue';
+import { brandLogoUrl } from '@/utils/assetUrl';
 
 interface ChatMessage {
   content: string;
@@ -175,18 +175,18 @@ defineExpose({
 }
 
 .empty-icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background-color: #f2f3f5;
+  width: 72px;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 16px;
 }
 
-.empty-icon .arco-icon {
-  font-size: 32px;
-  color: #c9cdd4;
+.empty-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 20px rgba(100, 180, 255, 0.18));
 }
 </style>

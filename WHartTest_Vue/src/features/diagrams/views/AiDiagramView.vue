@@ -153,10 +153,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { Message, Modal } from '@arco-design/web-vue';
 import { marked } from 'marked';
 import { useProjectStore } from '@/store/projectStore';
+import { useThemeStore } from '@/store/themeStore';
 import { getPromptByType, initializeUserPrompts } from '@/features/prompts/services/promptService';
 import { DiagramEditor, type EditOperation } from '../services/diagramEditor';
 import TokenUsageIndicator from '@/features/langgraph/components/TokenUsageIndicator.vue';
@@ -175,6 +176,7 @@ interface ChatMessage {
 }
 
 const projectStore = useProjectStore();
+const themeStore = useThemeStore();
 const messages = ref<ChatMessage[]>([]);
 const inputMessage = ref('');
 const isLoading = ref(false);
@@ -252,18 +254,38 @@ const loadAttempts = ref(0);  // 加载尝试次数
 let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 // Draw.io URL (使用 embed 模式，启用自动保存)
+const drawioUi = ref(themeStore.isBlack ? 'dark' : 'kennedy');
+
 const drawioUrl = computed(() => {
   const params = new URLSearchParams({
     embed: '1',
     spin: '1',
     proto: 'json',
-    ui: 'kennedy',
+    ui: drawioUi.value,
     noExitBtn: '1',  // 隐藏退出按钮
     autosave: '1',   // 启用自动保存
     math: '0'        // 禁用数学公式插件（避免 404 错误）
   });
   return `${currentDrawioBaseUrl.value}/?${params.toString()}`;
 });
+
+watch(
+  () => themeStore.isBlack,
+  async (isBlack) => {
+    const nextUi = isBlack ? 'dark' : 'kennedy';
+    if (drawioUi.value === nextUi) {
+      return;
+    }
+
+    const latestXml = await getCurrentXmlFromDrawio();
+    currentXml.value = latestXml;
+    pendingXml.value = latestXml;
+    drawioReady.value = false;
+    iframeLoading.value = true;
+
+    drawioUi.value = nextUi;
+  }
+);
 
 // 从 Draw.io 获取最新的 XML（异步）
 const getCurrentXmlFromDrawio = (): Promise<string> => {

@@ -185,7 +185,7 @@ watch(() => props.visible, (visible) => {
 
 .loading-container p {
   margin-top: 16px;
-  color: #666;
+  color: var(--theme-text-secondary);
 }
 
 .error-container {
@@ -207,12 +207,12 @@ watch(() => props.visible, (visible) => {
   align-items: center;
   margin-bottom: 24px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #e5e6eb;
+  border-bottom: 1px solid var(--theme-border);
 }
 
 .timestamp {
   font-size: 12px;
-  color: #666;
+  color: var(--theme-text-secondary);
 }
 
 .status-section {
@@ -223,12 +223,12 @@ watch(() => props.visible, (visible) => {
   margin: 0 0 16px 0;
   font-size: 16px;
   font-weight: bold;
-  color: #333;
+  color: var(--theme-text);
 }
 
 .model-info,
 .vector-info {
-  background: #f7f8fa;
+  background: color-mix(in srgb, var(--theme-surface-soft) 72%, white 28%);
   padding: 16px;
   border-radius: 6px;
 }
@@ -246,12 +246,12 @@ watch(() => props.visible, (visible) => {
 
 .label {
   font-weight: 500;
-  color: #333;
+  color: var(--theme-text);
   min-width: 100px;
 }
 
 .value {
-  color: #666;
+  color: var(--theme-text-secondary);
   text-align: right;
 }
 
@@ -271,13 +271,13 @@ watch(() => props.visible, (visible) => {
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  background: #f7f8fa;
+  background: color-mix(in srgb, var(--theme-surface-soft) 72%, white 28%);
   border-radius: 4px;
 }
 
 .dep-name {
   font-weight: 500;
-  color: #333;
+  color: var(--theme-text);
 }
 
 .actions {
@@ -286,6 +286,6 @@ watch(() => props.visible, (visible) => {
   gap: 12px;
   margin-top: 24px;
   padding-top: 16px;
-  border-top: 1px solid #e5e6eb;
+  border-top: 1px solid var(--theme-border);
 }
 </style>

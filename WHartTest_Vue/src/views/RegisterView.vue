@@ -12,7 +12,7 @@
       <!-- 品牌标识区域 -->
       <div class="brand-section">
         <div class="brand-logo">
-          <img src="/WHartTest.png" alt="WHartTest Logo" class="logo-icon" />
+          <img :src="brandLogoUrl" alt="WHartTest Logo" class="logo-icon" />
         </div>
         <h1 class="brand-title">注册新账户</h1>
         <p class="brand-subtitle">欢迎加入WHartTest</p>
@@ -156,6 +156,7 @@ import { reactive, computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/store/authStore';
 import { Message } from '@arco-design/web-vue';
+import { brandLogoUrl } from '@/utils/assetUrl';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -246,7 +247,7 @@ const handleSubmit = async () => {
 .decoration-circle {
   position: absolute;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(0, 160, 233, 0.1) 0%, rgba(0, 160, 233, 0.05) 100%);
+  background: linear-gradient(135deg, rgba(var(--theme-accent-rgb), 0.1) 0%, rgba(var(--theme-accent-rgb), 0.05) 100%);
   animation: float 6s ease-in-out infinite;
 }
 
@@ -401,15 +402,15 @@ const handleSubmit = async () => {
 
 .form-input:focus {
   outline: none;
-  border-color: #00a0e9;
+  border-color: var(--theme-accent);
   background: #ffffff;
-  box-shadow: 0 0 0 4px rgba(0, 160, 233, 0.08);
+  box-shadow: 0 0 0 4px rgba(var(--theme-accent-rgb), 0.08);
   transform: translateY(-1px);
 }
 
 .form-input:focus + .input-icon,
 .input-wrapper:focus-within .input-icon {
-  color: #00a0e9;
+  color: var(--theme-accent);
 }
 
 .password-toggle {
@@ -422,7 +423,7 @@ const handleSubmit = async () => {
 }
 
 .password-toggle:hover {
-  color: #00a0e9;
+  color: var(--theme-accent);
 }
 
 .password-toggle svg {
@@ -434,7 +435,7 @@ const handleSubmit = async () => {
 .register-button {
   width: 100%;
   padding: 12px 24px;
-  background: #00a0e9;
+  background: var(--theme-accent);
   border: none;
   border-radius: 14px;
   color: #ffffff;
@@ -442,7 +443,7 @@ const handleSubmit = async () => {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 6px 16px rgba(0, 160, 233, 0.25);
+  box-shadow: 0 6px 16px rgba(var(--theme-accent-rgb), 0.25);
   position: relative;
   overflow: hidden;
   min-height: 48px;
@@ -451,14 +452,14 @@ const handleSubmit = async () => {
 
 .register-button:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 10px 25px rgba(26, 170, 235, 0.35);
-  background: #1aaaeb;
+  box-shadow: 0 10px 25px rgba(var(--theme-accent-rgb), 0.35);
+  background: var(--theme-accent-hover);
 }
 
 .register-button:active:not(:disabled) {
   transform: translateY(1px) scale(0.98);
   transition: all 0.1s ease;
-  background: #0090d1;
+  background: var(--theme-accent-active);
 }
 
 .register-button:disabled {
@@ -518,14 +519,14 @@ const handleSubmit = async () => {
 }
 
 .login-link .link {
-  color: #00a0e9;
+  color: var(--theme-accent);
   text-decoration: none;
   font-weight: 500;
   transition: color 0.2s ease;
 }
 
 .login-link .link:hover {
-  color: #0090d1;
+  color: var(--theme-accent-active);
   text-decoration: underline;
 }
 

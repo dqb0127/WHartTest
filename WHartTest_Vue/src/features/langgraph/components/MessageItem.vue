@@ -22,7 +22,7 @@
     <!-- 其他消息类型：使用头像+气泡布局 -->
     <template v-else>
       <div class="avatar">
-        <img v-if="message.messageType === 'ai'" :src="logo" alt="AI Avatar" class="avatar-img" />
+        <img v-if="message.messageType === 'ai'" :src="brandLogoUrl" alt="AI Avatar" class="avatar-img" />
         <div v-else class="avatar-img" :class="avatarClass">
           <icon-tool v-if="message.messageType === 'tool'" class="tool-avatar-icon" />
           <span v-else>{{ avatarText }}</span>
@@ -147,7 +147,7 @@ import { Button as AButton, Tooltip as ATooltip, Message } from '@arco-design/we
 import { IconCopy, IconReply, IconRefresh, IconDelete, IconEye, IconTool } from '@arco-design/web-vue/es/icon';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import logo from '/WHartTest.png';
+import { brandLogoUrl } from '@/utils/assetUrl';
 import { extractDiagramToolPayload } from '../utils/diagramToolParser';
 import { extractHtmlPreviewContent } from '../utils/htmlPreviewParser';
 
@@ -1015,10 +1015,10 @@ const formatToolMessage = (content: string) => {
 .tool-header {
   font-size: 0.9em;
   font-weight: 600;
-  color: #666;
+  color: var(--theme-text-secondary);
   margin-bottom: 8px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #e6f4ea;
+  border-bottom: 1px solid rgba(var(--theme-accent-rgb), 0.16);
 }
 
 .tool-content {
@@ -1044,7 +1044,7 @@ const formatToolMessage = (content: string) => {
   left: 0;
   right: 0;
   height: 40px;
-  background: linear-gradient(transparent, #fff7e6);
+  background: linear-gradient(transparent, color-mix(in srgb, var(--theme-surface) 78%, white 22%));
   pointer-events: none;
 }
 
@@ -1445,10 +1445,10 @@ const formatToolMessage = (content: string) => {
 .message-bubble :deep(h3) { font-size: 1.1em; }
 
 .message-bubble :deep(blockquote) {
-  border-left: 3px solid #ddd;
+  border-left: 3px solid var(--theme-border);
   margin: 8px 0;
   padding-left: 12px;
-  color: #666;
+  color: var(--theme-text-secondary);
 }
 
 .message-bubble :deep(img) {

@@ -22,7 +22,7 @@ onMounted(() => { // 在根组件挂载完成后执行一次初始化回调。
   -webkit-font-smoothing: antialiased; /* 在 WebKit 内核浏览器启用抗锯齿字体渲染。 */
   -moz-osx-font-smoothing: grayscale; /* 在 macOS Firefox 上优化字体平滑显示效果。 */
   text-align: center; /* 设置默认文本水平居中（具体页面可自行覆盖）。 */
-  color: #2c3e50; /* 设置应用默认文字颜色为深灰蓝。 */
+  color: var(--theme-page-text); /* 设置应用默认文字颜色为当前主题页面文本色。 */
   min-height: 100vh; /* 保证根容器最小高度覆盖整个可视区域高度。 */
 }
 

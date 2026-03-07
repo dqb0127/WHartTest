@@ -4,7 +4,7 @@
 
     <div class="content-layer">
       <div class="brand-area">
-        <img src="/WHartTest.png" alt="Logo" class="brand-logo" />
+        <img :src="brandLogoUrl" alt="Logo" class="brand-logo" />
         <h1 class="brand-title">WHartTest</h1>
         <p class="brand-subtitle">小麦智测自动化平台</p>
         <div class="brand-tags">
@@ -156,6 +156,7 @@ import { Message } from '@arco-design/web-vue'
 import { useRouter } from 'vue-router'
 import { useStarryBackground } from '@/composables/useStarryBackground'
 import { useAuthStore } from '@/store/authStore'
+import { brandLogoUrl } from '@/utils/assetUrl'
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const usernameInputRef = ref<HTMLInputElement | null>(null)

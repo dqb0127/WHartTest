@@ -1844,7 +1844,7 @@ onBeforeUnmount(() => {
   border-left: 4px solid #e5e6eb;
   padding-left: 16px;
   margin: 1em 0;
-  color: #666;
+  color: var(--theme-text-secondary);
 }
 
 /* 图片样式 */
@@ -1892,7 +1892,7 @@ onBeforeUnmount(() => {
 
 .selected-titles {
   font-weight: normal;
-  color: #666;
+  color: var(--theme-text-secondary);
   margin-left: 8px;
 }
 
@@ -1979,7 +1979,7 @@ onBeforeUnmount(() => {
   font-size: 12px; /* 稍小的字体大小 */
   line-height: 1.4;
   margin: 0;
-  color: #666; /* 提示文字用稍浅的颜色 */
+  color: var(--theme-text-secondary);
   display: flex;
   align-items: center; /* 内容文字垂直居中 */
 }

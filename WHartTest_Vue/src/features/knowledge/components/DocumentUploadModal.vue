@@ -374,19 +374,19 @@ const handleCancel = () => {
 
 .upload-text > div:first-child {
   font-size: 14px;
-  color: #333;
+  color: var(--theme-text);
   margin-bottom: 4px;
 }
 
 .upload-tip {
   font-size: 12px;
-  color: #999;
+  color: var(--theme-text-tertiary);
 }
 
 .upload-progress {
   margin-top: 16px;
   padding: 16px;
-  background-color: #f7f8fa;
+  background-color: color-mix(in srgb, var(--theme-surface-soft) 72%, white 28%);
   border-radius: 6px;
 }
 
@@ -394,7 +394,7 @@ const handleCancel = () => {
   text-align: center;
   margin-top: 8px;
   font-size: 12px;
-  color: #666;
+  color: var(--theme-text-secondary);
 }
 
 .file-upload-container {
@@ -404,9 +404,9 @@ const handleCancel = () => {
 .selected-file {
   margin-top: 12px;
   padding: 8px 12px;
-  background: #f7f8fa;
+  background: color-mix(in srgb, var(--theme-surface-soft) 72%, white 28%);
   border-radius: 6px;
-  border: 1px solid #e5e6eb;
+  border: 1px solid var(--theme-border);
 }
 
 .file-info {
@@ -418,12 +418,12 @@ const handleCancel = () => {
 .file-name {
   flex: 1;
   font-size: 14px;
-  color: #333;
+  color: var(--theme-text);
 }
 
 .file-size {
   font-size: 12px;
-  color: #666;
+  color: var(--theme-text-secondary);
 }
 
 :deep(.arco-form-item-label) {

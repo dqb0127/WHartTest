@@ -66,7 +66,7 @@
       <div v-if="mcpConfigs.length === 0 && !loading" class="empty-data">
         <p>暂无数据</p>
       </div>
-      <div v-if="mcpConfigs.length > 0" class="debug-info" style="margin-top: 10px; font-size: 12px; color: #999;">
+      <div v-if="mcpConfigs.length > 0" class="debug-info" style="margin-top: 10px; font-size: 12px; color: var(--theme-text-tertiary);">
         <p>当前数据条数: {{ mcpConfigs.length }}</p>
       </div>
     </a-card>
