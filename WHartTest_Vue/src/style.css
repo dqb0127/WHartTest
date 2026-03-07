@@ -385,8 +385,8 @@ button:focus-visible {
 }
 
 :root[data-theme='black'] .login-overlay {
-  background: rgba(11, 18, 32, 0.44) !important;
-  backdrop-filter: blur(10px) !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
 }
 
 :root[data-theme='black'] .login-card {

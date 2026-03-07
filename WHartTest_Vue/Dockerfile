@@ -1,5 +1,5 @@
 # 第一阶段：构建阶段
-FROM docker.1ms.run/library/node:20-alpine AS builder
+FROM node:20-alpine AS builder
 
 # 设置工作目录
 WORKDIR /app
@@ -31,7 +31,7 @@ COPY .env.production .env.production
 RUN npx vite build --mode production
 
 # 第二阶段：运行阶段
-FROM docker.1ms.run/library/nginx:alpine
+FROM nginx:alpine
 
 # 复制自定义 nginx 配置
 COPY nginx.conf /etc/nginx/conf.d/default.conf

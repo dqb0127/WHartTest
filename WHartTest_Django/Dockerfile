@@ -6,7 +6,7 @@
 # ============================================
 # 第一阶段：构建阶段（包含编译工具）
 # ============================================
-FROM docker.1ms.run/library/python:3.11-slim AS builder
+FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
@@ -14,14 +14,11 @@ WORKDIR /build
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
+    DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# 配置 apt 国内镜像加速（清华源）
-RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources && \
-    sed -i 's|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources
-
 # 安装构建依赖（仅在构建阶段需要）
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=10 update && apt-get -o Acquire::Retries=10 install -y --fix-missing --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
@@ -56,24 +53,21 @@ print('BM25 model downloaded to:', os.environ.get('FASTEMBED_CACHE_PATH')); \
 # ============================================
 # 第二阶段：运行阶段（仅包含运行时依赖）
 # ============================================
-FROM docker.1ms.run/library/python:3.11-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    DEBIAN_FRONTEND=noninteractive \
     PATH="/opt/venv/bin:$PATH" \
-    PYTHONPATH="/app:$PYTHONPATH" \
+    PYTHONPATH="/app" \
     FASTEMBED_CACHE_PATH=/root/.cache/fastembed \
     HF_ENDPOINT=https://hf-mirror.com
 
-# 配置 apt 国内镜像加速（清华源）
-RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources && \
-    sed -i 's|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources
-
 # 仅安装运行时必需的系统依赖
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=10 update && apt-get -o Acquire::Retries=10 install -y --fix-missing --no-install-recommends \
     supervisor \
     curl \
     git \

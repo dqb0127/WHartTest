@@ -163,7 +163,7 @@ $sys_info
 - 优先检测环境，推荐合适的安装方式
 - 有 Docker 时推荐 Docker 安装
 - 无 Docker 时指导手动安装
-- Docker 拉取慢时推荐加速镜像：docker.1ms.run、docker.1panel.live、dockerproxy.cn
+- Docker 拉取慢时优先配置 Docker daemon 镜像或私有仓库，避免依赖不稳定的公共代理
 
 示例对话 1：
 用户：帮我检查环境

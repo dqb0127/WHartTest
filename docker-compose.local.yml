@@ -10,7 +10,7 @@
 services:
   # PostgreSQL 数据库服务（生产环境默认启用）
   postgres:
-    image: docker.1ms.run/library/postgres:16-alpine
+    image: postgres:16-alpine
     container_name: wharttest-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -31,12 +31,7 @@ services:
 
   # Redis 服务 - Celery的broker和backend
   redis:
-    # 当前使用 DaoCloud 镜像加速（国内最稳定的公共镜像源之一）
-    # 如果拉取失败，可尝试：
-    # - dockerproxy.com/library/redis:7-alpine
-    # - docker.1panel.live/library/redis:7-alpine
-    # - docker.rainbond.cc/library/redis:7-alpine
-    image: docker.1ms.run/library/redis:7-alpine
+    image: redis:7-alpine
     container_name: wharttest-redis
     ports:
       - "0.0.0.0:8911:6379"
@@ -106,7 +101,7 @@ services:
       - wharttest-network
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/')" ]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/')" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -220,7 +215,7 @@ services:
 
   # Qdrant 向量数据库 - 知识库检索
   qdrant:
-    image: docker.1ms.run/qdrant/qdrant:latest
+    image: qdrant/qdrant:latest
     container_name: wharttest-qdrant
     ports:
       - "0.0.0.0:8918:6333"  # REST API
