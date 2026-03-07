@@ -134,6 +134,7 @@ _MARKDOWN_IMAGE_URL_RE = re.compile(
 _PLAIN_HTTP_URL_RE = re.compile(r'(?P<url>https?://[^\s<>"\']+)', re.IGNORECASE)
 _URL_LEADING_WRAP_CHARS = "([<{\"'“‘（【《「『"
 _URL_TRAILING_WRAP_CHARS = ")]}>\"'”’）】》」』.,;!?，。；！？、"
+_URL_HARD_STOP_CHARS = "\r\n\t ,;)}]>\"'，。；！？、：”’）】》」』"
 
 
 def _get_env_int(name: str, default: int, min_value: int = 1) -> int:
@@ -196,6 +197,11 @@ def _extract_linked_image_urls(text: str) -> List[str]:
         url = (candidate or "").strip()
         while url and url[0] in _URL_LEADING_WRAP_CHARS:
             url = url[1:]
+        hard_stop_indexes = [
+            url.find(char) for char in _URL_HARD_STOP_CHARS if char in url
+        ]
+        if hard_stop_indexes:
+            url = url[: min(index for index in hard_stop_indexes if index >= 0)]
         while url and url[-1] in _URL_TRAILING_WRAP_CHARS:
             url = url[:-1]
         return url
@@ -206,8 +212,13 @@ def _extract_linked_image_urls(text: str) -> List[str]:
             if not url or url in seen:
                 continue
 
-            parsed = urlparse(url)
+            try:
+                parsed = urlparse(url)
+            except ValueError:
+                continue
             if parsed.scheme.lower() not in ("http", "https"):
+                continue
+            if not parsed.netloc:
                 continue
 
             seen.add(url)
@@ -221,7 +232,10 @@ def _is_linked_image_url_allowed(url: str) -> bool:
     if "*" in _LINKED_IMAGE_URL_ALLOWLIST or "all" in _LINKED_IMAGE_URL_ALLOWLIST:
         return True
 
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
     host = (parsed.hostname or "").strip().lower()
     return bool(host and host in _LINKED_IMAGE_URL_ALLOWLIST)
 

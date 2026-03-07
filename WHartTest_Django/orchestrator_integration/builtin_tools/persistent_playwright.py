@@ -24,6 +24,8 @@ from typing import Any, Dict, List, Optional
 
 import logging
 
+from .output_sanitizer import strip_terminal_control_sequences
+
 logger = logging.getLogger("orchestrator_integration")
 
 
@@ -240,7 +242,9 @@ class _PlaywrightNodeProcess:
             try:
                 msg = json.loads(raw)
             except Exception:
-                self._stderr_tail.append(f"[stdout] {raw}")
+                self._stderr_tail.append(
+                    strip_terminal_control_sequences(f"[stdout] {raw}")
+                )
                 continue
 
             req_id = msg.get("id")
@@ -264,7 +268,7 @@ class _PlaywrightNodeProcess:
         for line in self._proc.stderr:
             raw = (line or "").rstrip("\n")
             if raw:
-                self._stderr_tail.append(raw)
+                self._stderr_tail.append(strip_terminal_control_sequences(raw))
 
     def _fail_all_pending(self, reason: str) -> None:
         with self._pending_lock:
@@ -348,11 +352,19 @@ class _PlaywrightNodeProcess:
 
         output = ""
         if stdout_lines:
-            output += "\n".join(str(x) for x in stdout_lines if x is not None)
+            output += "\n".join(
+                strip_terminal_control_sequences(str(x))
+                for x in stdout_lines
+                if x is not None
+            )
         if stderr_lines:
             if output:
                 output += "\n--- stderr ---\n"
-            output += "\n".join(str(x) for x in stderr_lines if x is not None)
+            output += "\n".join(
+                strip_terminal_control_sequences(str(x))
+                for x in stderr_lines
+                if x is not None
+            )
 
         if not resp.get("ok", False):
             err = resp.get("error")
@@ -360,7 +372,7 @@ class _PlaywrightNodeProcess:
                 if output:
                     output = f"{err}\n{output}"
                 else:
-                    output = str(err)
+                    output = strip_terminal_control_sequences(str(err))
 
         return output
 
