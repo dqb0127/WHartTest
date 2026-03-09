@@ -18,7 +18,7 @@
 
 - 容器启动新增预置 Skills 自动初始化（`init_skills`）。
 - Docker 本地开发支持挂载 bundled skills 自动同步。
-- 新增 `run_local_compose.sh` 一键构建、启动、日志采集脚本。
+- 新增 `run_compose.sh` 一键构建、启动、日志采集脚本。
 
 ## ✨ 新功能
 
@@ -84,6 +84,6 @@
 ## 📦 升级说明
 
 1. 升级后请执行数据库迁移：`python manage.py migrate`。
-2. Docker 本地开发建议使用：`./scripts/run_local_compose.sh docker-compose.local.yml`。
+2. Docker 本地开发建议使用：`./run_compose.sh docker-compose.local.yml`。
 3. 若需启用 `xinference`，请在 compose 文件中手动开启对应服务。
 4. 若依赖 Draw.io 自托管能力，请调整为官方在线模式或自行扩展代理方案。

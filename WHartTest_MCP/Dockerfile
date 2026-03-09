@@ -1,5 +1,10 @@
 # 使用 Python 3.11 官方镜像作为基础镜像
-FROM python:3.11-slim
+ARG PYTHON_BASE_IMAGE=python:3.11-slim
+FROM ${PYTHON_BASE_IMAGE}
+
+ARG APT_BASE_URL=http://deb.debian.org
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_INDEX_FALLBACKS=
 
 # 设置工作目录
 WORKDIR /app
@@ -9,23 +14,51 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     DEBIAN_FRONTEND=noninteractive \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_FALLBACKS=${PIP_INDEX_FALLBACKS}
 
 # 安装系统依赖
-RUN apt-get -o Acquire::Retries=10 update && apt-get -o Acquire::Retries=10 install -y --fix-missing --no-install-recommends \
+RUN if [ "$APT_BASE_URL" != "http://deb.debian.org" ]; then \
+        sed -i "s|http://deb.debian.org/debian|${APT_BASE_URL}/debian|g; s|http://deb.debian.org/debian-security|${APT_BASE_URL}/debian-security|g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get -o Acquire::Retries=10 update && apt-get -o Acquire::Retries=10 install -y --fix-missing --no-install-recommends \
     supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 uv
-RUN pip install uv
+# 安装 uv（主镜像失败时自动切换到后备源）
+RUN set -eux; \
+    install_uv() { \
+      for index in "${PIP_INDEX_URL}" ${PIP_INDEX_FALLBACKS}; do \
+        [ -n "$index" ] || continue; \
+        echo "pip install uv via $index"; \
+        if python -m pip install --no-cache-dir --retries 5 --timeout 30 -i "$index" uv; then \
+          return 0; \
+        fi; \
+        echo "pip install uv failed via $index, trying next index..." >&2; \
+      done; \
+      return 1; \
+    }; \
+    install_uv
 
 # 复制依赖文件
 COPY requirements.txt .
 
-# 使用 uv 安装 Python 依赖 + 使用清华镜像加速
-RUN uv pip install --system \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple \
-    -r requirements.txt
+# 使用 uv 安装 Python 依赖（主镜像失败时自动切换到后备源）
+RUN set -eux; \
+    install_requirements() { \
+      for index in "${PIP_INDEX_URL}" ${PIP_INDEX_FALLBACKS}; do \
+        [ -n "$index" ] || continue; \
+        echo "uv pip install via $index"; \
+        if uv pip install --system \
+          --default-index "$index" \
+          -r requirements.txt; then \
+          return 0; \
+        fi; \
+        echo "uv pip install failed via $index, trying next index..." >&2; \
+      done; \
+      return 1; \
+    }; \
+    install_requirements
 
 # 复制supervisord配置
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
