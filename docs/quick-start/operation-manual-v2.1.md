@@ -37,6 +37,36 @@
 ![alt text](./img_8.png)
 ![alt text](./img_2.png)
 ![alt text](./img_3.png)
+#### 操作步骤
+1.创建一个模块
+![alt text](./img_9.png)
+2.创建一个页面
+![alt text](./img_10.png)
+3.添加页面元素
+![alt text](./img_11.png)
+![alt text](./img_12.png)
+4.新增页面步骤
+![alt text](./img_13.png)
+5.添加步骤
+![alt text](./img_14.png)
+![alt text](./img_15.png)
+6.创建环境配置
+![alt text](./img_16.png)
+7.启动执行器  
+终端执行下面的命令
+![alt text](./img_17.png)
+![alt text](./img_18.png)
+![alt text](./img_19.png)
+![alt text](./img_20.png)
+![alt text](./img_21.png)
+8.创建测试用例
+![alt text](./img_22.png)
+9.执行测试用例
+![alt text](./img_23.png)
+![alt text](./img_24.png)
+![alt text](./img_25.png)
+![alt text](./img_26.png)
+![alt text](./img_27.png)
 ### Agent 交互能力增强
 
 - 工具消息支持头像与图片悬浮预览，支持拖动和关闭。
