@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db.models.deletion import ProtectedError
+from django.db import transaction
 
 from .models import (
     UiModule, UiPage, UiElement, UiPageSteps, UiPageStepsDetailed,
@@ -218,6 +219,83 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='batch-delete')
+    def batch_delete(self, request, **kwargs):
+        """
+        批量删除UI自动化测试用例
+        POST请求体格式: {"ids": [1, 2, 3, 4]}
+        """
+        # 获取要删除的用例ID列表
+        ids_data = request.data.get('ids', [])
+
+        if not ids_data:
+            return Response(
+                {'error': '请提供要删除的用例ID列表'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 验证ID格式
+        try:
+            testcase_ids = [int(id) for id in ids_data]
+        except (ValueError, TypeError):
+            return Response(
+                {'error': 'ids参数格式错误，应为数字列表'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not testcase_ids:
+            return Response(
+                {'error': '用例ID列表不能为空'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 获取当前查询集，确保数据隔离
+        queryset = self.get_queryset()
+
+        # 过滤出要删除的用例
+        testcases_to_delete = queryset.filter(id__in=testcase_ids)
+
+        # 检查是否所有请求的ID都存在
+        found_ids = list(testcases_to_delete.values_list('id', flat=True))
+        not_found_ids = [id for id in testcase_ids if id not in found_ids]
+
+        if not_found_ids:
+            return Response(
+                {
+                    'error': f'以下用例ID不存在: {not_found_ids}',
+                    'not_found_ids': not_found_ids
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 记录删除前的信息用于返回
+        deleted_testcases_info = []
+        for testcase in testcases_to_delete:
+            deleted_testcases_info.append({
+                'id': testcase.id,
+                'name': testcase.name,
+                'module': testcase.module.name if testcase.module else None
+            })
+
+        # 执行批量删除
+        try:
+            with transaction.atomic():
+                # 删除用例（关联的步骤会因为外键级联删除而自动删除）
+                deleted_count, deleted_details = testcases_to_delete.delete()
+
+                return Response({
+                    'message': f'成功删除 {len(deleted_testcases_info)} 个UI自动化测试用例',
+                    'deleted_count': len(deleted_testcases_info),
+                    'deleted_testcases': deleted_testcases_info,
+                    'deletion_details': deleted_details
+                }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response(
+                {'error': f'删除过程中发生错误: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class UiCaseStepsDetailedViewSet(viewsets.ModelViewSet):

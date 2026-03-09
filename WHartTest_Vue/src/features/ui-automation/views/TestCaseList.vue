@@ -74,6 +74,20 @@
           <template #icon><icon-thunderbolt /></template>
           批量执行{{ selectedRowKeys.length > 0 ? ` (${selectedRowKeys.length})` : '' }}
         </a-button>
+        <a-popconfirm
+          content="确定要删除选中的用例吗？此操作不可恢复。"
+          @ok="batchDeleteTestCases"
+        >
+          <a-button
+            type="primary"
+            status="danger"
+            :disabled="selectedRowKeys.length === 0"
+            style="margin-right: 12px"
+          >
+            <template #icon><icon-delete /></template>
+            批量删除{{ selectedRowKeys.length > 0 ? ` (${selectedRowKeys.length})` : '' }}
+          </a-button>
+        </a-popconfirm>
         <a-button type="primary" @click="showAddModal">
           <template #icon><icon-plus /></template>
           新增用例
@@ -564,6 +578,32 @@ const runBatchTestCases = async () => {
   } else {
     Message.error('发送批量执行命令失败')
     executingIds.value = executingIds.value.filter(id => !selectedRowKeys.value.includes(id))
+  }
+}
+
+/** 批量删除选中的用例 */
+const batchDeleteTestCases = async () => {
+  if (selectedRowKeys.value.length === 0) {
+    Message.warning('请先选择要删除的用例')
+    return
+  }
+
+  try {
+    const res = await testCaseApi.batchDelete(selectedRowKeys.value)
+    const result = extractResponseData(res)
+    
+    if (result) {
+      Message.success(result.message || `成功删除 ${selectedRowKeys.value.length} 个用例`)
+      // 清空选择
+      selectedRowKeys.value = []
+      // 刷新列表
+      fetchTestCases()
+    } else {
+      Message.error('批量删除失败')
+    }
+  } catch (error) {
+    console.error('批量删除用例出错:', error)
+    Message.error('批量删除用例时发生错误')
   }
 }
 

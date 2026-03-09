@@ -126,6 +126,8 @@ export const testCaseApi = {
     request.patch<UiTestCase>(`${BASE_URL}/testcases/${id}/`, data),
 
   delete: (id: number) => request.delete(`${BASE_URL}/testcases/${id}/`),
+
+  batchDelete: (ids: number[]) => request.post(`${BASE_URL}/testcases/batch-delete/`, { ids }),
 }
 
 // ==================== 用例步骤管理 ====================
