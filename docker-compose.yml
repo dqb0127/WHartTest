@@ -1,5 +1,5 @@
 # 默认配置 - 使用预构建的Docker镜像
-# 使用方式: docker-compose up -d
+# 使用方式: ./run_compose.sh remote
 #
 # 镜像会从 GitHub Container Registry (ghcr.io) 自动拉取
 # 如果需要本地构建镜像（开发环境），请注释掉 image 行，取消注释 build 部分
@@ -11,7 +11,7 @@
 services:
   # PostgreSQL 数据库服务（生产环境默认启用）
   postgres:
-    image: postgres:16-alpine
+    image: ${DOCKER_POSTGRES_IMAGE:-postgres:16-alpine}
     container_name: wharttest-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -32,7 +32,7 @@ services:
 
   # Redis 服务 - Celery的broker和backend
   redis:
-    image: redis:7-alpine
+    image: ${DOCKER_REDIS_IMAGE:-redis:7-alpine}
     container_name: wharttest-redis
     ports:
       - "8911:6379"
@@ -50,7 +50,7 @@ services:
 
   # 后端 Django 服务（包含Celery Worker和Beat）
   backend:
-    image: ghcr.io/mgdaaslab/wharttest-backend:latest
+    image: ${DOCKER_BACKEND_IMAGE:-ghcr.io/mgdaaslab/wharttest-backend:latest}
     # 如果需要本地构建，注释掉上面的image行，取消注释下面的build部分
     # build:
     #   context: ./WHartTest_Django
@@ -92,6 +92,7 @@ services:
       - QDRANT_URL=http://qdrant:6333
       # 内部API基础URL - 使用localhost因为在同一容器
       - DJANGO_BASE_URL=http://localhost:8000
+      - HF_ENDPOINT=${DOCKER_HF_ENDPOINT:-https://huggingface.co}
     depends_on:
       postgres:
         condition: service_healthy
@@ -111,7 +112,7 @@ services:
 
   # 前端 Vue 服务
   frontend:
-    image: ghcr.io/mgdaaslab/wharttest-frontend:latest
+    image: ${DOCKER_FRONTEND_IMAGE:-ghcr.io/mgdaaslab/wharttest-frontend:latest}
     # 如果需要本地构建，注释掉上面的image行，取消注释下面的build部分
     # build:
     #   context: ./WHartTest_Vue
@@ -133,7 +134,7 @@ services:
 
   # MCP 服务（独立容器）
   mcp:
-    image: ghcr.io/mgdaaslab/wharttest-mcp:latest
+    image: ${DOCKER_MCP_IMAGE:-ghcr.io/mgdaaslab/wharttest-mcp:latest}
     # 如果需要本地构建，注释掉上面的image行，取消注释下面的build部分
     # build:
     #   context: ./WHartTest_MCP
@@ -168,7 +169,7 @@ services:
 
   # Playwright MCP 服务（官方Docker镜像）
   playwright-mcp:
-    image: mcr.microsoft.com/playwright/mcp
+    image: ${DOCKER_PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp}
     container_name: wharttest-playwright-mcp
     user: root # 以 root 用户运行,确保有权限写入挂载目录
     entrypoint: node
@@ -190,7 +191,7 @@ services:
 
   # Qdrant 向量数据库服务
   qdrant:
-    image: qdrant/qdrant:latest
+    image: ${DOCKER_QDRANT_IMAGE:-qdrant/qdrant:latest}
     container_name: wharttest-qdrant
     ports:
       - "8918:6333"  # REST API

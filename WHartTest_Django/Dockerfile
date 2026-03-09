@@ -3,10 +3,17 @@
 # 镜像大小：~1.1GB（从1.74GB减少36.8%）
 # ============================================
 
+ARG PYTHON_BASE_IMAGE=python:3.11-slim
+
 # ============================================
 # 第一阶段：构建阶段（包含编译工具）
 # ============================================
-FROM python:3.11-slim AS builder
+FROM ${PYTHON_BASE_IMAGE} AS builder
+
+ARG APT_BASE_URL=http://deb.debian.org
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_INDEX_FALLBACKS=
+ARG HF_ENDPOINT=https://huggingface.co
 
 WORKDIR /build
 
@@ -15,36 +22,64 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     DEBIAN_FRONTEND=noninteractive \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_INDEX_FALLBACKS=${PIP_INDEX_FALLBACKS} \
+    FASTEMBED_CACHE_PATH=/root/.cache/fastembed \
+    HF_ENDPOINT=${HF_ENDPOINT}
 
 # 安装构建依赖（仅在构建阶段需要）
-RUN apt-get -o Acquire::Retries=10 update && apt-get -o Acquire::Retries=10 install -y --fix-missing --no-install-recommends \
+RUN if [ "$APT_BASE_URL" != "http://deb.debian.org" ]; then \
+        sed -i "s|http://deb.debian.org/debian|${APT_BASE_URL}/debian|g; s|http://deb.debian.org/debian-security|${APT_BASE_URL}/debian-security|g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get -o Acquire::Retries=10 update && apt-get -o Acquire::Retries=10 install -y --fix-missing --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装uv（更快的pip替代品）+ 使用清华镜像加速
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple uv
+# 安装 uv（主镜像失败时自动切换到后备源）
+RUN set -eux; \
+    install_uv() { \
+      for index in "${PIP_INDEX_URL}" ${PIP_INDEX_FALLBACKS}; do \
+        [ -n "$index" ] || continue; \
+        echo "pip install uv via $index"; \
+        if python -m pip install --no-cache-dir --retries 5 --timeout 30 -i "$index" uv; then \
+          return 0; \
+        fi; \
+        echo "pip install uv failed via $index, trying next index..." >&2; \
+      done; \
+      return 1; \
+    }; \
+    install_uv
 
 # 复制requirements并安装依赖到虚拟环境
 COPY requirements.txt .
 
-# 使用uv直接安装到虚拟环境（uv更快）+ 使用清华镜像加速
-RUN uv venv /opt/venv && \
-    uv pip install --python /opt/venv/bin/python --no-cache \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple \
-    -r requirements.txt
+# 使用 uv 直接安装到虚拟环境（主镜像失败时自动切换到后备源）
+RUN set -eux; \
+    uv venv /opt/venv; \
+    install_requirements() { \
+      for index in "${PIP_INDEX_URL}" ${PIP_INDEX_FALLBACKS}; do \
+        [ -n "$index" ] || continue; \
+        echo "uv pip install via $index"; \
+        if uv pip install --python /opt/venv/bin/python --no-cache \
+          --default-index "$index" \
+          -r requirements.txt; then \
+          return 0; \
+        fi; \
+        echo "uv pip install failed via $index, trying next index..." >&2; \
+      done; \
+      return 1; \
+    }; \
+    install_requirements
 
 # 预下载 BM25 稀疏编码模型（用于混合检索）
 # 使用 FASTEMBED_CACHE_PATH 环境变量强制指定缓存路径
-# 使用 Hugging Face 国内镜像加速下载
-ENV HOME=/root \
-    FASTEMBED_CACHE_PATH=/root/.cache/fastembed \
-    HF_ENDPOINT=https://hf-mirror.com
+# 运行时会继承当前选择的 Hugging Face 下载地址
+ENV HOME=/root
 RUN mkdir -p /root/.cache/fastembed && \
     /opt/venv/bin/python -c "\
 import os; \
 os.environ['FASTEMBED_CACHE_PATH'] = '/root/.cache/fastembed'; \
-os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'; \
+os.environ['HF_ENDPOINT'] = os.environ.get('HF_ENDPOINT', 'https://huggingface.co'); \
 from fastembed import SparseTextEmbedding; \
 m = SparseTextEmbedding('Qdrant/bm25'); \
 print('BM25 model downloaded to:', os.environ.get('FASTEMBED_CACHE_PATH')); \
@@ -53,7 +88,12 @@ print('BM25 model downloaded to:', os.environ.get('FASTEMBED_CACHE_PATH')); \
 # ============================================
 # 第二阶段：运行阶段（仅包含运行时依赖）
 # ============================================
-FROM python:3.11-slim
+FROM ${PYTHON_BASE_IMAGE}
+
+ARG APT_BASE_URL=http://deb.debian.org
+ARG HF_ENDPOINT=https://huggingface.co
+ARG NPM_REGISTRY=https://registry.npmjs.org
+ARG PLAYWRIGHT_DOWNLOAD_HOST=
 
 WORKDIR /app
 
@@ -64,10 +104,14 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
     PYTHONPATH="/app" \
     FASTEMBED_CACHE_PATH=/root/.cache/fastembed \
-    HF_ENDPOINT=https://hf-mirror.com
+    HF_ENDPOINT=${HF_ENDPOINT} \
+    PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST}
 
 # 仅安装运行时必需的系统依赖
-RUN apt-get -o Acquire::Retries=10 update && apt-get -o Acquire::Retries=10 install -y --fix-missing --no-install-recommends \
+RUN if [ "$APT_BASE_URL" != "http://deb.debian.org" ]; then \
+        sed -i "s|http://deb.debian.org/debian|${APT_BASE_URL}/debian|g; s|http://deb.debian.org/debian-security|${APT_BASE_URL}/debian-security|g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get -o Acquire::Retries=10 update && apt-get -o Acquire::Retries=10 install -y --fix-missing --no-install-recommends \
     supervisor \
     curl \
     git \
@@ -141,7 +185,8 @@ RUN set -eux; \
 
 # 安装 agent-browser CLI 工具及其浏览器
 # agent-browser 是 AI Agent 专用的浏览器自动化工具
-RUN npm install -g agent-browser && \
+RUN npm config set registry "${NPM_REGISTRY}" && \
+    npm install -g agent-browser && \
     agent-browser install
 
 # 从构建阶段复制预下载的 BM25 模型缓存

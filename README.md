@@ -20,14 +20,58 @@ cd WHartTest
 # 2. 准备配置（使用默认配置，包含自动生成的API Key）
 cp .env.example .env
 
-# 3. 一键启动（自动拉取预构建镜像）
-docker-compose up -d
+# 3. 一键启动（直接运行脚本，按提示选择 1 或 2）
+./run_compose.sh
 
 # 4. 访问系统
 # http://localhost:8913 (admin/admin123456)
 ```
 
 **就这么简单！** 系统会自动创建默认API Key，MCP服务开箱即用。
+
+### 统一部署脚本
+
+如果你使用仓库自带脚本部署，现在启动后会先让你在“远程拉镜像”和“本地构建镜像”之间二选一：
+
+```bash
+./run_compose.sh
+```
+
+这个脚本现在会：
+
+- 先选择部署方式：`remote` 远程镜像下载，或 `local` 本地构建镜像
+- `remote` 模式会自动在内置远程镜像仓库候选里测速择优，用户只需选择 `1` 即可
+- `remote` 会按仓库类型分别选择：Docker Hub 使用官方 / `docker.1panel.live` / `docker.1ms.run` / `docker.xuanyuan.me` / `docker.m.daocloud.io`，GHCR 使用官方 / `ghcr.1ms.run` / `ghcr.nju.edu.cn` / `ghcr.m.daocloud.io`，MCR 使用官方 / `mcr.azure.cn` / `mcr.m.daocloud.io`
+- `local` 模式会自动探测当前网络下更快的 `APT / PyPI / npm / Hugging Face` 下载地址
+- Python 依赖安装现在支持自动回退：首选测速最快的 PyPI 源，某个包下载超时会顺序切到其余候选继续安装
+- `local` 内置候选包含官方源、清华、中科大、阿里云、腾讯云、华为云、北外、上海交大、`npmmirror`、`hf-mirror` 等
+- 支持通过环境变量继续追加你自己的候选镜像源
+- 本地构建默认使用 Docker 缓存，不再每次都 `--no-cache`
+
+常用示例：
+
+```bash
+# 交互选择部署方式
+./run_compose.sh
+
+# 直接使用远程预构建镜像
+./run_compose.sh remote
+
+# 直接使用本地构建，并自动选择更快下载源
+./run_compose.sh local
+
+# 本地构建时强制使用原生官方源
+DOCKER_SOURCE_PROFILE=native ./run_compose.sh local
+
+# 本地构建时强制只在镜像源里择优
+DOCKER_SOURCE_PROFILE=mirror ./run_compose.sh local
+
+# 给 PyPI 追加自定义候选源（注意用引号包起来）
+DOCKER_PIP_CANDIDATES_EXTRA="corp|https://pypi.example.com/simple|https://pypi.example.com/simple/pip/" ./run_compose.sh local
+
+# 只有在本地全量重建时才禁用缓存
+DOCKER_BUILD_NO_CACHE=1 ./run_compose.sh local
+```
 
 > ⚠️ **生产环境提示**：请登录后台删除默认API Key并创建新的安全密钥。详见 [快速启动指南](./docs/QUICK_START.md)
 
