@@ -237,12 +237,36 @@ PY
   awk -v left="$left" -v right="$right" 'BEGIN { exit !(left < right) }'
 }
 
+format_speed() {
+  local speed_kbps="$1"
+  awk -v s="$speed_kbps" 'BEGIN { if (s >= 1024) printf "%.2f MB/s", s/1024; else printf "%.1f KB/s", s }'
+}
+
 probe_url_speed() {
   local url="$1"
   local timeout="${2:-5}"
   local max_bytes="${3:-1048576}"
 
-  python3 - "$url" "$timeout" "$max_bytes" <<'PY'
+  if command -v curl >/dev/null 2>&1; then
+    curl -sS -o /dev/null \
+      -H "User-Agent: Mozilla/5.0" \
+      --connect-timeout "$timeout" \
+      --max-time "$timeout" \
+      -r "0-$((max_bytes - 1))" \
+      -w '%{speed_download}' \
+      "$url" 2>/dev/null | awk '{
+        speed_bytes = $1
+        if (speed_bytes > 0) {
+          printf "%.1f", speed_bytes / 1024
+        } else {
+          exit 1
+        }
+      }'
+    return "${PIPESTATUS[1]:-$?}"
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$url" "$timeout" "$max_bytes" <<'PY'
 import sys, time, urllib.error, urllib.request
 
 url, timeout, max_bytes = sys.argv[1], float(sys.argv[2]), int(sys.argv[3])
@@ -269,6 +293,10 @@ if elapsed > 0 and total > 0:
 else:
     sys.exit(1)
 PY
+    return $?
+  fi
+
+  return 1
 }
 
 normalize_source_profile() {
@@ -402,7 +430,7 @@ select_source_from_candidates() {
       if [ -n "$speed" ]; then
         echo "$candidate_name|$candidate_value|$speed" > "$tmpdir/$candidate_name"
         local display=""
-        display=$(python3 -c "s=float('$speed');print(f'{s/1024:.2f} MB/s' if s>=1024 else f'{s:.1f} KB/s')" 2>/dev/null)
+        display=$(format_speed "$speed")
         echo "$label/$candidate_name: $display => $candidate_value" >&2
       else
         echo "$label/$candidate_name: 探测失败" >&2
@@ -433,7 +461,7 @@ select_source_from_candidates() {
     local best_name="" best_value="" best_speed=""
     IFS='|' read -r best_name best_value best_speed <<< "$best_line"
     local display=""
-    display=$(python3 -c "s=float('$best_speed');print(f'{s/1024:.2f} MB/s' if s>=1024 else f'{s:.1f} KB/s')" 2>/dev/null)
+    display=$(format_speed "$best_speed")
     echo "$label: 选择 $best_name ($display) => $best_value" >&2
     printf '%s' "$best_value"
     return 0
@@ -695,83 +723,6 @@ probe_remote_image_manifest() {
 
   url="https://$registry_host/v2/$repo/manifests/$tag"
 
-  if command -v python3 >/dev/null 2>&1; then
-    python3 - "$url" "$timeout" <<'PY'
-import json
-import re
-import sys
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
-
-url = sys.argv[1]
-timeout = float(sys.argv[2])
-accept = ", ".join([
-    "application/vnd.oci.image.index.v1+json",
-    "application/vnd.oci.image.manifest.v1+json",
-    "application/vnd.docker.distribution.manifest.v2+json",
-])
-success_codes = {200, 204, 301, 302, 307, 308}
-
-
-def request_once(extra_headers=None):
-    headers = {"Accept": accept}
-    if extra_headers:
-        headers.update(extra_headers)
-
-    req = urllib.request.Request(url, headers=headers, method="HEAD")
-    start = time.perf_counter()
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            response.read(0)
-            return response.getcode(), response.headers, time.perf_counter() - start
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.headers, time.perf_counter() - start
-
-
-status, headers, elapsed = request_once()
-if status in success_codes:
-    print(f"{elapsed:.6f}")
-    sys.exit(0)
-
-if status != 401:
-    sys.exit(1)
-
-auth_header = headers.get("WWW-Authenticate", "")
-if not auth_header.lower().startswith("bearer "):
-    sys.exit(1)
-
-attrs = dict(re.findall(r'(\w+)="([^"]+)"', auth_header))
-realm = attrs.pop("realm", "")
-if not realm:
-    sys.exit(1)
-
-token_url = realm
-if attrs:
-    token_url = f"{realm}?{urllib.parse.urlencode(attrs)}"
-
-token_request = urllib.request.Request(token_url, headers={"Accept": "application/json"})
-try:
-    with urllib.request.urlopen(token_request, timeout=timeout) as response:
-        payload = json.loads(response.read().decode("utf-8", errors="replace"))
-except Exception:
-    sys.exit(1)
-
-token = payload.get("token") or payload.get("access_token")
-if not token:
-    sys.exit(1)
-
-status, headers, elapsed2 = request_once({"Authorization": f"Bearer {token}"})
-if status in success_codes:
-    print(f"{elapsed + elapsed2:.6f}")
-    sys.exit(0)
-
-sys.exit(1)
-PY
-    return $?
-  fi
-
   if command -v curl >/dev/null 2>&1; then
     local result=""
     local http_code=""
@@ -850,6 +801,83 @@ PY
     esac
   fi
 
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$url" "$timeout" <<'PY'
+import json
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+url = sys.argv[1]
+timeout = float(sys.argv[2])
+accept = ", ".join([
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+])
+success_codes = {200, 204, 301, 302, 307, 308}
+
+
+def request_once(extra_headers=None):
+    headers = {"Accept": accept}
+    if extra_headers:
+        headers.update(extra_headers)
+
+    req = urllib.request.Request(url, headers=headers, method="HEAD")
+    start = time.perf_counter()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            response.read(0)
+            return response.getcode(), response.headers, time.perf_counter() - start
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.headers, time.perf_counter() - start
+
+
+status, headers, elapsed = request_once()
+if status in success_codes:
+    print(f"{elapsed:.6f}")
+    sys.exit(0)
+
+if status != 401:
+    sys.exit(1)
+
+auth_header = headers.get("WWW-Authenticate", "")
+if not auth_header.lower().startswith("bearer "):
+    sys.exit(1)
+
+attrs = dict(re.findall(r'(\w+)="([^"]+)"', auth_header))
+realm = attrs.pop("realm", "")
+if not realm:
+    sys.exit(1)
+
+token_url = realm
+if attrs:
+    token_url = f"{realm}?{urllib.parse.urlencode(attrs)}"
+
+token_request = urllib.request.Request(token_url, headers={"Accept": "application/json"})
+try:
+    with urllib.request.urlopen(token_request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="replace"))
+except Exception:
+    sys.exit(1)
+
+token = payload.get("token") or payload.get("access_token")
+if not token:
+    sys.exit(1)
+
+status, headers, elapsed2 = request_once({"Authorization": f"Bearer {token}"})
+if status in success_codes:
+    print(f"{elapsed + elapsed2:.6f}")
+    sys.exit(0)
+
+sys.exit(1)
+PY
+    return $?
+  fi
+
   return 1
 }
 
@@ -884,10 +912,7 @@ probe_candidate_worker() {
     speed_kbps=${raw_result%%|*}
     speed_type=${raw_result##*|}
     local display_speed=""
-    display_speed=$(python3 -c "
-s = float('$speed_kbps')
-print(f'{s/1024:.2f} MB/s' if s >= 1024 else f'{s:.1f} KB/s')
-" 2>/dev/null || printf '%s KB/s' "$speed_kbps")
+    display_speed=$(format_speed "$speed_kbps")
     local type_label=""
     if [ "$speed_type" = "blob" ]; then
       type_label="blob 测速"
@@ -921,7 +946,69 @@ measure_registry_speed() {
     *)         registry_host="$registry" ;;
   esac
 
-  python3 - "$registry_host" "$repo" "$tag" "$timeout" "$max_bytes" <<'PYEOF'
+  local accept_header="application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json"
+  local base_url="https://$registry_host/v2/$repo"
+  local manifest_url="$base_url/manifests/$tag"
+
+  if command -v curl >/dev/null 2>&1; then
+    local result="" http_code="" auth_header="" realm="" service="" scope=""
+    local token_response="" token="" speed_download=""
+    local -a token_cmd=()
+
+    result=$(curl -sS -D - -o /dev/null \
+      -w '\nCURL_HTTP_CODE=%{http_code}\nCURL_SPEED=%{speed_download}\n' \
+      --connect-timeout "$timeout" \
+      --max-time "$timeout" \
+      -H "Accept: $accept_header" \
+      "$manifest_url" 2>/dev/null || true)
+    http_code=$(printf '%s\n' "$result" | sed -n 's/^CURL_HTTP_CODE=//p' | tail -n 1)
+
+    if [ "$http_code" = "401" ]; then
+      auth_header=$(printf '%s\n' "$result" | tr -d '\r' | awk 'BEGIN { IGNORECASE = 1 } /^www-authenticate:/ { sub(/^[^:]*:[[:space:]]*/, ""); value = $0 } END { print value }')
+      realm=$(printf '%s' "$auth_header" | sed -n 's/.*realm="\([^"]*\)".*/\1/p')
+      service=$(printf '%s' "$auth_header" | sed -n 's/.*service="\([^"]*\)".*/\1/p')
+      scope=$(printf '%s' "$auth_header" | sed -n 's/.*scope="\([^"]*\)".*/\1/p')
+
+      if [ -n "$realm" ]; then
+        token_cmd=(curl -sS --get --connect-timeout "$timeout" --max-time "$timeout")
+        [ -n "$service" ] && token_cmd+=(--data-urlencode "service=$service")
+        [ -n "$scope" ] && token_cmd+=(--data-urlencode "scope=$scope")
+        token_response=$("${token_cmd[@]}" "$realm" 2>/dev/null || true)
+        token=$(printf '%s' "$token_response" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+        [ -z "$token" ] && token=$(printf '%s' "$token_response" | sed -n 's/.*"access_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+      fi
+
+      if [ -n "$token" ]; then
+        result=$(curl -sS -o /dev/null \
+          -w '%{http_code} %{speed_download}' \
+          --connect-timeout "$timeout" \
+          --max-time "$timeout" \
+          -r "0-$((max_bytes - 1))" \
+          -H "Accept: $accept_header" \
+          -H "Authorization: Bearer $token" \
+          "$manifest_url" 2>/dev/null || true)
+        http_code=${result%% *}
+        speed_download=${result#* }
+      fi
+    else
+      speed_download=$(printf '%s\n' "$result" | sed -n 's/^CURL_SPEED=//p' | tail -n 1)
+    fi
+
+    case "$http_code" in
+      200|301|302)
+        if [ -n "$speed_download" ]; then
+          local speed_kbps=""
+          speed_kbps=$(awk -v s="$speed_download" 'BEGIN { if (s > 0) printf "%.1f", s / 1024; else exit 1 }') || return 1
+          printf '%s|manifest' "$speed_kbps"
+          return 0
+        fi
+        ;;
+    esac
+    return 1
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$registry_host" "$repo" "$tag" "$timeout" "$max_bytes" <<'PYEOF'
 import json, re, sys, time, urllib.error, urllib.parse, urllib.request
 
 
@@ -1064,6 +1151,10 @@ else:
     speed_kbps = (total_bytes / 1024) / elapsed
     print(f"{speed_kbps:.1f}|manifest")
 PYEOF
+    return $?
+  fi
+
+  return 1
 }
 
 select_remote_candidate() {
@@ -1148,10 +1239,7 @@ select_remote_candidate() {
 
   if [ -n "$best_kind" ]; then
     local display_speed=""
-    display_speed=$(python3 -c "
-s = float('$best_time')
-print(f'{s/1024:.2f} MB/s' if s >= 1024 else f'{s:.1f} KB/s')
-" 2>/dev/null || printf '%s KB/s' "$best_time")
+    display_speed=$(format_speed "$best_time")
     echo "remote/$registry_group: 选择 $best_name ($display_speed)" >&2
     printf '%s' "$best_kind"
     return 0
