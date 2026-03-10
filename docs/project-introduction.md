@@ -45,41 +45,33 @@
 以下截图展示了平台的典型界面与功能，供快速浏览：
 
 ### 登录页面
-![登录页面](/img/image.png)
+![登录页面](/img/image-a1.png)
 
 ### 知识库提取与管理
-![知识库管理](/img/image-1.png)
+![知识库管理](/img/image-a18.png)
 
 ### AI 对话与测试用例生成
-![AI 对话与测试用例生成](/img/image-2.png)
+![AI 对话与测试用例生成](/img/image-a6.png)
 
 ### 测试用例管理
-![测试用例管理](/img/image-3.png)
+![测试用例管理](/img/image-a7.png)
 
 ### 生成用例详情
-![生成用例详情](/img/image-4.png)
+![生成用例详情](/img/image-a8.png)
 
 ### 测试执行与自动截屏
-![测试执行与自动截屏](/img/image-6.png)
-![测试批量执行](image.png)
+![测试执行](/img/image-a19.png)
+![自动截屏](/img/image-a20.png)
 
-### 执行结果与报告
-![执行结果](/img/image-7.png)
-![alt text](image-1.png)
+### UI自动化测试
+![执行结果](/img/image-a22.png)
+![报告详情](/img/image-a23.png)
 
-
-### 报告详情
-![报告详情](/img/image-8.png)
-![alt text](image-2.png)
 
 ### AI 驱动的需求评审与报告
-![AI 需求评审](/img/image-9.png)
+![AI 需求评审](/img/image-a15.png)
+![报告打分与建议](/img/image-a5.png)
 
-### 报告打分与建议
-![报告打分与建议](/img/image-11.png)
-
-### 报告详情
-![报告详情](/img/image-10.png)
 
 （更多细节、API 与部署说明请查阅仓库中的 docs 目录及各模块 README）
 

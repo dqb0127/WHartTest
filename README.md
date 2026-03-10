@@ -4,7 +4,37 @@
 
 WHartTest 是一个基于 Django REST Framework 构建的AI驱动测试自动化平台，核心功能是通过AI智能生成测试用例。平台集成了 LangChain、MCP（Model Context Protocol）工具调用、项目管理、需求评审、测试用例管理以及先进的知识库管理和文档理解功能。利用大语言模型和多种嵌入服务（OpenAI、Azure OpenAI、Ollama等）的能力，自动化生成高质量的测试用例，并结合知识库提供更精准的测试辅助，为测试团队提供一个完整的智能测试管理解决方案。
 
-
+## 平台功能
+1. AI智能测试用例生成  
+基于大语言模型（LLM）技术，从需求文档或对话中自动生成结构化测试用例  
+包含测试步骤、前置条件、输入数据、期望结果、优先级等完整信息  
+支持多种嵌入服务（OpenAI、Azure OpenAI、Ollama等）增强理解能力
+2. 知识库管理与文档理解  
+集成知识库系统，支持文档上传、解析和嵌入搜索  
+从API文档、需求文档中提取上下文信息  
+提供精准的知识检索和语义理解能力
+3. MCP（Model Context Protocol）工具调用  
+支持多种AI工具的无缝集成和调用  
+提供Playwright浏览器自动化、UI自动化、APP自动化等工具  
+支持自定义工具扩展和第三方服务接入
+4. 需求评审与风险分析  
+AI驱动的需求文档评审功能  
+自动识别需求中的潜在问题和风险点  
+提供改进建议和测试策略指导
+5. 测试用例管理与执行  
+测试用例的创建、编辑、分类和组织  
+支持测试套件和测试计划的制定  
+批量执行测试用例并生成执行报告
+6. 自动化脚本生成  
+基于测试用例自动生成UI自动化脚本  
+支持一键执行和调试功能  
+降低自动化测试的技术门槛
+7. 执行结果与报告分析  
+自动截屏和测试结果记录  
+详细的执行报告和统计分析  
+支持结果导出和历史回溯
+8. Skill系统（智能技能管理）  
+Skill上传与管理：支持通过zip文件或Git仓库导入skill  
 ## 文档
 详细文档请访问：https://mgdaaslab.github.io/WHartTest/
 
@@ -84,15 +114,14 @@ DOCKER_BUILD_NO_CACHE=1 ./run_compose.sh local
 
 | | |
   |---|---|
-  | ![alt text](./img/image-1.png) | ![alt text](./img/image-2.png) |
-  | ![alt text](./img/image-3.png)| ![alt text](./img/image-4.png) |
-  | ![alt text](./img/image-5.png) | ![alt text](./img/image-6.png) |
-  | ![alt text](./img/image-7.png) | ![alt text](./img/image-8.png) |
-  | ![alt text](./img/image-9.png) | ![alt text](./img/image-10.png) |
-  | ![alt text](./img/image-11.png) | ![alt text](./img/image-12.png) |
-  | ![alt text](./img/image-13.png) | ![alt text](./img/image-14.png) |
-  | ![alt text](./img/image-15.png) | ![alt text](./img/image-16.png) |
-  | ![alt text](./img/image-17.png)
+  | ![alt text](docs\public\img\image-a1.png) | ![alt text](docs\public\img\image-a2.png) |
+  | ![alt text](docs\public\img\image-a3.png)| ![alt text](docs\public\img\image-a4.png) |
+  | ![alt text](docs\public\img\image-a5.png) | ![alt text](docs\public\img\image-a17.png) |
+  | ![alt text](docs\public\img\image-a7.png) | ![alt text](docs\public\img\image-a8.png) |
+  | ![alt text](docs\public\img\image-a9.png) | ![alt text](docs\public\img\image-a10.png) |
+  | ![alt text](docs\public\img\image-a11.png) | ![alt text](docs\public\img\image-a12.png) |
+  | ![alt text](docs\public\img\image-a13.png) | ![alt text](docs\public\img\image-a14.png) |
+  | ![alt text](docs\public\img\image-a15.png) | ![alt text](docs\public\img\image-a16.png) |
 ## 贡献指南
 
 1. Fork 项目
@@ -106,10 +135,16 @@ DOCKER_BUILD_NO_CACHE=1 ./run_compose.sh local
 如有问题或建议，请通过以下方式联系：
 - 提交 Issue
 - 项目讨论区
+- 添加微信时请备注github，拉你进微信群聊。
 
-<img width="400" alt="image" src="https://github.com/user-attachments/assets/074e7c56-39a6-40b5-a9c6-37232637dd09" />
-<img src="./docs/developer-guide/image.png" alt="contact" width="400">
+<img width="400" alt="image" src="docs\public\img\wx.jpg" />
 
+qq群：
+1. 8xxxxxxxx0（已满）
+2. 1017708746
 ---
+## 【重要安全警示】关于 v1.4.0 以及后续版本 Skills 权限及部署安全的声明
+鉴于 Skills 模块具备较高的系统执行权限，为了保障您的数据与环境安全，我们做出以下严正提示：
 
+部署建议：强烈建议仅在内网环境或受信任的私有网络中部署使用。 访问控制：切勿将服务直接暴露于公网（Public Internet），或授予任何未经身份验证及不可信人员访问权限。 免责声明：本项目（WHartTest）仅供学习与研究使用。用户需自行承担因违规部署（如开放公网、未做鉴权等）所导致的一切安全风险与后果。对于因不当配置引发的数据泄露、服务器被入侵等安全事故，WHartTest 团队不承担任何法律及连带责任。
 **WHartTest** - AI驱动测试用例生成，让测试更智能，让开发更高效！
