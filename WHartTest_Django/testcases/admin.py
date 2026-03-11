@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import TestCase, TestCaseStep, TestCaseModule
+from .models import TestCase, TestCaseStep, TestCaseModule, AutomationScript, ScriptExecution
 
 class TestCaseStepInline(admin.TabularInline):
     """
@@ -119,3 +119,76 @@ class TestCaseModuleAdmin(admin.ModelAdmin):
                 instance.creator = request.user
             instance.save()
         formset.save_m2m()
+
+
+class ScriptExecutionInline(admin.TabularInline):
+    """脚本执行记录内联显示"""
+    model = ScriptExecution
+    extra = 0
+    fields = ('status', 'started_at', 'completed_at', 'execution_time', 'executor')
+    readonly_fields = ('status', 'started_at', 'completed_at', 'execution_time', 'executor')
+    can_delete = False
+    max_num = 10
+    
+    def has_add_permission(self, request, obj):
+        return False
+
+
+@admin.register(AutomationScript)
+class AutomationScriptAdmin(admin.ModelAdmin):
+    """自动化用例 Admin 配置"""
+    list_display = ('name', 'test_case', 'script_type', 'source', 'status', 'version', 'creator', 'created_at')
+    list_filter = ('script_type', 'source', 'status', 'test_case__project', 'created_at')
+    search_fields = ('name', 'test_case__name', 'description')
+    readonly_fields = ('created_at', 'updated_at', 'recorded_steps')
+    inlines = [ScriptExecutionInline]
+    fieldsets = (
+        (None, {
+            'fields': ('test_case', 'name', 'description', 'status')
+        }),
+        ('脚本配置', {
+            'fields': ('script_type', 'source', 'target_url', 'timeout_seconds', 'headless')
+        }),
+        ('脚本内容', {
+            'fields': ('script_content',),
+            'classes': ('wide',)
+        }),
+        ('来源信息', {
+            'fields': ('source_task', 'recorded_steps'),
+            'classes': ('collapse',)
+        }),
+        ('版本与元信息', {
+            'fields': ('version', 'creator', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def save_model(self, request, obj, form, change):
+        if not obj.creator_id:
+            obj.creator = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(ScriptExecution)
+class ScriptExecutionAdmin(admin.ModelAdmin):
+    """脚本执行记录 Admin 配置"""
+    list_display = ('script', 'status', 'started_at', 'completed_at', 'execution_time', 'executor')
+    list_filter = ('status', 'browser_type', 'script__test_case__project', 'created_at')
+    search_fields = ('script__name', 'error_message')
+    readonly_fields = ('created_at', 'started_at', 'completed_at', 'execution_time')
+    fieldsets = (
+        (None, {
+            'fields': ('script', 'status', 'executor')
+        }),
+        ('执行时间', {
+            'fields': ('started_at', 'completed_at', 'execution_time')
+        }),
+        ('执行结果', {
+            'fields': ('output', 'error_message', 'stack_trace', 'screenshots'),
+            'classes': ('wide',)
+        }),
+        ('执行环境', {
+            'fields': ('browser_type', 'viewport'),
+            'classes': ('collapse',)
+        }),
+    )
