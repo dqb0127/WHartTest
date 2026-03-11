@@ -245,12 +245,14 @@ const handleGitImport = async () => {
 
   importing.value = true
   try {
-    await SkillService.importFromGit(
+    const skills = await SkillService.importFromGit(
       props.projectId,
       gitUrl.value.trim(),
       gitBranch.value.trim() || undefined
     )
-    Message.success('导入成功')
+    const count = skills.length
+    const names = skills.map(s => s.name).join(', ')
+    Message.success(`成功导入 ${count} 个 Skill: ${names}`)
     showGitImportModal.value = false
     gitUrl.value = ''
     gitBranch.value = ''

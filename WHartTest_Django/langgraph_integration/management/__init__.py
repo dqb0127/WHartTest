@@ -1,1 +1,1 @@
-# Management commands for langgraph_integration app
+# langgraph_integration 应用的管理命令

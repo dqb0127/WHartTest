@@ -1,6 +1,7 @@
 """
 用例导出服务 - 支持模版化导出
 """
+
 import io
 import posixpath
 import re
@@ -13,15 +14,16 @@ from openpyxl.styles import Font, Alignment
 class TestCaseExportService:
     """测试用例导出服务"""
 
+
     # 内部字段名到默认列名的映射
     DEFAULT_FIELD_NAMES = {
-        'name': '用例名称',
-        'module': '所属模块',
-        'precondition': '前置条件',
-        'level': '用例等级',
-        'notes': '备注',
-        'steps': '步骤描述',
-        'expected_results': '预期结果',
+        "name": "用例名称",
+        "module": "所属模块",
+        "precondition": "前置条件",
+        "level": "用例等级",
+        "notes": "备注",
+        "steps": "步骤描述",
+        "expected_results": "预期结果",
     }
 
     def __init__(self, template=None):
@@ -42,29 +44,43 @@ class TestCaseExportService:
         field_mappings = self._get_field_mappings()
         value_transformations = self._get_value_transformations()
 
-        using_template_file = bool(self.template and getattr(self.template, 'template_file', None) and self.template.template_file)
+        using_template_file = bool(
+            self.template
+            and getattr(self.template, "template_file", None)
+            and self.template.template_file
+        )
         if using_template_file:
-            excel_bytes = self._export_using_template_file_bytes(queryset, field_mappings, value_transformations)
+            excel_bytes = self._export_using_template_file_bytes(
+                queryset, field_mappings, value_transformations
+            )
         else:
-            excel_bytes = self._export_default_bytes(queryset, field_mappings, value_transformations)
+            excel_bytes = self._export_default_bytes(
+                queryset, field_mappings, value_transformations
+            )
 
         filename = f"{project_name}_测试用例.xlsx"
         return excel_bytes, filename
 
-    def _export_default_bytes(self, queryset, field_mappings: dict, value_transformations: dict) -> bytes:
+    def _export_default_bytes(
+        self, queryset, field_mappings: dict, value_transformations: dict
+    ) -> bytes:
         wb = Workbook()
         ws = wb.active
-        ws.title = self.template.sheet_name if self.template and self.template.sheet_name else "测试用例"
+        ws.title = (
+            self.template.sheet_name
+            if self.template and self.template.sheet_name
+            else "测试用例"
+        )
 
         # 构建表头
         headers = self._get_headers(field_mappings)
         header_row = self.template.header_row if self.template else 1
         header_to_col = {}
         for col, header in enumerate(headers, 1):
-            cell_value = header if header is not None else ''
+            cell_value = header if header is not None else ""
             cell = ws.cell(row=header_row, column=col, value=cell_value)
             cell.font = Font(bold=True)
-            cell.alignment = Alignment(horizontal='center')
+            cell.alignment = Alignment(horizontal="center")
             if cell_value:
                 header_to_col[str(cell_value).strip()] = col
 
@@ -77,7 +93,7 @@ class TestCaseExportService:
                 testcase,
                 field_mappings,
                 value_transformations,
-                header_to_col=header_to_col if header_to_col else None
+                header_to_col=header_to_col if header_to_col else None,
             )
 
         # 调整列宽
@@ -90,14 +106,16 @@ class TestCaseExportService:
         output.seek(0)
         return output.getvalue()
 
-    def _export_using_template_file_bytes(self, queryset, field_mappings: dict, value_transformations: dict) -> bytes:
+    def _export_using_template_file_bytes(
+        self, queryset, field_mappings: dict, value_transformations: dict
+    ) -> bytes:
         """
         基于用户上传的模板文件直接打补丁写入数据，尽量做到“模板原样不变，只新增数据”。
 
         说明：openpyxl 在“读入并另存”时无法完整保留某些 Excel 特性（如单元格内局部红字的 rich text runs），
         因此这里采用 xlsx(zip+xml) 方式仅修改目标数据单元格，避免破坏模板里的富文本/样式/合并等。
         """
-        self.template.template_file.open('rb')
+        self.template.template_file.open("rb")
         try:
             template_bytes = self.template.template_file.read()
         finally:
@@ -109,7 +127,9 @@ class TestCaseExportService:
         header_row = self.template.header_row if self.template else 1
         data_start_row = self.template.data_start_row if self.template else 2
         data_count = self._safe_count(queryset)
-        need_last_row = data_start_row + data_count - 1 if data_count > 0 else data_start_row
+        need_last_row = (
+            data_start_row + data_count - 1 if data_count > 0 else data_start_row
+        )
 
         patcher = _XlsxTemplatePatcher(
             xlsx_bytes=template_bytes,
@@ -125,7 +145,15 @@ class TestCaseExportService:
         row_idx = data_start_row
         for testcase in queryset:
             values_by_header = {}
-            for field in ['name', 'module', 'precondition', 'steps', 'expected_results', 'level', 'notes']:
+            for field in [
+                "name",
+                "module",
+                "precondition",
+                "steps",
+                "expected_results",
+                "level",
+                "notes",
+            ]:
                 if field not in field_mappings:
                     continue
                 header_name = field_mappings.get(field)
@@ -134,7 +162,9 @@ class TestCaseExportService:
                 col_num = header_to_col.get(str(header_name).strip())
                 if not col_num:
                     continue
-                values_by_header[col_num] = self._get_field_value(testcase, field, value_transformations)
+                values_by_header[col_num] = self._get_field_value(
+                    testcase, field, value_transformations
+                )
             patcher.write_row_values(row_idx=row_idx, values_by_col=values_by_header)
             row_idx += 1
 
@@ -178,7 +208,7 @@ class TestCaseExportService:
         优先使用用户上传/解析得到的 template_headers，以保持模版列顺序；
         若不存在则按固定字段顺序生成。
         """
-        if self.template and getattr(self.template, 'template_headers', None):
+        if self.template and getattr(self.template, "template_headers", None):
             headers = list(self.template.template_headers or [])
             # 若字段映射中包含未出现在 template_headers 的列名，追加到末尾避免丢列
             for col_name in (field_mappings or {}).values():
@@ -190,16 +220,40 @@ class TestCaseExportService:
     def _build_headers_by_field_order(self, field_mappings: dict) -> list:
         """构建表头列表"""
         # 按照固定顺序构建表头
-        field_order = ['name', 'module', 'precondition', 'steps', 'expected_results', 'level', 'notes']
+        field_order = [
+            "name",
+            "module",
+            "precondition",
+            "steps",
+            "expected_results",
+            "level",
+            "notes",
+        ]
         headers = []
         for field in field_order:
             if field in field_mappings:
                 headers.append(field_mappings[field])
         return headers
 
-    def _write_testcase_row(self, ws, row: int, testcase, field_mappings: dict, value_transformations: dict, header_to_col: dict | None = None):
+    def _write_testcase_row(
+        self,
+        ws,
+        row: int,
+        testcase,
+        field_mappings: dict,
+        value_transformations: dict,
+        header_to_col: dict | None = None,
+    ):
         """写入单个用例行"""
-        field_order = ['name', 'module', 'precondition', 'steps', 'expected_results', 'level', 'notes']
+        field_order = [
+            "name",
+            "module",
+            "precondition",
+            "steps",
+            "expected_results",
+            "level",
+            "notes",
+        ]
         col = 1
 
         for field in field_order:
@@ -220,34 +274,39 @@ class TestCaseExportService:
                 ws.cell(row=row, column=col, value=value)
                 col += 1
 
-    def _get_field_value(self, testcase, field: str, value_transformations: dict) -> str:
+    def _get_field_value(
+        self, testcase, field: str, value_transformations: dict
+    ) -> str:
         """获取字段值"""
-        if field == 'name':
+        if field == "name":
             return testcase.name
-        elif field == 'module':
+        elif field == "module":
             return self._get_module_path(testcase.module)
-        elif field == 'precondition':
-            return testcase.precondition or ''
-        elif field == 'level':
+        elif field == "precondition":
+            return testcase.precondition or ""
+        elif field == "level":
             value = testcase.level
             # 应用反向值转换
-            if 'level' in value_transformations and value in value_transformations['level']:
-                return value_transformations['level'][value]
+            if (
+                "level" in value_transformations
+                and value in value_transformations["level"]
+            ):
+                return value_transformations["level"][value]
             return value
-        elif field == 'notes':
-            return testcase.notes or ''
-        elif field == 'steps':
+        elif field == "notes":
+            return testcase.notes or ""
+        elif field == "steps":
             return self._format_steps_desc(testcase.steps.all())
-        elif field == 'expected_results':
+        elif field == "expected_results":
             return self._format_expected_results(testcase.steps.all())
-        return ''
+        return ""
 
     def _get_module_path(self, module) -> str:
         """获取模块完整路径"""
         if not module:
-            return ''
+            return ""
 
-        delimiter = self.template.module_path_delimiter if self.template else '/'
+        delimiter = self.template.module_path_delimiter if self.template else "/"
         path_parts = []
         current = module
         while current:
@@ -259,16 +318,16 @@ class TestCaseExportService:
     def _format_steps_desc(self, steps) -> str:
         """格式化步骤描述"""
         step_list = []
-        for step in steps.order_by('step_number'):
+        for step in steps.order_by("step_number"):
             step_list.append(f"[{step.step_number}]{step.description}")
-        return '\n'.join(step_list)
+        return "\n".join(step_list)
 
     def _format_expected_results(self, steps) -> str:
         """格式化预期结果"""
         result_list = []
-        for step in steps.order_by('step_number'):
+        for step in steps.order_by("step_number"):
             result_list.append(f"[{step.step_number}]{step.expected_result}")
-        return '\n'.join(result_list)
+        return "\n".join(result_list)
 
     def _get_column_letter(self, col_idx: int) -> str:
         """将列索引转换为列字母"""
@@ -285,15 +344,25 @@ class _XlsxTemplatePatcher:
     """
 
     NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-    # Used by attributes like r:id in workbook/sheet XML
+    # 用于 workbook/sheet XML 中的 r:id 等属性
     NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-    # Used inside *.rels parts (Relationship elements)
+    # 用于 *.rels 文件中的 Relationship 元素
     NS_PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
     XML_SPACE = "{http://www.w3.org/XML/1998/namespace}space"
 
-    def __init__(self, xlsx_bytes: bytes, sheet_name: str | None, header_row: int, data_start_row: int, need_last_row: int):
+    def __init__(
+        self,
+        xlsx_bytes: bytes,
+        sheet_name: str | None,
+        header_row: int,
+        data_start_row: int,
+        need_last_row: int,
+    ):
         self._zip_in = zipfile.ZipFile(io.BytesIO(xlsx_bytes), "r")
-        self._original_entries = {zi.filename: self._zip_in.read(zi.filename) for zi in self._zip_in.infolist()}
+        self._original_entries = {
+            zi.filename: self._zip_in.read(zi.filename)
+            for zi in self._zip_in.infolist()
+        }
         self._sheet_name = sheet_name
         self._header_row = int(header_row)
         self._data_start_row = int(data_start_row)
@@ -306,7 +375,11 @@ class _XlsxTemplatePatcher:
         self._sheet_path = self._resolve_sheet_path()
         self._sheet_xml = self._parse_xml(self._original_entries[self._sheet_path])
         self._sheet_rels_path = self._guess_sheet_rels_path(self._sheet_path)
-        self._sheet_rels_xml = self._parse_xml(self._original_entries[self._sheet_rels_path]) if self._sheet_rels_path in self._original_entries else None
+        self._sheet_rels_xml = (
+            self._parse_xml(self._original_entries[self._sheet_rels_path])
+            if self._sheet_rels_path in self._original_entries
+            else None
+        )
 
         self._merged_ranges = self._parse_merged_ranges()
         self._style_template = self._capture_style_template()
@@ -341,7 +414,9 @@ class _XlsxTemplatePatcher:
         if chosen is None:
             # activeTab 优先，否则选第一个
             active_tab = 0
-            view = wb_xml.getroot().find(f"{self._q('bookViews')}/{self._q('workbookView')}")
+            view = wb_xml.getroot().find(
+                f"{self._q('bookViews')}/{self._q('workbookView')}"
+            )
             if view is not None and view.attrib.get("activeTab") is not None:
                 try:
                     active_tab = int(view.attrib.get("activeTab") or 0)
@@ -356,7 +431,9 @@ class _XlsxTemplatePatcher:
         if not rid:
             raise ValueError("sheet 缺少 r:id")
 
-        rel = wb_rels.getroot().find(f".//{{{self.NS_PKG_REL}}}Relationship[@Id='{rid}']")
+        rel = wb_rels.getroot().find(
+            f".//{{{self.NS_PKG_REL}}}Relationship[@Id='{rid}']"
+        )
         if rel is None:
             raise ValueError(f"workbook.xml.rels 未找到 {rid}")
 
@@ -367,7 +444,7 @@ class _XlsxTemplatePatcher:
         return posixpath.normpath(posixpath.join("xl", target))
 
     def _guess_sheet_rels_path(self, sheet_path: str) -> str:
-        # xl/worksheets/sheet1.xml -> xl/worksheets/_rels/sheet1.xml.rels
+        # 例如：xl/worksheets/sheet1.xml -> xl/worksheets/_rels/sheet1.xml.rels
         base_dir = posixpath.dirname(sheet_path)
         base_name = posixpath.basename(sheet_path)
         return posixpath.join(base_dir, "_rels", f"{base_name}.rels")
@@ -522,7 +599,10 @@ class _XlsxTemplatePatcher:
         if row_el is not None:
             return row_el
 
-        row_el = ET.Element(self._q("row"), {"r": str(row_idx), **(self._style_template.get("row_attrib") or {})})
+        row_el = ET.Element(
+            self._q("row"),
+            {"r": str(row_idx), **(self._style_template.get("row_attrib") or {})},
+        )
         sheet_data = self._sheet_data()
         # 按 r 顺序插入
         inserted = False
@@ -536,7 +616,9 @@ class _XlsxTemplatePatcher:
             sheet_data.append(row_el)
         return row_el
 
-    def _get_or_create_cell(self, row_el: ET.Element, row_idx: int, col: int) -> ET.Element:
+    def _get_or_create_cell(
+        self, row_el: ET.Element, row_idx: int, col: int
+    ) -> ET.Element:
         ref = f"{self._col_to_letters(col)}{row_idx}"
         for c in row_el.findall(self._q("c")):
             if c.attrib.get("r") == ref:
@@ -602,7 +684,9 @@ class _XlsxTemplatePatcher:
         min_col, min_row, max_col, max_row = self._range_boundaries(ref)
         if self._need_last_row <= max_row:
             return
-        af.attrib["ref"] = f"{self._col_to_letters(min_col)}{min_row}:{self._col_to_letters(max_col)}{self._need_last_row}"
+        af.attrib["ref"] = (
+            f"{self._col_to_letters(min_col)}{min_row}:{self._col_to_letters(max_col)}{self._need_last_row}"
+        )
 
     def _extend_tables_ref(self):
         # tableParts 在 sheet 中，真正的 ref 在 xl/tables/tableX.xml
@@ -615,20 +699,30 @@ class _XlsxTemplatePatcher:
             rid = tp.attrib.get(self._qr("id"))
             if not rid:
                 continue
-            rel = self._sheet_rels_xml.getroot().find(f".//{{{self.NS_PKG_REL}}}Relationship[@Id='{rid}']")
+            rel = self._sheet_rels_xml.getroot().find(
+                f".//{{{self.NS_PKG_REL}}}Relationship[@Id='{rid}']"
+            )
             if rel is None:
                 continue
             target = rel.attrib.get("Target")
             if not target:
                 continue
             # Target 形如 '../tables/table1.xml'
-            table_path = posixpath.normpath(posixpath.join(posixpath.dirname(self._sheet_path), target))
+            table_path = posixpath.normpath(
+                posixpath.join(posixpath.dirname(self._sheet_path), target)
+            )
             if table_path.startswith("../"):
-                table_path = posixpath.normpath(posixpath.join(posixpath.dirname(self._sheet_path), table_path))
+                table_path = posixpath.normpath(
+                    posixpath.join(posixpath.dirname(self._sheet_path), table_path)
+                )
             if table_path not in self._original_entries:
                 # 兜底：有的 target 没带 ../
-                table_path2 = posixpath.normpath(posixpath.join("xl", target.lstrip("/")))
-                table_path = table_path2 if table_path2 in self._original_entries else table_path
+                table_path2 = posixpath.normpath(
+                    posixpath.join("xl", target.lstrip("/"))
+                )
+                table_path = (
+                    table_path2 if table_path2 in self._original_entries else table_path
+                )
             if table_path not in self._original_entries:
                 continue
 
@@ -637,15 +731,25 @@ class _XlsxTemplatePatcher:
             tref = table_root.attrib.get("ref")
             if tref and ":" in tref:
                 min_col, min_row, max_col, max_row = self._range_boundaries(tref)
-                if self._need_last_row > max_row and self._need_last_row >= self._data_start_row:
-                    table_root.attrib["ref"] = f"{self._col_to_letters(min_col)}{min_row}:{self._col_to_letters(max_col)}{self._need_last_row}"
+                if (
+                    self._need_last_row > max_row
+                    and self._need_last_row >= self._data_start_row
+                ):
+                    table_root.attrib["ref"] = (
+                        f"{self._col_to_letters(min_col)}{min_row}:{self._col_to_letters(max_col)}{self._need_last_row}"
+                    )
             taf = table_root.find(self._q("autoFilter"))
             if taf is not None:
                 aref = taf.attrib.get("ref")
                 if aref and ":" in aref:
                     min_col, min_row, max_col, max_row = self._range_boundaries(aref)
-                    if self._need_last_row > max_row and self._need_last_row >= self._data_start_row:
-                        taf.attrib["ref"] = f"{self._col_to_letters(min_col)}{min_row}:{self._col_to_letters(max_col)}{self._need_last_row}"
+                    if (
+                        self._need_last_row > max_row
+                        and self._need_last_row >= self._data_start_row
+                    ):
+                        taf.attrib["ref"] = (
+                            f"{self._col_to_letters(min_col)}{min_row}:{self._col_to_letters(max_col)}{self._need_last_row}"
+                        )
 
             self._original_entries[table_path] = self._serialize_xml(table_xml)
 
@@ -669,7 +773,9 @@ class _XlsxTemplatePatcher:
         new_max_row = max(max_row, self._need_last_row)
         if new_max_row == max_row:
             return
-        dim.attrib["ref"] = f"{self._col_to_letters(min_col)}{min_row}:{self._col_to_letters(max_col)}{new_max_row}"
+        dim.attrib["ref"] = (
+            f"{self._col_to_letters(min_col)}{min_row}:{self._col_to_letters(max_col)}{new_max_row}"
+        )
 
     def to_bytes(self) -> bytes:
         # 写回 sheet xml

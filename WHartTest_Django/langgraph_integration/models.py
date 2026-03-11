@@ -11,6 +11,7 @@ class LLMConfig(models.Model):
     
     PROVIDER_CHOICES = [
         ('openai_compatible', 'OpenAI 兼容'),
+        ('qwen', 'Qwen/通义千问'),
     ]
     
     # 配置标识字段（新增）
@@ -40,6 +41,18 @@ class LLMConfig(models.Model):
     # 上下文限制（用于Token计数和对话压缩）
     context_limit = models.IntegerField(default=128000, verbose_name="上下文限制",
                                        help_text="模型最大上下文Token数（GPT-4o: 128000, Claude: 200000, Gemini: 1000000）")
+
+    # 请求超时和重试配置
+    request_timeout = models.IntegerField(
+        default=120,
+        verbose_name="请求超时(秒)",
+        help_text="单次LLM请求的超时时间，默认120秒。如果模型响应较慢可适当增加"
+    )
+    max_retries = models.IntegerField(
+        default=3,
+        verbose_name="最大重试次数",
+        help_text="请求失败时的自动重试次数，默认3次。设为0禁用重试"
+    )
 
     # v2.0.0: 中间件配置
     enable_summarization = models.BooleanField(

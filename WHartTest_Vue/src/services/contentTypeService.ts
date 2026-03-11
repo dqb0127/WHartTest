@@ -1,4 +1,4 @@
-// src/services/contentTypeService.ts
+// 内容类型服务
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import { API_BASE_URL } from '@/config/api';

@@ -68,6 +68,38 @@
                 <icon-check-circle-fill />
               </div>
             </div>
+            <div
+              class="option-card"
+              :class="{ active: form.exportMode === 'module', disabled: !hasModules }"
+              @click="hasModules && (form.exportMode = 'module')"
+            >
+              <div class="option-icon">
+                <icon-folder />
+              </div>
+              <div class="option-content">
+                <div class="option-title">按模块导出</div>
+                <div class="option-desc">
+                  {{ hasModules ? '选择模块导出其下所有用例' : '当前项目暂无模块' }}
+                </div>
+              </div>
+              <div class="option-check" v-if="form.exportMode === 'module'">
+                <icon-check-circle-fill />
+              </div>
+            </div>
+          </div>
+          <!-- 模块选择 -->
+          <div v-if="form.exportMode === 'module'" class="module-select-area">
+            <a-tree-select
+              v-model="form.moduleIds"
+              :data="moduleTree"
+              placeholder="请选择要导出的模块"
+              multiple
+              allow-clear
+              :max-tag-count="3"
+              tree-checkable
+              :tree-check-strictly="false"
+              size="large"
+            />
           </div>
         </div>
 
@@ -149,7 +181,9 @@ import {
   IconFile,
   IconSettings,
   IconInfoCircle,
+  IconFolder,
 } from '@arco-design/web-vue/es/icon';
+import type { TreeNodeData } from '@arco-design/web-vue';
 import {
   getTemplateList,
   getTemplateDetail,
@@ -161,6 +195,7 @@ import {
 const props = defineProps<{
   projectId: number;
   selectedIds: number[];
+  moduleTree?: TreeNodeData[];
 }>();
 
 const emit = defineEmits<{
@@ -178,9 +213,12 @@ const templates = ref<ImportExportTemplateListItem[]>([]);
 const selectedTemplate = ref<ImportExportTemplate | null>(null);
 
 const form = ref({
-  exportMode: 'all' as 'all' | 'selected',
+  exportMode: 'all' as 'all' | 'selected' | 'module',
   templateId: null as number | null,
+  moduleIds: [] as number[],
 });
+
+const hasModules = computed(() => (props.moduleTree?.length ?? 0) > 0);
 
 const selectedCount = computed(() => props.selectedIds.length);
 
@@ -219,13 +257,19 @@ const loadTemplates = async () => {
 };
 
 const handleExport = async () => {
+  if (form.value.exportMode === 'module' && form.value.moduleIds.length === 0) {
+    Message.warning('请选择至少一个模块');
+    return;
+  }
   exporting.value = true;
   try {
     const ids = form.value.exportMode === 'selected' ? props.selectedIds : undefined;
+    const moduleIds = form.value.exportMode === 'module' ? form.value.moduleIds : undefined;
     const result = await exportTestCasesWithTemplate(
       props.projectId,
       form.value.templateId,
-      ids
+      ids,
+      moduleIds
     );
 
     if (result.success) {
@@ -244,6 +288,7 @@ const handleClose = () => {
   form.value = {
     exportMode: 'all',
     templateId: null,
+    moduleIds: [],
   };
   selectedTemplate.value = null;
   emit('close');
@@ -418,6 +463,11 @@ defineExpose({ open });
 .template-desc {
   font-size: 12px;
   color: var(--color-text-3);
+}
+
+/* 模块选择区域 */
+.module-select-area {
+  margin-top: 12px;
 }
 
 /* 模版预览 */

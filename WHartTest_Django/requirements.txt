@@ -52,6 +52,10 @@ langchain==1.2.3
 # https://github.com/langchain-ai/langchain/blob/master/libs/partners/openai/LICENSE
 langchain-openai==1.1.7
 
+# LangChain Qwen集成 - MIT许可证
+# https://github.com/langchain-ai/langchain-qwq/blob/main/LICENSE
+langchain-qwq==0.3.4
+
 # LangChain Anthropic/Claude 支持（已移除 - 保留注释以便记录）
 # 如果将来需要使用 Anthropic/Claude，请取消注释以下依赖：
 # langchain-anthropic>=0.3.0
@@ -263,6 +267,10 @@ pytest>=8.0.0
 # https://github.com/microsoft/playwright-python/blob/main/LICENSE
 playwright>=1.40.0
 
+# Pillow图像处理库 - MIT-CMU许可证（用于Word文档图片尺寸解析）
+# https://github.com/python-pillow/Pillow/blob/main/LICENSE
+Pillow>=10.0.0
+
 # Token计数库 - MIT许可证 (用于上下文长度计算)
 # https://github.com/openai/tiktoken/blob/main/LICENSE
 tiktoken>=0.5.0
@@ -270,3 +278,7 @@ tiktoken>=0.5.0
 # NLTK自然语言处理库 - Apache 2.0许可证 (用于文本分割)
 # https://github.com/nltk/nltk/blob/develop/LICENSE.txt
 nltk>=3.8.0
+
+# WebSocket客户端 - LGPL许可证 (用于WebSocket连接)
+# https://github.com/websocket-client/websocket-client/blob/master/LICENSE
+websocket-client>=1.6.0

@@ -36,6 +36,17 @@
         <a-option value="P2">P2 - 中</a-option>
         <a-option value="P3">P3 - 低</a-option>
       </a-select>
+      <a-select
+        v-model="selectedTestType"
+        placeholder="筛选测试类型"
+        allow-clear
+        style="width: 150px; margin-left: 12px;"
+        @change="handleTestTypeChange"
+      >
+        <a-option v-for="option in TEST_TYPE_OPTIONS" :key="option.value" :value="option.value">
+          {{ option.label }}
+        </a-option>
+      </a-select>
     </div>
 
     <a-table
@@ -65,6 +76,9 @@
       <template #level="{ record }">
         <a-tag :color="getLevelColor(record.level)">{{ record.level }}</a-tag>
       </template>
+      <template #testType="{ record }">
+        <a-tag>{{ getTestTypeLabel(record.test_type) }}</a-tag>
+      </template>
     </a-table>
 
     <div class="selector-footer">
@@ -90,7 +104,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { Message } from '@arco-design/web-vue';
 import { getTestCaseList, type TestCase } from '@/services/testcaseService';
 import { getTestCaseModules, type TestCaseModule } from '@/services/testcaseModuleService';
-import { formatDate, getLevelColor } from '@/utils/formatters';
+import { formatDate, getLevelColor, TEST_TYPE_OPTIONS, getTestTypeLabel } from '@/utils/formatters';
 
 interface Props {
   currentProjectId: number | null;
@@ -110,6 +124,7 @@ const loading = ref(false);
 const modulesLoading = ref(false);
 const searchKeyword = ref('');
 const selectedLevel = ref<string>('');
+const selectedTestType = ref<string>('');
 const selectedModule = ref<number | undefined>(undefined);
 const testCaseData = ref<TestCase[]>([]);
 const localSelectedIds = ref<number[]>([...props.initialSelectedIds]);
@@ -137,6 +152,7 @@ const columns = [
   { title: '用例名称', dataIndex: 'name', width: 200, ellipsis: true, tooltip: true },
   { title: '前置条件', dataIndex: 'precondition', width: 150, ellipsis: true, tooltip: true },
   { title: '优先级', dataIndex: 'level', slotName: 'level', width: 80 },
+  { title: '测试类型', dataIndex: 'test_type', slotName: 'testType', width: 90 },
   {
     title: '创建者',
     dataIndex: 'creator_detail',
@@ -209,6 +225,7 @@ const fetchTestCases = async () => {
       pageSize: paginationConfig.pageSize,
       search: searchKeyword.value,
       level: selectedLevel.value || undefined,
+      test_type: selectedTestType.value || undefined,
       module_id: selectedModule.value,
     });
 
@@ -236,6 +253,11 @@ const handleSearch = () => {
 };
 
 const handleLevelChange = () => {
+  paginationConfig.current = 1;
+  fetchTestCases();
+};
+
+const handleTestTypeChange = () => {
   paginationConfig.current = 1;
   fetchTestCases();
 };
@@ -320,6 +342,7 @@ watch(
     paginationConfig.current = 1;
     searchKeyword.value = '';
     selectedLevel.value = '';
+    selectedTestType.value = '';
     selectedModule.value = undefined;
     fetchModules();
     fetchTestCases();

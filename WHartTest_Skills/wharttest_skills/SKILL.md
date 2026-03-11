@@ -32,8 +32,8 @@ python whart_tools.py --action <action_name> [--参数名 参数值]
 | `get_levels` | 获取用例等级列表 | 无 |
 | `get_testcases` | 获取模块下的用例列表 | `--project_id`, `--module_id` |
 | `get_testcase_detail` | 获取用例详情 | `--project_id`, `--case_id` |
-| `add_testcase` | 新增测试用例 | `--project_id`, `--module_id`, `--name`, `--level`, `--precondition`, `--steps`, `--notes`, `--review_status` |
-| `edit_testcase` | 编辑测试用例 | `--project_id`, `--case_id`, `--name`, `--level`, `--module_id`, `--precondition`, `--steps`, `--notes`, `--review_status`, `--is_optimization` |
+| `add_testcase` | 新增测试用例 | `--project_id`, `--module_id`, `--name`, `--level`, `--precondition`, `--steps`, `--notes`, `--review_status`, `--test_type` |
+| `edit_testcase` | 编辑测试用例 | `--project_id`, `--case_id`, `--name`, `--level`, `--module_id`, `--precondition`, `--steps`, `--notes`, `--review_status`, `--test_type`, `--is_optimization` |
 
 ### 截图管理
 
@@ -62,6 +62,17 @@ python whart_tools.py --action <action_name> [--参数名 参数值]
 - `needs_optimization` - 优化
 - `optimization_pending_review` - 优化待审核
 - `unavailable` - 不可用
+
+### 测试类型
+
+`--test_type` 可选值：
+- `smoke` - 冒烟测试
+- `functional` - 功能测试（默认）
+- `boundary` - 边界测试
+- `exception` - 异常测试
+- `permission` - 权限测试
+- `security` - 安全测试
+- `compatibility` - 兼容性测试
 
 `--is_optimization` 标志（布尔型，无需传值）：在 edit_testcase 时带上此标志，会自动将状态设为 `optimization_pending_review`（优化待审核），用于AI优化后的用例提交。**一次调用即可完成编辑+状态更新。**
 - ✅ 正确用法：`python whart_tools.py --action edit_testcase --project_id 1 --case_id 51 ... --is_optimization`

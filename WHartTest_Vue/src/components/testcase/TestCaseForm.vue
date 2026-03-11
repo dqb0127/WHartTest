@@ -59,6 +59,15 @@
           </a-form-item>
         </a-col>
         <a-col :span="4">
+          <a-form-item field="test_type" label="测试类型">
+            <a-select v-model="formState.test_type" placeholder="请选择测试类型">
+              <a-option v-for="opt in TEST_TYPE_OPTIONS" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </a-option>
+            </a-select>
+          </a-form-item>
+        </a-col>
+        <a-col :span="4">
           <a-form-item field="module_id" label="所属模块">
             <a-tree-select
               v-model="formState.module_id"
@@ -380,7 +389,7 @@ import {
   type CreateTestCaseRequest,
   type UpdateTestCaseRequest,
 } from '@/services/testcaseService';
-import { formatDate, REVIEW_STATUS_OPTIONS } from '@/utils/formatters';
+import { formatDate, REVIEW_STATUS_OPTIONS, TEST_TYPE_OPTIONS } from '@/utils/formatters';
 import type { ReviewStatus } from '@/services/testcaseService';
 
 interface StepWithError extends TestCaseStep {
@@ -393,6 +402,7 @@ interface FormState extends CreateTestCaseRequest {
   notes?: string;
   module_id?: number;
   review_status?: ReviewStatus;
+  test_type?: string;
 }
 
 
@@ -421,6 +431,7 @@ const formState = reactive<FormState>({
   name: '',
   precondition: '',
   level: 'P2',
+  test_type: 'functional',
   module_id: undefined,
   steps: [{ step_number: 1, description: '', expected_result: '', temp_id: Date.now().toString() }],
   notes: '',
@@ -504,6 +515,7 @@ const resetForm = () => {
   formState.name = '';
   formState.precondition = '';
   formState.level = 'P2';
+  formState.test_type = 'functional';
   formState.module_id = initialSelectedModuleId?.value || undefined;
   formState.steps = [{ step_number: 1, description: '', expected_result: '', temp_id: Date.now().toString() }];
   formState.notes = '';
@@ -525,6 +537,7 @@ const fetchDetailsAndSetForm = async (id: number) => {
       formState.name = data.name;
       formState.precondition = data.precondition;
       formState.level = data.level;
+      formState.test_type = data.test_type || 'functional';
       formState.module_id = data.module_id;
       formState.notes = data.notes || ''; // 设置备注信息
       formState.review_status = data.review_status || 'pending_review'; // 设置审核状态
@@ -671,6 +684,9 @@ const handleSubmit = async () => {
           updatePayload.review_status = formState.review_status;
           reviewStatusChanged = true; // 标记审核状态变更
         }
+        if (formState.test_type !== originalFormData.value.test_type) {
+          updatePayload.test_type = formState.test_type;
+        }
 
         // 比较步骤：检查是否有变更
         // 将原始步骤数据标准化为与 payloadSteps 相同的格式后再比较
@@ -689,6 +705,7 @@ const handleSubmit = async () => {
         updatePayload.name = formState.name;
         updatePayload.precondition = formState.precondition;
         updatePayload.level = formState.level;
+        updatePayload.test_type = formState.test_type;
         updatePayload.module_id = formState.module_id;
         updatePayload.steps = payloadSteps;
         updatePayload.notes = formState.notes;
@@ -713,6 +730,7 @@ const handleSubmit = async () => {
         name: formState.name,
         precondition: formState.precondition,
         level: formState.level,
+        test_type: formState.test_type,
         module_id: formState.module_id,
         steps: payloadSteps.map(({id, ...rest}) => rest), // 创建时不需要步骤id
         notes: formState.notes,
@@ -728,18 +746,8 @@ const handleSubmit = async () => {
 
       Message.success(isEditing.value ? '测试用例更新成功' : '测试用例创建成功');
 
-      if (isEditing.value) {
-        // 编辑模式：保存后刷新当前数据，不返回列表
-        await fetchDetailsAndSetForm(formState.id!);
-        newScreenshots.value = []; // 清空新上传的截图
-        // 如果审核状态变更，通知父组件刷新导航列表
-        if (reviewStatusChanged) {
-          emit('reviewStatusChanged');
-        }
-      } else {
-        // 新建模式：返回列表页并刷新
-        emit('submitSuccess');
-      }
+      // 无论是编辑还是新建，保存成功后都返回列表并刷新
+      emit('submitSuccess');
     } else {
       Message.error(response.error || (isEditing.value ? '更新失败' : '创建失败'));
     }

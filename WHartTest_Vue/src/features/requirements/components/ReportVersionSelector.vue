@@ -53,7 +53,7 @@
 
 import type { ReviewReport, Rating } from '../types';
 
-// Props
+// 组件属性
 interface Props {
   reportVersions: ReviewReport[];
   selectedReportId?: string;
@@ -66,7 +66,7 @@ const props = withDefaults(defineProps<Props>(), {
   loading: false
 });
 
-// Emits
+// 组件事件
 const emit = defineEmits<{
   'version-change': [reportId: string];
 }>();

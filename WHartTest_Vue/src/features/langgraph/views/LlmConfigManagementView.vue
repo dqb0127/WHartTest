@@ -203,7 +203,7 @@ const handleSubmitConfig = async (
       // LlmConfigFormModal 实现的是：如果 api_key 为空字符串，则不提交该字段，适合 PATCH
       response = await partialUpdateLlmConfig(id, data as PartialUpdateLlmConfigRequest);
       // 如果需要严格的 PUT，则 LlmConfigFormModal 需要确保所有字段都提交
-      // response = await updateLlmConfig(id, data as CreateLlmConfigRequest);
+      // 示例：response = await updateLlmConfig(id, data as CreateLlmConfigRequest);
     } else {
       // 新增模式
       response = await createLlmConfig(data as CreateLlmConfigRequest);

@@ -55,10 +55,7 @@
           <span v-else>-</span>
         </template>
         <template #testcase_count="{ record }">
-          <a-space :size="4">
-            <a-tag color="blue">{{ record.testcase_count }} 用例</a-tag>
-            <a-tag color="purple">{{ record.script_count || 0 }} 脚本</a-tag>
-          </a-space>
+          <a-tag color="blue">{{ record.testcase_count }} 用例</a-tag>
         </template>
         <template #created_at="{ record }">
           {{ formatDate(record.created_at) }}
@@ -237,9 +234,8 @@ const handleViewDetail = (suite: TestSuite) => {
 
 // 执行测试套件
 const handleExecute = (suite: TestSuite) => {
-  const totalCount = (suite.testcase_count || 0) + (suite.script_count || 0);
-  if (totalCount === 0) {
-    Message.warning('该测试套件没有用例或脚本，无法执行');
+  if ((suite.testcase_count || 0) === 0) {
+    Message.warning('该测试套件没有用例，无法执行');
     return;
   }
   selectedSuite.value = suite;

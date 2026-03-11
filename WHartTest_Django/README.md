@@ -324,6 +324,15 @@ wharttest_django/
 - 使用统一的响应格式 `UnifiedResponseRenderer`
 - 遵循 RESTful API 设计原则
 - 完善的权限控制和数据隔离
+- 注释规范统一遵循 [`docs/code_comment_rules.md`](./docs/code_comment_rules.md)
+
+### 注释规范
+
+为避免配置注释与逻辑注释风格混用，项目按以下规则执行（详细示例见 [`docs/code_comment_rules.md`](./docs/code_comment_rules.md)）：
+
+1. 配置文件（如 `settings.py`）统一使用行尾注释，强调“用途/影响”，且同一列表/字典全量一致。
+2. 业务逻辑文件（`views/services/tasks/permissions`）统一使用上方细粒度注释，说明“条件 -> 动作 -> 结果”或“为什么这么做”。
+3. 同一配置块保持同一风格；新增/修改配置时同步补注释；注释不得与代码语义冲突。
 
 ## 部署指南
 

@@ -1,1 +1,1 @@
-# Django management commands for knowledge base
+# 知识库相关 Django 管理命令

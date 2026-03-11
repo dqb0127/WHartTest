@@ -1,15 +1,15 @@
-// playwright-helpers.js
-// Reusable utility functions for Playwright automation
+// Playwright 辅助函数模块
+// Playwright 自动化可复用工具函数
 
 const { chromium, firefox, webkit } = require('playwright');
 
 /**
- * Parse extra HTTP headers from environment variables.
- * Supports two formats:
- * - PW_HEADER_NAME + PW_HEADER_VALUE: Single header (simple, common case)
- * - PW_EXTRA_HEADERS: JSON object for multiple headers (advanced)
- * Single header format takes precedence if both are set.
- * @returns {Object|null} Headers object or null if none configured
+ * 从环境变量解析额外 HTTP 请求头。
+ * 支持两种格式：
+ * - PW_HEADER_NAME + PW_HEADER_VALUE：单个请求头（简单常用）
+ * - PW_EXTRA_HEADERS：多个请求头的 JSON 对象（高级用法）
+ * 若两种同时存在，优先使用单请求头格式。
+ * @returns {Object|null} 请求头对象；若未配置则返回 null
  */
 function getExtraHeadersFromEnv() {
   const headerName = process.env.PW_HEADER_NAME;
@@ -36,9 +36,9 @@ function getExtraHeadersFromEnv() {
 }
 
 /**
- * Launch browser with standard configuration
- * @param {string} browserType - 'chromium', 'firefox', or 'webkit'
- * @param {Object} options - Additional launch options
+ * 以标准配置启动浏览器
+ * @param {string} browserType - 浏览器类型：'chromium'、'firefox' 或 'webkit'
+ * @param {Object} options - 额外启动配置
  */
 async function launchBrowser(browserType = 'chromium', options = {}) {
   const defaultOptions = {
@@ -58,9 +58,9 @@ async function launchBrowser(browserType = 'chromium', options = {}) {
 }
 
 /**
- * Create a new page with viewport and user agent
- * @param {Object} context - Browser context
- * @param {Object} options - Page options
+ * 创建新页面并应用视口与 UA 配置
+ * @param {Object} context - 浏览器上下文
+ * @param {Object} options - 页面配置
  */
 async function createPage(context, options = {}) {
   const page = await context.newPage();
@@ -75,16 +75,16 @@ async function createPage(context, options = {}) {
     });
   }
   
-  // Set default timeout
+  // 设置默认超时时间
   page.setDefaultTimeout(options.timeout || 30000);
   
   return page;
 }
 
 /**
- * Smart wait for page to be ready
- * @param {Object} page - Playwright page
- * @param {Object} options - Wait options
+ * 智能等待页面就绪
+ * @param {Object} page - Playwright 页面对象
+ * @param {Object} options - 等待配置
  */
 async function waitForPageReady(page, options = {}) {
   const waitOptions = {
@@ -100,7 +100,7 @@ async function waitForPageReady(page, options = {}) {
     console.warn('Page load timeout, continuing...');
   }
   
-  // Additional wait for dynamic content if selector provided
+  // 若提供了选择器，则额外等待动态内容出现
   if (options.waitForSelector) {
     await page.waitForSelector(options.waitForSelector, { 
       timeout: options.timeout 
@@ -109,10 +109,10 @@ async function waitForPageReady(page, options = {}) {
 }
 
 /**
- * Safe click with retry logic
- * @param {Object} page - Playwright page
- * @param {string} selector - Element selector
- * @param {Object} options - Click options
+ * 带重试机制的安全点击
+ * @param {Object} page - Playwright 页面对象
+ * @param {string} selector - 元素选择器
+ * @param {Object} options - 点击配置
  */
 async function safeClick(page, selector, options = {}) {
   const maxRetries = options.retries || 3;
@@ -141,11 +141,11 @@ async function safeClick(page, selector, options = {}) {
 }
 
 /**
- * Safe text input with clear before type
- * @param {Object} page - Playwright page
- * @param {string} selector - Input selector
- * @param {string} text - Text to type
- * @param {Object} options - Type options
+ * 安全文本输入（输入前可先清空）
+ * @param {Object} page - Playwright 页面对象
+ * @param {string} selector - 输入框选择器
+ * @param {string} text - 要输入的文本
+ * @param {Object} options - 输入配置
  */
 async function safeType(page, selector, text, options = {}) {
   await page.waitForSelector(selector, { 
@@ -165,9 +165,9 @@ async function safeType(page, selector, text, options = {}) {
 }
 
 /**
- * Extract text from multiple elements
- * @param {Object} page - Playwright page
- * @param {string} selector - Elements selector
+ * 批量提取多个元素文本
+ * @param {Object} page - Playwright 页面对象
+ * @param {string} selector - 元素选择器
  */
 async function extractTexts(page, selector) {
   await page.waitForSelector(selector, { timeout: 10000 });
@@ -177,10 +177,10 @@ async function extractTexts(page, selector) {
 }
 
 /**
- * Take screenshot with timestamp
- * @param {Object} page - Playwright page
- * @param {string} name - Screenshot name
- * @param {Object} options - Screenshot options
+ * 截图并附加时间戳
+ * @param {Object} page - Playwright 页面对象
+ * @param {string} name - 截图名称
+ * @param {Object} options - 截图配置
  */
 async function takeScreenshot(page, name, options = {}) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -197,10 +197,10 @@ async function takeScreenshot(page, name, options = {}) {
 }
 
 /**
- * Handle authentication
- * @param {Object} page - Playwright page
- * @param {Object} credentials - Username and password
- * @param {Object} selectors - Login form selectors
+ * 处理登录认证流程
+ * @param {Object} page - Playwright 页面对象
+ * @param {Object} credentials - 用户名与密码
+ * @param {Object} selectors - 登录表单选择器
  */
 async function authenticate(page, credentials, selectors = {}) {
   const defaultSelectors = {
@@ -215,7 +215,7 @@ async function authenticate(page, credentials, selectors = {}) {
   await safeType(page, finalSelectors.password, credentials.password);
   await safeClick(page, finalSelectors.submit);
   
-  // Wait for navigation or success indicator
+  // 等待页面跳转或登录成功标识
   await Promise.race([
     page.waitForNavigation({ waitUntil: 'networkidle' }),
     page.waitForSelector(selectors.successIndicator || '.dashboard, .user-menu, .logout', { timeout: 10000 })
@@ -225,10 +225,10 @@ async function authenticate(page, credentials, selectors = {}) {
 }
 
 /**
- * Scroll page
- * @param {Object} page - Playwright page
- * @param {string} direction - 'down', 'up', 'top', 'bottom'
- * @param {number} distance - Pixels to scroll (for up/down)
+ * 滚动页面
+ * @param {Object} page - Playwright 页面对象
+ * @param {string} direction - 滚动方向：'down'、'up'、'top'、'bottom'
+ * @param {number} distance - 滚动像素（仅对 up/down 生效）
  */
 async function scrollPage(page, direction = 'down', distance = 500) {
   switch (direction) {
@@ -245,13 +245,13 @@ async function scrollPage(page, direction = 'down', distance = 500) {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
       break;
   }
-  await page.waitForTimeout(500); // Wait for scroll animation
+  await page.waitForTimeout(500); // 等待滚动动画完成
 }
 
 /**
- * Extract table data
- * @param {Object} page - Playwright page
- * @param {string} tableSelector - Table selector
+ * 提取表格数据
+ * @param {Object} page - Playwright 页面对象
+ * @param {string} tableSelector - 表格选择器
  */
 async function extractTableData(page, tableSelector) {
   await page.waitForSelector(tableSelector);
@@ -281,9 +281,9 @@ async function extractTableData(page, tableSelector) {
 }
 
 /**
- * Wait for and dismiss cookie banners
- * @param {Object} page - Playwright page
- * @param {number} timeout - Max time to wait
+ * 等待并关闭 Cookie 提示条
+ * @param {Object} page - Playwright 页面对象
+ * @param {number} timeout - 最大等待时间
  */
 async function handleCookieBanner(page, timeout = 3000) {
   const commonSelectors = [
@@ -309,7 +309,7 @@ async function handleCookieBanner(page, timeout = 3000) {
         return true;
       }
     } catch (e) {
-      // Continue to next selector
+      // 当前选择器失败，继续尝试下一个
     }
   }
   
@@ -317,10 +317,10 @@ async function handleCookieBanner(page, timeout = 3000) {
 }
 
 /**
- * Retry a function with exponential backoff
- * @param {Function} fn - Function to retry
- * @param {number} maxRetries - Maximum retry attempts
- * @param {number} initialDelay - Initial delay in ms
+ * 使用指数退避重试函数
+ * @param {Function} fn - 待重试函数
+ * @param {number} maxRetries - 最大重试次数
+ * @param {number} initialDelay - 初始延迟（毫秒）
  */
 async function retryWithBackoff(fn, maxRetries = 3, initialDelay = 1000) {
   let lastError;
@@ -340,14 +340,14 @@ async function retryWithBackoff(fn, maxRetries = 3, initialDelay = 1000) {
 }
 
 /**
- * Create browser context with common settings
- * @param {Object} browser - Browser instance
- * @param {Object} options - Context options
+ * 使用通用配置创建浏览器上下文
+ * @param {Object} browser - 浏览器实例
+ * @param {Object} options - 上下文配置
  */
 async function createContext(browser, options = {}) {
   const envHeaders = getExtraHeadersFromEnv();
 
-  // Merge environment headers with any passed in options
+  // 将环境变量请求头与传入配置合并
   const mergedHeaders = {
     ...envHeaders,
     ...options.extraHTTPHeaders
@@ -362,7 +362,7 @@ async function createContext(browser, options = {}) {
     geolocation: options.geolocation,
     locale: options.locale || 'en-US',
     timezoneId: options.timezoneId || 'America/New_York',
-    // Only include extraHTTPHeaders if we have any
+    // 仅在存在请求头时附加 extraHTTPHeaders
     ...(Object.keys(mergedHeaders).length > 0 && { extraHTTPHeaders: mergedHeaders })
   };
 
@@ -370,14 +370,14 @@ async function createContext(browser, options = {}) {
 }
 
 /**
- * Detect running dev servers on common ports
- * @param {Array<number>} customPorts - Additional ports to check
- * @returns {Promise<Array>} Array of detected server URLs
+ * 在常见端口检测正在运行的开发服务器
+ * @param {Array<number>} customPorts - 额外要检测的端口
+ * @returns {Promise<Array>} 检测到的服务 URL 列表
  */
 async function detectDevServers(customPorts = []) {
   const http = require('http');
 
-  // Common dev server ports
+  // 常见开发服务器端口
   const commonPorts = [3000, 3001, 3002, 5173, 8080, 8000, 4200, 5000, 9000, 1234];
   const allPorts = [...new Set([...commonPorts, ...customPorts])];
 
@@ -411,7 +411,7 @@ async function detectDevServers(customPorts = []) {
         req.end();
       });
     } catch (e) {
-      // Port not available, continue
+      // 端口不可用，继续检测
     }
   }
 
@@ -423,19 +423,19 @@ async function detectDevServers(customPorts = []) {
 }
 
 /**
- * Get page content as readable text (for AI understanding)
- * @param {Object} page - Playwright page
- * @returns {string} Page text content
+ * 获取可读页面文本（便于 AI 理解）
+ * @param {Object} page - Playwright 页面对象
+ * @returns {string} 页面文本内容
  */
 async function getPageText(page) {
   return await page.innerText('body');
 }
 
 /**
- * Get page structure for AI to understand what elements are available
- * Returns a simplified view of interactive elements
- * @param {Object} page - Playwright page
- * @returns {Object} Page structure with forms, buttons, links, inputs
+ * 获取页面结构，帮助 AI 理解可交互元素
+ * 返回表单、按钮、链接、输入框等简化结构
+ * @param {Object} page - Playwright 页面对象
+ * @returns {Object} 页面结构信息（表单/按钮/链接/输入框）
  */
 async function getPageStructure(page) {
   return await page.evaluate(() => {
@@ -485,9 +485,9 @@ async function getPageStructure(page) {
 }
 
 /**
- * Describe page for AI in a readable format
- * @param {Object} page - Playwright page
- * @returns {string} Human/AI readable page description
+ * 以可读格式生成页面描述（供 AI 使用）
+ * @param {Object} page - Playwright 页面对象
+ * @returns {string} 人类与 AI 都易读的页面描述
  */
 async function describePageForAI(page) {
   const structure = await getPageStructure(page);

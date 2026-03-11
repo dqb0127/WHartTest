@@ -161,8 +161,7 @@ const handleBatchDelete = () => {
 
 // 格式化时间显示
 const formatTime = (date: Date) => {
-  // 确保传入的是有效的 Date 对象
-  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+  if (!date || !(date instanceof Date) || isNaN(date.getTime()) || date.getTime() === 0) {
     return '时间未知';
   }
 

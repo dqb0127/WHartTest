@@ -30,10 +30,11 @@ class SkillViewSet(BaseModelViewSet):
     parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get_queryset(self):
-        # Skills 全局共享，不限制项目
+        # Skills 当前设计为全局共享资源，不按项目过滤查询集。
         return Skill.objects.all()
 
     def get_serializer_class(self):
+        # 按动作切换序列化器，确保每个接口只暴露必要字段与校验规则。
         if self.action == 'list':
             return SkillListSerializer
         if self.action == 'upload':
@@ -45,6 +46,7 @@ class SkillViewSet(BaseModelViewSet):
         return SkillSerializer
 
     def get_project(self):
+        # 解析嵌套路由中的项目 ID；不存在时返回 404。
         project_id = self.kwargs.get('project_pk')
         return get_object_or_404(Project, id=project_id)
 
@@ -71,6 +73,7 @@ class SkillViewSet(BaseModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         """更新 Skill（仅支持 is_active）"""
         instance = self.get_object()
+        # 条件：缺少 is_active；动作：拒绝；结果：避免误改其它只读字段。
         if 'is_active' not in request.data:
             return Response({
                 'code': 400,
@@ -92,6 +95,7 @@ class SkillViewSet(BaseModelViewSet):
         """删除 Skill"""
         instance = self.get_object()
         name = instance.name
+        # 删除数据库记录会触发模型 delete() 中的文件清理逻辑。
         instance.delete()
         return Response({
             'code': 200,
@@ -112,6 +116,7 @@ class SkillViewSet(BaseModelViewSet):
         project = self.get_project()
 
         try:
+            # 条件：上传包合法；动作：解压并创建 Skill；结果：返回新 Skill 的完整信息。
             skill = Skill.create_from_zip(
                 zip_file=zip_file,
                 project=project,
@@ -123,6 +128,7 @@ class SkillViewSet(BaseModelViewSet):
                 'data': SkillSerializer(skill).data
             }, status=status.HTTP_201_CREATED)
         except ValidationError as e:
+            # 参数/文件内容校验失败返回 400，便于前端直接提示用户修正输入。
             msg = e.messages[0] if hasattr(e, 'messages') and e.messages else str(e)
             return Response({
                 'code': 400,
@@ -130,6 +136,7 @@ class SkillViewSet(BaseModelViewSet):
                 'data': None
             }, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
+            # 未预期异常记录堆栈并返回 500，避免将内部错误细节暴露给客户端。
             logger.exception("Skill upload failed: %s", e)
             return Response({
                 'code': 500,
@@ -140,7 +147,7 @@ class SkillViewSet(BaseModelViewSet):
     @action(detail=False, methods=['post'], url_path='import-git')
     def import_git(self, request, *args, **kwargs):
         """
-        从 Git 仓库导入 Skill
+        从 Git 仓库导入 Skills（支持仓库包含多个 Skill）
 
         请求：application/json，包含 git_url（必填）和 branch（可选）
         """
@@ -152,16 +159,17 @@ class SkillViewSet(BaseModelViewSet):
         project = self.get_project()
 
         try:
-            skill = Skill.create_from_git(
+            skills = Skill.create_from_git(
                 git_url=git_url,
                 branch=branch,
                 project=project,
                 creator=request.user
             )
+            names = ', '.join(s.name for s in skills)
             return Response({
                 'code': 201,
-                'message': f"Skill '{skill.name}' 导入成功",
-                'data': SkillSerializer(skill).data
+                'message': f"成功导入 {len(skills)} 个 Skill: {names}",
+                'data': SkillSerializer(skills, many=True).data
             }, status=status.HTTP_201_CREATED)
         except ValidationError as e:
             msg = e.messages[0] if hasattr(e, 'messages') and e.messages else str(e)

@@ -30,13 +30,14 @@
 
           <div class="overview-card">
             <div class="overview-header">
-              <icon-robot class="overview-icon" />
-              <span class="overview-title">UI用例</span>
+              <icon-desktop class="overview-icon" />
+              <span class="overview-title">UI自动化</span>
             </div>
-            <div class="overview-value">{{ statistics?.automation_scripts?.total || 0 }}</div>
+            <div class="overview-value">{{ statistics?.ui_automation?.total_cases || 0 }}</div>
             <div class="overview-sub">
-              <span class="sub-item active">启用 {{ statistics?.automation_scripts?.by_status?.active || 0 }}</span>
-              <span class="sub-item draft">草稿 {{ statistics?.automation_scripts?.by_status?.draft || 0 }}</span>
+              <span class="sub-item">执行 {{ statistics?.ui_automation?.total_executions || 0 }}</span>
+              <span class="sub-item passed">成功 {{ statistics?.ui_automation?.by_status?.success || 0 }}</span>
+              <span class="sub-item failed">失败 {{ statistics?.ui_automation?.by_status?.failed || 0 }}</span>
             </div>
           </div>
 
@@ -242,7 +243,7 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { Message } from '@arco-design/web-vue';
 import {
-  IconBarChart, IconFile, IconRobot, IconThunderbolt, IconApps
+  IconBarChart, IconFile, IconThunderbolt, IconApps, IconDesktop
 } from '@arco-design/web-vue/es/icon';
 import { getProjectStatistics, getTokenUsageStats, type ProjectStatistics, type TokenUsageStats } from '@/services/projectService';
 import { useProjectStore } from '@/store/projectStore';
@@ -370,7 +371,7 @@ onMounted(() => {
 <style scoped>
 .dashboard-view {
   height: 100%;
-  background-color: #f8f9fc;
+  background-color: var(--theme-page-bg);
   padding: 10px;
   box-sizing: border-box;
   overflow-y: auto;
@@ -418,7 +419,7 @@ onMounted(() => {
 }
 
 .overview-card:hover {
-  box-shadow: 4px 0 12px rgba(0, 160, 233, 0.25), 0 4px 12px rgba(0, 160, 233, 0.25), 0 0 12px rgba(0, 160, 233, 0.2);
+  box-shadow: 4px 0 12px rgba(var(--theme-accent-rgb), 0.22), 0 4px 12px rgba(var(--theme-accent-rgb), 0.22), 0 0 12px rgba(var(--theme-accent-rgb), 0.18);
 }
 
 .overview-header {
@@ -430,12 +431,12 @@ onMounted(() => {
 
 .overview-icon {
   font-size: 20px;
-  color: #00a0e9;
+  color: var(--theme-accent);
 }
 
 .overview-title {
   font-size: 14px;
-  color: #666;
+  color: var(--theme-text-secondary);
   font-weight: 500;
 }
 
@@ -488,7 +489,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 14px 20px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--theme-border);
 }
 
 .panel-title {
@@ -499,8 +500,8 @@ onMounted(() => {
 
 .panel-badge {
   font-size: 12px;
-  color: #86909c;
-  background: #f2f3f5;
+  color: var(--theme-text-tertiary);
+  background: var(--theme-surface-soft);
   padding: 2px 8px;
   border-radius: 10px;
 }
@@ -530,24 +531,24 @@ onMounted(() => {
 
 .bar-label {
   font-size: 13px;
-  color: #4e5969;
+  color: var(--theme-text-secondary);
 }
 
 .bar-value {
   font-size: 14px;
   font-weight: 600;
-  color: #1d2129;
+  color: var(--theme-text);
 }
 
 .bar-percent {
   font-size: 12px;
   font-weight: 400;
-  color: #86909c;
+  color: var(--theme-text-tertiary);
 }
 
 .bar-track {
   height: 6px;
-  background: #e8e8e8;
+  background: var(--theme-surface-soft);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -580,7 +581,7 @@ onMounted(() => {
 
 .rate-bg {
   fill: none;
-  stroke: #e8e8e8;
+  stroke: var(--theme-surface-soft);
   stroke-width: 8;
 }
 
@@ -607,7 +608,7 @@ onMounted(() => {
 
 .rate-unit {
   font-size: 14px;
-  color: #86909c;
+  color: var(--theme-text-tertiary);
 }
 
 .rate-legend {
@@ -636,13 +637,13 @@ onMounted(() => {
 .legend-dot.error { background: #ff7875; }
 
 .legend-label {
-  color: #86909c;
+  color: var(--theme-text-tertiary);
   flex: 1;
 }
 
 .legend-value {
   font-weight: 600;
-  color: #1d2129;
+  color: var(--theme-text);
 }
 
 /* 资源统计 */
@@ -654,7 +655,7 @@ onMounted(() => {
 
 .resource-block {
   padding-bottom: 12px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--theme-border);
 }
 
 .resource-block:last-child {
@@ -665,7 +666,7 @@ onMounted(() => {
 .resource-label {
   font-size: 13px;
   font-weight: 500;
-  color: #4e5969;
+  color: var(--theme-text-secondary);
   margin-bottom: 8px;
 }
 
@@ -679,12 +680,12 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
-  color: #86909c;
+  color: var(--theme-text-tertiary);
 }
 
 .stat-num {
   font-weight: 600;
-  color: #1d2129;
+  color: var(--theme-text);
 }
 
 .stat-num.active { color: #52c41a; }
@@ -701,18 +702,18 @@ onMounted(() => {
   padding: 2px 8px;
   border-radius: 10px;
   cursor: pointer;
-  color: #86909c;
-  background: #f2f3f5;
+  color: var(--theme-text-tertiary);
+  background: var(--theme-surface-soft);
   transition: all 0.2s;
 }
 
 .period-tag:hover {
-  color: #00a0e9;
+  color: var(--theme-accent);
 }
 
 .period-tag.active {
   color: #fff;
-  background: #00a0e9;
+  background: var(--theme-accent);
 }
 
 .token-total {
@@ -723,7 +724,7 @@ onMounted(() => {
 .token-value {
   font-size: 28px;
   font-weight: 700;
-  color: #00a0e9;
+  color: var(--theme-accent);
   line-height: 1.2;
   margin: 8px 0;
 }
@@ -736,7 +737,7 @@ onMounted(() => {
 
 .token-detail {
   font-size: 12px;
-  color: #86909c;
+  color: var(--theme-text-tertiary);
 }
 
 /* 趋势图 */
@@ -769,11 +770,11 @@ onMounted(() => {
   display: flex;
   gap: 16px;
   font-size: 12px;
-  color: #86909c;
+  color: var(--theme-text-tertiary);
 }
 
 .summary-item strong {
-  color: #1d2129;
+  color: var(--theme-text);
 }
 
 .summary-item.passed strong { color: #52c41a; }
@@ -814,7 +815,7 @@ onMounted(() => {
 
 .column-label {
   font-size: 11px;
-  color: #86909c;
+  color: var(--theme-text-tertiary);
 }
 
 .trend-legend {
@@ -823,12 +824,12 @@ onMounted(() => {
   gap: 20px;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--theme-border);
 }
 
 .legend-tag {
   font-size: 12px;
-  color: #86909c;
+  color: var(--theme-text-tertiary);
   display: flex;
   align-items: center;
   gap: 6px;

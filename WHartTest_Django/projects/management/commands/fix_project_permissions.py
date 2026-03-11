@@ -1,5 +1,10 @@
+# 导入 Django 管理命令基类。
 from django.core.management.base import BaseCommand
+
+# 导入权限模型。
 from django.contrib.auth.models import Permission
+
+# 导入项目成员模型。
 from projects.models import ProjectMember
 
 
@@ -7,12 +12,13 @@ class Command(BaseCommand):
     help = '为所有项目成员分配必要的Django模型权限'
 
     def add_arguments(self, parser):
+        # 预览模式仅输出变更，不真正写入数据库。
         parser.add_argument('--dry-run', action='store_true', help='只显示将要执行的操作，不实际执行')
 
     def handle(self, *args, **options):
         dry_run = options['dry_run']
         
-        # 获取项目相关的权限
+        # 预先加载项目模块四类模型权限，缺失则直接终止修复。
         try:
             view_perm = Permission.objects.get(codename='view_project', content_type__app_label='projects')
             add_perm = Permission.objects.get(codename='add_project', content_type__app_label='projects')
@@ -22,7 +28,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f'权限不存在: {e}'))
             return
 
-        # 获取所有项目成员
+        # 扫描全部项目成员，按其角色补齐应有权限。
         members = ProjectMember.objects.select_related('user').all()
         
         self.stdout.write(f"找到 {members.count()} 个项目成员")
@@ -38,27 +44,29 @@ class Command(BaseCommand):
                 
             permissions_to_add = []
             
-            # 所有项目成员都需要查看权限
+            # 所有项目成员至少应具备项目查看权限。
             if not user.has_perm('projects.view_project'):
                 permissions_to_add.append(view_perm)
             
-            # 根据角色分配不同权限
+            # admin/owner 补齐新增和修改权限。
             if member.role in ['owner', 'admin']:
                 if not user.has_perm('projects.add_project'):
                     permissions_to_add.append(add_perm)
                 if not user.has_perm('projects.change_project'):
                     permissions_to_add.append(change_perm)
                     
-            # 只有拥有者可以删除项目
+            # owner 额外补齐删除权限。
             if member.role == 'owner':
                 if not user.has_perm('projects.delete_project'):
                     permissions_to_add.append(delete_perm)
             
             if permissions_to_add:
                 if dry_run:
+                    # 预览模式仅打印将变更的权限，不执行写入。
                     perm_names = [p.codename for p in permissions_to_add]
                     self.stdout.write(f"将为用户 {user.username} ({member.role}) 添加权限: {perm_names}")
                 else:
+                    # 正式模式执行权限写入。
                     user.user_permissions.add(*permissions_to_add)
                     perm_names = [p.codename for p in permissions_to_add]
                     self.stdout.write(f"已为用户 {user.username} ({member.role}) 添加权限: {perm_names}")

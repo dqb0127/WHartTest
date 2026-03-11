@@ -1,5 +1,9 @@
 # 第一阶段：构建阶段
-FROM docker.1ms.run/library/node:20-alpine AS builder
+ARG NODE_BASE_IMAGE=node:20-alpine
+ARG NGINX_BASE_IMAGE=nginx:alpine
+FROM ${NODE_BASE_IMAGE} AS builder
+
+ARG NPM_REGISTRY=https://registry.npmjs.org
 
 # 设置工作目录
 WORKDIR /app
@@ -7,8 +11,12 @@ WORKDIR /app
 # 复制 package 文件
 COPY package*.json ./
 
-# 设置 npm 淘宝镜像源
-RUN npm config set registry https://registry.npmmirror.com
+# 设置 npm 源，并同步修正 lock 文件中的 resolved 地址
+RUN npm config set registry "${NPM_REGISTRY}" && \
+    sed -i \
+      -e "s#https://registry\\.npmmirror\\.com/#${NPM_REGISTRY%/}/#g" \
+      -e "s#https://registry\\.npmjs\\.org/#${NPM_REGISTRY%/}/#g" \
+      package-lock.json
 
 # 安装依赖（npm ci更快更可靠，基于lock文件）
 RUN npm ci
@@ -31,7 +39,7 @@ COPY .env.production .env.production
 RUN npx vite build --mode production
 
 # 第二阶段：运行阶段
-FROM docker.1ms.run/library/nginx:alpine
+FROM ${NGINX_BASE_IMAGE}
 
 # 复制自定义 nginx 配置
 COPY nginx.conf /etc/nginx/conf.d/default.conf

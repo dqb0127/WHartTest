@@ -24,6 +24,16 @@ class TestCase(models.Model):
         ('P3', _('P3')),
     ]
 
+    TEST_TYPE_CHOICES = [
+        ('smoke', _('冒烟测试')),
+        ('functional', _('功能测试')),
+        ('boundary', _('边界测试')),
+        ('exception', _('异常测试')),
+        ('permission', _('权限测试')),
+        ('security', _('安全测试')),
+        ('compatibility', _('兼容性测试')),
+    ]
+
     REVIEW_STATUS_CHOICES = [
         ('pending_review', _('待审核')),
         ('approved', _('通过')),
@@ -78,6 +88,13 @@ class TestCase(models.Model):
         default='pending_review',
         blank=True,
         null=True,
+    )
+    test_type = models.CharField(
+        _('测试类型'),
+        max_length=20,
+        choices=TEST_TYPE_CHOICES,
+        default='functional',
+        blank=True,
     )
 
     class Meta:
@@ -263,13 +280,6 @@ class TestSuite(models.Model):
         verbose_name=_('测试用例'),
         blank=True
     )
-    automation_scripts = models.ManyToManyField(
-        'AutomationScript',
-        related_name='test_suites',
-        verbose_name=_('自动化脚本'),
-        blank=True,
-        help_text=_('关联的 Playwright 自动化测试脚本')
-    )
     creator = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -281,7 +291,7 @@ class TestSuite(models.Model):
     max_concurrent_tasks = models.PositiveSmallIntegerField(
         _('最大并发数'),
         default=1,
-        help_text=_('同时执行的测试用例/脚本数量，1表示串行执行，建议值2-5')
+        help_text=_('同时执行的测试用例数量，1表示串行执行，建议值2-5')
     )
     created_at = models.DateTimeField(_('创建时间'), auto_now_add=True)
     updated_at = models.DateTimeField(_('更新时间'), auto_now=True)
@@ -430,201 +440,6 @@ class TestCaseResult(models.Model):
     
     def __str__(self):
         return f"{self.testcase.name} - {self.get_status_display()}"
-    
-    @property
-    def duration(self):
-        """计算执行时长(秒)"""
-        if self.started_at and self.completed_at:
-            return (self.completed_at - self.started_at).total_seconds()
-        return self.execution_time
-
-
-class AutomationScript(models.Model):
-    """
-    自动化用例模型 - 从 AI 探索生成的可重复执行脚本
-    
-    关联关系：
-    - TestCase 1:N AutomationScript（一个用例可有多个脚本版本）
-    - AgentTask 1:1 AutomationScript（脚本从任务生成）
-    """
-    
-    SCRIPT_TYPE_CHOICES = [
-        ('playwright_python', _('Playwright Python')),
-        ('playwright_javascript', _('Playwright JavaScript')),
-    ]
-    
-    SOURCE_CHOICES = [
-        ('ai_generated', _('AI 自动生成')),
-        ('manual', _('手动编写')),
-        ('recorded', _('录制生成')),
-    ]
-    
-    STATUS_CHOICES = [
-        ('draft', _('草稿')),
-        ('active', _('启用')),
-        ('deprecated', _('已废弃')),
-    ]
-    
-    # 关联功能用例
-    test_case = models.ForeignKey(
-        TestCase,
-        on_delete=models.CASCADE,
-        related_name='automation_scripts',
-        verbose_name=_('关联功能用例')
-    )
-    
-    # 来源任务（可选，AI 生成时关联）
-    source_task = models.ForeignKey(
-        'orchestrator_integration.AgentTask',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='generated_scripts',
-        verbose_name=_('来源任务')
-    )
-    
-    # 脚本基本信息
-    name = models.CharField(_('脚本名称'), max_length=255)
-    description = models.TextField(_('脚本描述'), blank=True, null=True)
-    script_type = models.CharField(
-        _('脚本类型'),
-        max_length=30,
-        choices=SCRIPT_TYPE_CHOICES,
-        default='playwright_python'
-    )
-    source = models.CharField(
-        _('来源'),
-        max_length=20,
-        choices=SOURCE_CHOICES,
-        default='ai_generated'
-    )
-    status = models.CharField(
-        _('状态'),
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default='active'
-    )
-    
-    # 脚本内容
-    script_content = models.TextField(_('脚本代码'))
-    
-    # 原始记录的操作步骤（JSON 格式，用于重新生成或分析）
-    recorded_steps = models.JSONField(
-        _('记录的操作步骤'),
-        default=list,
-        blank=True,
-        help_text=_('从 AgentStep 提取的 Playwright 操作列表')
-    )
-    
-    # 配置
-    target_url = models.URLField(_('目标URL'), max_length=2000, blank=True, null=True)
-    timeout_seconds = models.IntegerField(_('超时时间(秒)'), default=30)
-    headless = models.BooleanField(_('无头模式'), default=True)
-    
-    # 版本管理
-    version = models.IntegerField(_('版本号'), default=1)
-    
-    # 元信息
-    creator = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='created_automation_scripts',
-        verbose_name=_('创建人')
-    )
-    created_at = models.DateTimeField(_('创建时间'), auto_now_add=True)
-    updated_at = models.DateTimeField(_('更新时间'), auto_now=True)
-    
-    class Meta:
-        verbose_name = _('自动化用例')
-        verbose_name_plural = _('自动化用例')
-        ordering = ['-created_at']
-    
-    def __str__(self):
-        return f"{self.test_case.name} - {self.name} (v{self.version})"
-    
-    @property
-    def project(self):
-        """获取所属项目"""
-        return self.test_case.project
-
-
-class ScriptExecution(models.Model):
-    """
-    脚本执行记录模型 - 记录每次脚本执行的结果
-    """
-    
-    STATUS_CHOICES = [
-        ('pending', _('等待中')),
-        ('running', _('执行中')),
-        ('pass', _('通过')),
-        ('fail', _('失败')),
-        ('error', _('错误')),
-        ('cancelled', _('已取消')),
-    ]
-    
-    script = models.ForeignKey(
-        AutomationScript,
-        on_delete=models.CASCADE,
-        related_name='executions',
-        verbose_name=_('执行的脚本')
-    )
-    
-    # 关联到测试套件执行记录（可选，因为脚本也可以单独执行）
-    test_execution = models.ForeignKey(
-        TestExecution,
-        on_delete=models.CASCADE,
-        related_name='script_results',
-        verbose_name=_('测试执行'),
-        null=True,
-        blank=True
-    )
-    
-    status = models.CharField(
-        _('执行状态'),
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default='pending'
-    )
-    
-    # 执行时间
-    started_at = models.DateTimeField(_('开始时间'), null=True, blank=True)
-    completed_at = models.DateTimeField(_('完成时间'), null=True, blank=True)
-    execution_time = models.FloatField(_('执行耗时(秒)'), null=True, blank=True)
-    
-    # 执行结果
-    output = models.TextField(_('执行输出'), blank=True, null=True)
-    error_message = models.TextField(_('错误信息'), blank=True, null=True)
-    stack_trace = models.TextField(_('堆栈跟踪'), blank=True, null=True)
-    
-    # 截图（JSON 格式存储路径列表）
-    screenshots = models.JSONField(_('截图列表'), default=list, blank=True)
-    
-    # 录屏（JSON 格式存储路径列表）
-    videos = models.JSONField(_('录屏列表'), default=list, blank=True)
-    
-    # 执行环境信息
-    browser_type = models.CharField(_('浏览器类型'), max_length=50, default='chromium')
-    viewport = models.JSONField(_('视口大小'), default=dict, blank=True)
-    
-    # 执行人
-    executor = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='script_executions',
-        verbose_name=_('执行人')
-    )
-    
-    created_at = models.DateTimeField(_('创建时间'), auto_now_add=True)
-    
-    class Meta:
-        verbose_name = _('脚本执行记录')
-        verbose_name_plural = _('脚本执行记录')
-        ordering = ['-created_at']
-    
-    def __str__(self):
-        return f"{self.script.name} - {self.get_status_display()} - {self.created_at.strftime('%Y-%m-%d %H:%M:%S')}"
     
     @property
     def duration(self):

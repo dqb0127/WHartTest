@@ -153,10 +153,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue';
 import { Message, Modal } from '@arco-design/web-vue';
 import { marked } from 'marked';
 import { useProjectStore } from '@/store/projectStore';
+import { useThemeStore } from '@/store/themeStore';
 import { getPromptByType, initializeUserPrompts } from '@/features/prompts/services/promptService';
 import { DiagramEditor, type EditOperation } from '../services/diagramEditor';
 import TokenUsageIndicator from '@/features/langgraph/components/TokenUsageIndicator.vue';
@@ -175,6 +176,7 @@ interface ChatMessage {
 }
 
 const projectStore = useProjectStore();
+const themeStore = useThemeStore();
 const messages = ref<ChatMessage[]>([]);
 const inputMessage = ref('');
 const isLoading = ref(false);
@@ -252,18 +254,38 @@ const loadAttempts = ref(0);  // 加载尝试次数
 let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 // Draw.io URL (使用 embed 模式，启用自动保存)
+const drawioUi = ref(themeStore.isBlack ? 'dark' : 'kennedy');
+
 const drawioUrl = computed(() => {
   const params = new URLSearchParams({
     embed: '1',
     spin: '1',
     proto: 'json',
-    ui: 'kennedy',
+    ui: drawioUi.value,
     noExitBtn: '1',  // 隐藏退出按钮
     autosave: '1',   // 启用自动保存
     math: '0'        // 禁用数学公式插件（避免 404 错误）
   });
   return `${currentDrawioBaseUrl.value}/?${params.toString()}`;
 });
+
+watch(
+  () => themeStore.isBlack,
+  async (isBlack) => {
+    const nextUi = isBlack ? 'dark' : 'kennedy';
+    if (drawioUi.value === nextUi) {
+      return;
+    }
+
+    const latestXml = await getCurrentXmlFromDrawio();
+    currentXml.value = latestXml;
+    pendingXml.value = latestXml;
+    drawioReady.value = false;
+    iframeLoading.value = true;
+
+    drawioUi.value = nextUi;
+  }
+);
 
 // 从 Draw.io 获取最新的 XML（异步）
 const getCurrentXmlFromDrawio = (): Promise<string> => {
@@ -669,6 +691,7 @@ const sendMessage = async () => {
   } finally {
     isLoading.value = false;
     scrollToBottom();
+    saveToStorage();  // 保存对话消息到 localStorage
   }
 };
 
@@ -714,6 +737,7 @@ const handleToolDecision = async (decision: {
     const actionCount = currentInterrupt.value?.action_requests?.length || 1;
     const resumePayload: Record<string, any> = {
       session_id: sessionId.value,
+      project_id: projectStore.currentProjectId,
       resume: {
         [decision.interruptId]: {
           decisions: [{ type: decision.type }],
@@ -885,8 +909,8 @@ const handleToolEnd = (data: any) => {
   }
   
   // 兼容 tool_end 和 tool_result 两种格式
-  // tool_end: { tool_name, tool_output }
-  // tool_result: { tool_name, tool_output } 或 { summary: "tool_name:\n{json}\n\nother_tool: 失败 - xxx" }
+  // tool_end 结构：{ tool_name, tool_output }
+  // tool_result 结构：{ tool_name, tool_output } 或 { summary: "tool_name:\n{json}\n\nother_tool: 失败 - xxx" }
   let tool_name = '';
   let tool_output = '';
 
@@ -919,12 +943,20 @@ const handleToolEnd = (data: any) => {
   }
 
   console.log('[Diagram] Tool end:', tool_name);
-  console.log('[Diagram] Tool output (first 200 chars):', typeof tool_output === 'string' ? tool_output.substring(0, 200) : tool_output);
+  console.log('[Diagram] Tool output (first 200 chars):', typeof tool_output === 'string' ? tool_output.substring(0, 200) : JSON.stringify(tool_output).substring(0, 200));
 
   if (!tool_name) return;
   
   try {
-    let result = typeof tool_output === 'string' ? JSON.parse(tool_output) : tool_output;
+    // 处理 MCP 工具返回的数组格式: [{"type": "text", "text": "{...}"}]
+    let resultStr = tool_output;
+    if (Array.isArray(tool_output)) {
+      // 从数组中提取第一个 text 类型的内容
+      const textItem = tool_output.find((item: any) => item.type === 'text' && item.text);
+      resultStr = textItem?.text || JSON.stringify(tool_output[0]);
+    }
+    
+    let result = typeof resultStr === 'string' ? JSON.parse(resultStr) : resultStr;
     
     // 处理转义字符的辅助函数
     const unescapeXml = (xml: string): string => {

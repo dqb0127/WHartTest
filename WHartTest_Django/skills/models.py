@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 def skill_upload_path(instance, filename):
     """Skill 文件上传路径"""
+    # 基于项目与 Skill ID 分层存储，便于后续按项目清理文件。
     return f'skills/{instance.project.id}/{instance.id}/{filename}'
 
 
@@ -87,11 +88,13 @@ class Skill(models.Model):
             return None
 
         for root, dirs, files in os.walk(full_path):
+            # 跳过缓存与依赖目录，减少无效扫描和误识别。
             dirs[:] = [d for d in dirs if d not in ('__pycache__', 'node_modules')]
             for f in files:
                 if f.startswith('__'):
                     continue
                 if f.endswith('.py') or f.endswith('.js'):
+                    # 返回首个可执行脚本路径，满足“快速发现入口脚本”场景。
                     return os.path.join(root, f)
         return None
 
@@ -115,10 +118,12 @@ class Skill(models.Model):
                 continue
 
             file_count += 1
+            # 文件数量超限直接拒绝，防止 zip bomb 大量小文件消耗 inode/IO。
             if file_count > max_files:
                 raise ValidationError("zip 文件包含过多文件")
 
             total_size += int(getattr(info, "file_size", 0) or 0)
+            # 解压总体积超限直接拒绝，避免磁盘被恶意压缩包打满。
             if total_size > max_total_size:
                 raise ValidationError("zip 解压后总大小超出限制")
 
@@ -129,11 +134,13 @@ class Skill(models.Model):
                 raise ValidationError("zip 文件包含非法路径")
 
             mode = (info.external_attr or 0) >> 16
+            # 禁止符号链接，避免解压后指向任意系统路径。
             if stat.S_ISLNK(mode):
                 raise ValidationError("zip 文件包含不支持的符号链接")
 
             target_path = (dest_path / Path(*posix.parts)).resolve(strict=False)
             try:
+                # 二次确保目标路径位于目标目录内，防止 Zip Slip。
                 if os.path.commonpath([str(dest_path), str(target_path)]) != str(dest_path):
                     raise ValidationError("zip 文件包含非法路径")
             except ValueError:
@@ -169,6 +176,7 @@ class Skill(models.Model):
 
         raw_name = frontmatter.get('name', '')
         raw_description = frontmatter.get('description', '')
+        # 显式限制类型，避免将复杂对象注入数据库字段。
         if not isinstance(raw_name, str) or not isinstance(raw_description, str):
             raise ValidationError('SKILL.md 的 name/description 必须是字符串')
 
@@ -205,6 +213,7 @@ class Skill(models.Model):
         with tempfile.TemporaryDirectory() as temp_dir:
             try:
                 with zipfile.ZipFile(zip_file, 'r') as zf:
+                    # 安全解压，统一处理路径穿越/超量解压/符号链接风险。
                     cls._safe_extract_zip(zf, temp_dir)
             except zipfile.BadZipFile:
                 raise ValidationError('无效的 zip 文件')
@@ -229,6 +238,7 @@ class Skill(models.Model):
             full_storage_path = None
             try:
                 with transaction.atomic():
+                    # 先创建数据库记录，再落盘文件；事务保证数据库写入原子性。
                     skill = cls.objects.create(
                         project=project,
                         creator=creator,
@@ -255,34 +265,16 @@ class Skill(models.Model):
 
                 return skill
             except Exception:
+                # 任一步骤失败时回滚已创建目录，避免遗留脏文件。
                 if full_storage_path and os.path.isdir(full_storage_path):
                     shutil.rmtree(full_storage_path, ignore_errors=True)
                 raise
 
     @classmethod
-    def create_from_git(
-        cls,
-        git_url: str,
-        project: Project,
-        creator: User,
-        branch: str = 'main'
-    ) -> 'Skill':
-        """
-        从公开 Git 仓库导入 Skill
-
-        Args:
-            git_url: 仓库 URL（仅支持 https://github.com 或 https://gitlab.com）
-            project: 所属项目
-            creator: 创建者
-            branch: 分支名（默认 main）
-
-        Returns:
-            Skill 实例
-        """
-        import tempfile
+    def _clone_repo(cls, git_url: str, branch: str, dest_dir: str) -> None:
+        """浅克隆 Git 仓库到指定目录"""
         import subprocess
         from urllib.parse import urlparse
-        from django.conf import settings
 
         git_url = (git_url or '').strip()
         branch = (branch or 'main').strip() or 'main'
@@ -297,86 +289,139 @@ class Skill(models.Model):
         if len(path_parts) < 2:
             raise ValidationError('无效的 Git 仓库地址')
 
+        try:
+            subprocess.run(
+                ['git', 'clone', '--depth', '1', '--branch', branch, git_url, dest_dir],
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            raise ValidationError('Git 克隆超时（60秒）')
+        except FileNotFoundError:
+            raise ValidationError('服务器未安装 git，无法导入')
+        except subprocess.CalledProcessError as e:
+            stderr = (e.stderr or '').strip()
+            raise ValidationError(f'Git 克隆失败: {stderr}' if stderr else 'Git 克隆失败')
+
+    @classmethod
+    def _find_skill_dirs(cls, repo_dir: str) -> list[str]:
+        """遍历仓库目录，找到所有包含 SKILL.md 的目录（找到后不再递归其子目录）"""
+        skill_dirs = []
+        for root, dirs, files in os.walk(repo_dir):
+            dirs[:] = [d for d in dirs if d not in ('.git', '__pycache__', 'node_modules')]
+            if 'SKILL.md' in files:
+                skill_dirs.append(root)
+                dirs.clear()
+        return skill_dirs
+
+    @classmethod
+    def _create_skill_from_dir(
+        cls,
+        skill_root: str,
+        project: Project,
+        creator: User,
+    ) -> 'Skill':
+        """从包含 SKILL.md 的目录创建单个 Skill 实例（含文件落盘）"""
+        from django.conf import settings
+
+        skill_md_path = os.path.join(skill_root, 'SKILL.md')
+        try:
+            with open(skill_md_path, 'r', encoding='utf-8') as f:
+                skill_content = f.read()
+        except UnicodeDecodeError:
+            raise ValidationError('SKILL.md 文件编码必须为 UTF-8')
+
+        parsed = cls.parse_skill_md(skill_content)
+
+        if cls.objects.filter(project=project, name=parsed['name']).exists():
+            raise ValidationError(f"项目中已存在名为 '{parsed['name']}' 的 Skill")
+
+        full_storage_path = None
+        try:
+            with transaction.atomic():
+                skill = cls.objects.create(
+                    project=project,
+                    creator=creator,
+                    name=parsed['name'],
+                    description=parsed['description'],
+                    skill_content=skill_content,
+                    is_active=True
+                )
+
+                skill_storage_path = f'skills/{project.id}/{skill.id}'
+                full_storage_path = os.path.join(settings.MEDIA_ROOT, skill_storage_path)
+                os.makedirs(full_storage_path, exist_ok=False)
+
+                for item in os.listdir(skill_root):
+                    if item in ('.git', '__pycache__', 'node_modules'):
+                        continue
+                    src = os.path.join(skill_root, item)
+                    if os.path.islink(src):
+                        continue
+                    dst = os.path.join(full_storage_path, item)
+                    if os.path.isdir(src):
+                        shutil.copytree(src, dst, symlinks=False, ignore=shutil.ignore_patterns('.git'))
+                    else:
+                        shutil.copy2(src, dst)
+
+                skill.skill_path = skill_storage_path
+                skill.save(update_fields=['skill_path'])
+
+            return skill
+        except Exception:
+            if full_storage_path and os.path.isdir(full_storage_path):
+                shutil.rmtree(full_storage_path, ignore_errors=True)
+            raise
+
+    @classmethod
+    def create_from_git(
+        cls,
+        git_url: str,
+        project: Project,
+        creator: User,
+        branch: str = 'main'
+    ) -> list['Skill']:
+        """
+        从公开 Git 仓库导入 Skills（支持仓库包含多个 Skill）
+
+        Returns:
+            成功导入的 Skill 列表
+        """
+        import tempfile
+
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_dir = os.path.join(temp_dir, 'repo')
+            cls._clone_repo(git_url, branch, repo_dir)
 
-            try:
-                subprocess.run(
-                    ['git', 'clone', '--depth', '1', '--branch', branch, git_url, repo_dir],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    timeout=60,
-                )
-            except subprocess.TimeoutExpired:
-                raise ValidationError('Git 克隆超时（60秒）')
-            except FileNotFoundError:
-                raise ValidationError('服务器未安装 git，无法导入')
-            except subprocess.CalledProcessError as e:
-                stderr = (e.stderr or '').strip()
-                raise ValidationError(f'Git 克隆失败: {stderr}' if stderr else 'Git 克隆失败')
-
-            skill_md_path = None
-            skill_root = repo_dir
-            for root, dirs, files in os.walk(repo_dir):
-                dirs[:] = [d for d in dirs if d not in ('.git', '__pycache__')]
-                if 'SKILL.md' in files:
-                    skill_md_path = os.path.join(root, 'SKILL.md')
-                    skill_root = root
-                    break
-
-            if not skill_md_path:
+            skill_dirs = cls._find_skill_dirs(repo_dir)
+            if not skill_dirs:
                 raise ValidationError('仓库中未找到 SKILL.md')
 
-            try:
-                with open(skill_md_path, 'r', encoding='utf-8') as f:
-                    skill_content = f.read()
-            except UnicodeDecodeError:
-                raise ValidationError('SKILL.md 文件编码必须为 UTF-8')
+            created_skills: list[Skill] = []
+            errors: list[str] = []
 
-            parsed = cls.parse_skill_md(skill_content)
+            for skill_dir in skill_dirs:
+                try:
+                    skill = cls._create_skill_from_dir(skill_dir, project, creator)
+                    created_skills.append(skill)
+                except ValidationError as e:
+                    msg = e.messages[0] if hasattr(e, 'messages') and e.messages else str(e)
+                    errors.append(msg)
 
-            if cls.objects.filter(project=project, name=parsed['name']).exists():
-                raise ValidationError(f"项目中已存在名为 '{parsed['name']}' 的 Skill")
+            if not created_skills:
+                raise ValidationError(
+                    f"所有 Skills 导入失败: {'; '.join(errors)}" if errors
+                    else '仓库中未找到有效的 SKILL.md'
+                )
 
-            full_storage_path = None
-            try:
-                with transaction.atomic():
-                    skill = cls.objects.create(
-                        project=project,
-                        creator=creator,
-                        name=parsed['name'],
-                        description=parsed['description'],
-                        skill_content=skill_content,
-                        is_active=True
-                    )
+            if errors:
+                logger.warning("部分 Skills 导入失败: %s", '; '.join(errors))
 
-                    skill_storage_path = f'skills/{project.id}/{skill.id}'
-                    full_storage_path = os.path.join(settings.MEDIA_ROOT, skill_storage_path)
-                    os.makedirs(full_storage_path, exist_ok=False)
-
-                    for item in os.listdir(skill_root):
-                        if item == '.git':
-                            continue
-                        src = os.path.join(skill_root, item)
-                        if os.path.islink(src):
-                            continue
-                        dst = os.path.join(full_storage_path, item)
-                        if os.path.isdir(src):
-                            shutil.copytree(src, dst, symlinks=False, ignore=shutil.ignore_patterns('.git'))
-                        else:
-                            shutil.copy2(src, dst)
-
-                    skill.skill_path = skill_storage_path
-                    skill.save(update_fields=['skill_path'])
-
-                return skill
-            except Exception:
-                if full_storage_path and os.path.isdir(full_storage_path):
-                    shutil.rmtree(full_storage_path, ignore_errors=True)
-                raise
+            return created_skills
 
     def delete(self, *args, **kwargs):
         """删除 Skill 时同时删除文件"""
@@ -386,8 +431,10 @@ class Skill(models.Model):
             media_root = Path(settings.MEDIA_ROOT).resolve(strict=False)
             expected_root = (media_root / 'skills' / str(self.project_id) / str(self.id)).resolve(strict=False)
             target = Path(full_path).resolve(strict=False)
+            # 条件：路径精确匹配预期目录；动作：递归删除；结果：防止误删非 Skill 目录。
             if target == expected_root and target.exists():
                 shutil.rmtree(target, ignore_errors=True)
             elif target.exists():
+                # 路径异常时仅告警不删除，避免潜在路径拼接错误导致数据破坏。
                 logger.warning("Refusing to delete unexpected Skill path: %s (expected %s)", target, expected_root)
         super().delete(*args, **kwargs)

@@ -64,6 +64,7 @@ export default defineConfig({
             ]},
             { text: '操作手册',
               items:[
+              {text: 'v2.1.0', link: '/quick-start/operation-manual-v2.1'},
               { text: 'v2.0.0', link: '/quick-start/operation-manual-v2' },
               { text: 'v1.4.0', link: '/quick-start/operation-manual' },
             ]},
@@ -104,13 +105,6 @@ export default defineConfig({
           items: [
             { text: '前端', link: '/core-concepts/frontend-architecture' },
             { text: '后端', link: '/core-concepts/permission-system' }
-          ]
-        },
-        {
-          text: '组件依赖',
-          items: [
-            { text: '前端', link: '/core-concepts/frontend-dependencies' },
-            { text: '后端', link: '/core-concepts/backend-dependencies' }
           ]
         }
       ]

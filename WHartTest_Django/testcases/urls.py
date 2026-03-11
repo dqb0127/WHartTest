@@ -5,9 +5,7 @@ from .views import TestCaseViewSet
 # 为了模块化，通常在主 urls.py 中处理顶层路由和嵌套路由的注册
 # 这里我们只定义 TestCaseViewSet 如何被注册到一个已有的 projects_router
 
-# projects_router = routers.NestedSimpleRouter(parent_router, r'projects', lookup='project')
-# projects_router.register(r'testcases', TestCaseViewSet, basename='project-testcases')
-# urlpatterns = projects_router.urls
+# 可在上层路由中创建项目嵌套路由，并在其中注册 TestCaseViewSet。
 
 # 更简洁的方式是，这个文件只导出需要注册到父级路由器的视图集和前缀
 # 然后在父级 urls.py 中进行实际的嵌套注册。
@@ -41,7 +39,7 @@ from .views import TestCaseViewSet
 # 如果将来 testcases 应用有非嵌套的独立路由，可以加在这里。
 # 目前，为了让 include('testcases.urls') 能工作，我们至少需要一个 urlpatterns 列表。
 
-app_name = 'testcases'
+app_name = "testcases"
 urlpatterns = [
     # TestCaseViewSet 的路由将通过 Nested Routers 在主 urls.py 中定义
 ]

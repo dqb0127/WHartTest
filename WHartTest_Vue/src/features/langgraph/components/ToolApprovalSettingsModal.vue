@@ -27,14 +27,20 @@
             :key="group.group_id"
             class="tool-group"
           >
-            <div class="group-header">
+            <div 
+              class="group-header" 
+              :class="{ 'collapsed': collapsedGroups.has(group.group_id) }"
+              @click="toggleGroup(group.group_id)"
+            >
               <icon-apps v-if="group.group_id.startsWith('builtin')" class="group-icon builtin" />
               <icon-cloud-download v-else class="group-icon mcp" />
               <span class="group-name">{{ group.group_name }}</span>
               <span class="group-count">{{ group.tools.length }} 个工具</span>
+              <icon-down v-if="!collapsedGroups.has(group.group_id)" class="expand-icon" />
+              <icon-right v-else class="expand-icon" />
             </div>
 
-            <div class="tool-list">
+            <div v-show="!collapsedGroups.has(group.group_id)" class="tool-list">
               <div
                 v-for="tool in group.tools"
                 :key="tool.tool_name"
@@ -86,7 +92,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue';
 import { Message } from '@arco-design/web-vue';
-import { IconInfoCircle, IconEmpty, IconApps, IconCloudDownload } from '@arco-design/web-vue/es/icon';
+import { IconInfoCircle, IconEmpty, IconApps, IconCloudDownload, IconDown, IconRight } from '@arco-design/web-vue/es/icon';
 import {
   getAvailableTools,
   batchUpdateToolApprovals,
@@ -111,6 +117,18 @@ const toolGroups = ref<ToolGroup[]>([]);
 const localToolGroups = ref<ToolGroup[]>([]);
 const policyChoices = ref<PolicyChoice[]>([]);
 const scopeChoices = ref<ScopeChoice[]>([]);
+const collapsedGroups = ref<Set<string>>(new Set());
+
+// 切换分组的折叠状态
+const toggleGroup = (groupId: string) => {
+  if (collapsedGroups.value.has(groupId)) {
+    collapsedGroups.value.delete(groupId);
+  } else {
+    collapsedGroups.value.add(groupId);
+  }
+  // 触发响应式更新
+  collapsedGroups.value = new Set(collapsedGroups.value);
+};
 
 const policyOptions = computed(() =>
   policyChoices.value.map((c) => ({ label: c.label, value: c.value }))
@@ -145,6 +163,8 @@ const fetchData = async () => {
       }
       policyChoices.value = resp.data.policy_choices;
       scopeChoices.value = resp.data.scope_choices;
+      // 默认收起所有分组
+      collapsedGroups.value = new Set(localToolGroups.value.map(g => g.group_id));
     } else {
       Message.error(resp.message || '加载失败');
     }
@@ -274,6 +294,23 @@ const handleCancel = () => {
   padding: 10px 14px;
   background: var(--color-fill-2);
   border-bottom: 1px solid var(--color-border-2);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+}
+
+.group-header.collapsed {
+  border-bottom: none;
+}
+
+.group-header:hover {
+  background: var(--color-fill-3);
+}
+
+.expand-icon {
+  font-size: 14px;
+  color: var(--color-text-3);
+  transition: transform 0.2s;
 }
 
 .group-icon {

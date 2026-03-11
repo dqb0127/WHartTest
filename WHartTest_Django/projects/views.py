@@ -39,37 +39,39 @@ class ProjectViewSet(BaseModelViewSet):
         """
         user = self.request.user
 
-        # 超级管理员可以看到所有项目
+        # 条件：超级用户；动作：返回全部项目；结果：平台管理员可跨项目管理。
         if user.is_superuser:
             return Project.objects.all()
 
-        # 普通用户只能看到自己是成员的项目
+        # 非超级用户仅可查看自己参与的项目，避免越权枚举其他项目。
         return Project.objects.filter(members__user=user).distinct()
 
     def get_serializer_class(self):
         """
         根据操作类型返回不同的序列化器
         """
+        # 详情接口需携带成员列表和凭据等扩展信息。
         if self.action == 'retrieve':
             return ProjectDetailSerializer
+        # 其余场景使用基础序列化器减少返回负载。
         return ProjectSerializer
 
     def get_permissions(self):
         """
         根据操作类型设置不同的权限
         """
-        # 成员管理操作需要 ProjectMember 模型权限 + 项目成员身份
+        # 成员管理操作：先过项目成员模型权限，再校验调用者属于该项目。
         if self.action in ['members', 'add_member', 'remove_member', 'update_member_role']:
             return [HasProjectMemberPermission(), IsProjectMember()]
 
-        # statistics 只需要用户认证和项目成员身份
+        # 统计接口只读，要求登录且属于项目即可。
         if self.action == 'statistics':
             return [IsAuthenticated(), IsProjectMember()]
 
         # 其他操作需要基础权限（用户认证 + Django模型权限）
         base_permissions = super().get_permissions()
         
-        # 在基础权限之上添加项目特定的权限检查
+        # 在基础权限之上叠加项目角色权限，保证“模型权限 + 业务角色”双层防线。
         if self.action in ['update', 'partial_update']:
             return base_permissions + [IsProjectAdmin()]
         elif self.action == 'destroy':
@@ -92,10 +94,10 @@ class ProjectViewSet(BaseModelViewSet):
         并将所有平台管理员（超级用户和staff用户）添加为项目管理者
         """
         with transaction.atomic():
-            # 保存项目，设置创建人
+            # 条件：创建项目；动作：写入 creator；结果：项目可追溯创建责任人。
             project = serializer.save(creator=self.request.user)
             
-            # 添加当前用户为项目拥有者
+            # 创建者默认成为 owner，保证其拥有项目最高管理权限。
             ProjectMember.objects.create(
                 project=project,
                 user=self.request.user,
@@ -109,7 +111,7 @@ class ProjectViewSet(BaseModelViewSet):
                 is_active=True
             )
             
-            # 为每个平台管理员添加项目管理者角色（如果不是当前用户）
+            # 条件：遍历平台管理员；动作：补齐 admin 成员关系；结果：平台管理员自动具备项目接管能力。
             for admin in platform_admins:
                 if admin != self.request.user:  # 避免重复添加当前用户
                     ProjectMember.objects.get_or_create(
@@ -126,6 +128,7 @@ class ProjectViewSet(BaseModelViewSet):
         project = self.get_object()
         members = project.members.all()
 
+        # 分页开启时返回分页结构，避免大项目成员列表一次性返回。
         page = self.paginate_queryset(members)
         if page is not None:
             serializer = ProjectMemberSerializer(page, many=True)
@@ -146,6 +149,7 @@ class ProjectViewSet(BaseModelViewSet):
             context={'project': project}
         )
 
+        # 条件：参数合法；动作：创建成员并返回详情；结果：前端可直接刷新成员列表。
         if serializer.is_valid():
             member = serializer.save()
             member_serializer = ProjectMemberSerializer(member)
@@ -160,15 +164,16 @@ class ProjectViewSet(BaseModelViewSet):
         project = self.get_object()
         user_id = request.data.get('user_id')
 
+        # 条件：缺失 user_id；动作：直接拒绝；结果：避免执行无目标的删除操作。
         if not user_id:
             return Response({"error": "必须提供用户ID"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 不能移除项目拥有者
+        # 条件：目标是 owner 且操作者非超级用户；动作：拒绝；结果：避免项目失去拥有者。
         member = get_object_or_404(ProjectMember, project=project, user_id=user_id)
         if member.role == 'owner' and not request.user.is_superuser:
             return Response({"error": "不能移除项目拥有者"}, status=status.HTTP_403_FORBIDDEN)
 
-        # 不能移除自己（除非是超级管理员）
+        # 条件：尝试删除自己且非超级用户；动作：拒绝；结果：避免误操作导致无人管理。
         if member.user == request.user and not request.user.is_superuser:
             return Response({"error": "不能移除自己"}, status=status.HTTP_403_FORBIDDEN)
 
@@ -185,27 +190,29 @@ class ProjectViewSet(BaseModelViewSet):
         user_id = request.data.get('user_id')
         role = request.data.get('role')
 
+        # 条件：缺少必要参数；动作：拒绝；结果：阻断不完整角色更新请求。
         if not user_id or not role:
             return Response({"error": "必须提供用户ID和角色"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # 条件：角色不在允许值中；动作：拒绝；结果：避免写入无效角色。
         if role not in [r[0] for r in ProjectMember.ROLE_CHOICES]:
             return Response({"error": f"无效的角色，可选值为: {[r[0] for r in ProjectMember.ROLE_CHOICES]}"},
                            status=status.HTTP_400_BAD_REQUEST)
 
         member = get_object_or_404(ProjectMember, project=project, user_id=user_id)
 
-        # 只有拥有者或超级管理员可以修改拥有者角色
+        # 条件：目标成员当前是 owner；动作：仅 owner/超级用户可修改；结果：限制关键角色变更入口。
         if member.role == 'owner' and not (request.user.is_superuser or
                                           ProjectMember.objects.filter(project=project, user=request.user, role='owner').exists()):
             return Response({"error": "只有项目拥有者或超级管理员可以修改拥有者角色"}, status=status.HTTP_403_FORBIDDEN)
 
-        # 不能修改自己的角色（除非是超级管理员）
+        # 条件：尝试修改自己角色且非超级用户；动作：拒绝；结果：避免误降权后无法恢复。
         if member.user == request.user and not request.user.is_superuser:
             return Response({"error": "不能修改自己的角色"}, status=status.HTTP_403_FORBIDDEN)
 
         # 使用事务确保数据一致性
         with transaction.atomic():
-            # 如果要将成员设置为拥有者
+            # 条件：目标角色为 owner；动作：先处理旧 owner；结果：确保任一时刻仅有一个 owner。
             if role == 'owner':
                 # 查找当前的项目拥有者
                 current_owners = ProjectMember.objects.filter(project=project, role='owner')
@@ -232,11 +239,10 @@ class ProjectViewSet(BaseModelViewSet):
         project = self.get_object()
 
         # 导入所需模型
-        from testcases.models import TestCase, AutomationScript, TestExecution
+        from testcases.models import TestCase, TestExecution
         from skills.models import Skill
         from mcp_tools.models import RemoteMCPConfig
-        from requirements.models import RequirementDocument
-        from knowledge.models import Document
+        from ui_automation.models import UiTestCase, UiExecutionRecord
 
         # 1. 功能用例统计（按审核状态）
         testcase_stats = TestCase.objects.filter(project=project).aggregate(
@@ -248,17 +254,7 @@ class ProjectViewSet(BaseModelViewSet):
             unavailable=Count('id', filter=Q(review_status='unavailable')),
         )
 
-        # 2. UI用例（自动化脚本）统计
-        automation_stats = AutomationScript.objects.filter(
-            test_case__project=project
-        ).aggregate(
-            total=Count('id'),
-            draft=Count('id', filter=Q(status='draft')),
-            active=Count('id', filter=Q(status='active')),
-            deprecated=Count('id', filter=Q(status='deprecated')),
-        )
-
-        # 3. 测试执行统计（最近的执行汇总）
+        # 2. 测试执行统计（最近的执行汇总）
         executions = TestExecution.objects.filter(suite__project=project)
         execution_stats = executions.aggregate(
             total_executions=Count('id'),
@@ -285,11 +281,12 @@ class ProjectViewSet(BaseModelViewSet):
             total_cases=Sum('total_count'),
         )
 
-        # 4. 执行历史趋势（近7天）
+        # 4. 执行历史趋势（近7天和近30天）
         now = timezone.now()
         seven_days_ago = now - timedelta(days=7)
+        thirty_days_ago = now - timedelta(days=30)
 
-        # 近7天每日执行统计
+        # 近 7 天按天聚合执行趋势，供前端绘制趋势图。
         daily_stats_7d = []
         for i in range(7):
             day_start = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -308,8 +305,8 @@ class ProjectViewSet(BaseModelViewSet):
             })
         daily_stats_7d.reverse()
 
-        # 近7天统计汇总
-        stats_7d = executions.filter(created_at__gte=seven_days_ago).aggregate(
+        # 近30天统计汇总
+        stats_30d = executions.filter(created_at__gte=thirty_days_ago).aggregate(
             execution_count=Count('id'),
             passed=Sum('passed_count'),
             failed=Sum('failed_count'),
@@ -327,14 +324,17 @@ class ProjectViewSet(BaseModelViewSet):
             'active': Skill.objects.filter(is_active=True).count(),
         }
 
-        # 7. 需求文档统计（当前项目）
-        requirement_stats = {
-            'total': RequirementDocument.objects.filter(project=project).count(),
-        }
-
-        # 8. 知识库文档统计（全局所有知识库文档）
-        knowledge_stats = {
-            'total': Document.objects.count(),
+        # 7. UI自动化统计
+        ui_testcases = UiTestCase.objects.filter(project=project)
+        ui_executions = UiExecutionRecord.objects.filter(test_case__project=project)
+        ui_automation_stats = {
+            'total_cases': ui_testcases.count(),
+            'total_executions': ui_executions.count(),
+            'by_status': {
+                'success': ui_executions.filter(status=2).count(),
+                'failed': ui_executions.filter(status=3).count(),
+                'cancelled': ui_executions.filter(status=4).count(),
+            },
         }
 
         # 构建响应数据
@@ -351,14 +351,6 @@ class ProjectViewSet(BaseModelViewSet):
                     'needs_optimization': testcase_stats['needs_optimization'],
                     'optimization_pending_review': testcase_stats['optimization_pending_review'],
                     'unavailable': testcase_stats['unavailable'],
-                },
-            },
-            'automation_scripts': {
-                'total': automation_stats['total'],
-                'by_status': {
-                    'draft': automation_stats['draft'],
-                    'active': automation_stats['active'],
-                    'deprecated': automation_stats['deprecated'],
                 },
             },
             'executions': {
@@ -378,16 +370,15 @@ class ProjectViewSet(BaseModelViewSet):
             },
             'execution_trend': {
                 'daily_7d': daily_stats_7d,
-                'summary_7d': {
-                    'execution_count': stats_7d['execution_count'] or 0,
-                    'passed': stats_7d['passed'] or 0,
-                    'failed': stats_7d['failed'] or 0,
+                'summary_30d': {
+                    'execution_count': stats_30d['execution_count'] or 0,
+                    'passed': stats_30d['passed'] or 0,
+                    'failed': stats_30d['failed'] or 0,
                 },
             },
             'mcp': mcp_stats,
             'skills': skill_stats,
-            'requirements': requirement_stats,
-            'knowledge': knowledge_stats,
+            'ui_automation': ui_automation_stats,
         }
 
         return Response(response_data)

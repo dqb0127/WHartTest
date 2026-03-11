@@ -9,19 +9,84 @@ Skill 工具
 import logging
 import subprocess
 import os
+import shutil
 import threading
-from pathlib import Path
 from typing import Optional
 
 from langchain_core.tools import tool as langchain_tool
 from django.conf import settings
 
+from .output_sanitizer import strip_terminal_control_sequences
 from .persistent_playwright import PlaywrightSessionManager, extract_runjs_args
 
-logger = logging.getLogger('orchestrator_integration')
+logger = logging.getLogger("orchestrator_integration")
 
 _playwright_session_manager: Optional[PlaywrightSessionManager] = None
 _playwright_session_manager_lock = threading.Lock()
+
+
+def _sanitize_runtime_path_segment(value: Optional[str], default: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return default
+
+    sanitized = raw.replace("..", "_")
+    for separator in filter(None, {os.sep, os.altsep}):
+        sanitized = sanitized.replace(separator, "_")
+
+    sanitized = sanitized.strip(" .")
+    return sanitized or default
+
+
+def _build_skill_screenshots_dir(
+    project_id: Optional[int] = None,
+    case_dir_key: Optional[str] = None,
+) -> str:
+    project_segment = str(project_id if project_id is not None else 0)
+    case_segment = _sanitize_runtime_path_segment(case_dir_key, "_default")
+    return os.path.abspath(
+        os.path.join(
+            settings.MEDIA_ROOT,
+            "skill_runtime",
+            "screenshots",
+            project_segment,
+            case_segment,
+        )
+    )
+
+
+def _prepare_skill_screenshots_dir(
+    project_id: Optional[int] = None,
+    case_dir_key: Optional[str] = None,
+    chat_session_id: Optional[str] = None,
+) -> str:
+    screenshots_dir = _build_skill_screenshots_dir(project_id, case_dir_key)
+    if not case_dir_key:
+        os.makedirs(screenshots_dir, exist_ok=True)
+        return screenshots_dir
+
+    session_marker = os.path.join(screenshots_dir, ".chat_session")
+    current_chat_id = chat_session_id or "default"
+    should_clear = False
+
+    if os.path.exists(screenshots_dir):
+        if os.path.exists(session_marker):
+            with open(session_marker, "r", encoding="utf-8") as f:
+                stored_chat_id = f.read().strip()
+            if stored_chat_id != current_chat_id:
+                should_clear = True
+        else:
+            should_clear = True
+
+    if should_clear:
+        shutil.rmtree(screenshots_dir, ignore_errors=True)
+        logger.info(f"[execute_skill_script] 清空旧截图目录: {screenshots_dir}")
+
+    os.makedirs(screenshots_dir, exist_ok=True)
+    with open(session_marker, "w", encoding="utf-8") as f:
+        f.write(current_chat_id)
+
+    return screenshots_dir
 
 
 def _get_playwright_session_manager() -> PlaywrightSessionManager:
@@ -30,7 +95,9 @@ def _get_playwright_session_manager() -> PlaywrightSessionManager:
     if _playwright_session_manager is None:
         with _playwright_session_manager_lock:
             if _playwright_session_manager is None:
-                idle_timeout = getattr(settings, "PLAYWRIGHT_BROWSER_SESSION_IDLE_TIMEOUT_SECONDS", 15 * 60)
+                idle_timeout = getattr(
+                    settings, "PLAYWRIGHT_BROWSER_SESSION_IDLE_TIMEOUT_SECONDS", 15 * 60
+                )
                 max_sessions = getattr(settings, "PLAYWRIGHT_BROWSER_MAX_SESSIONS", 20)
                 _playwright_session_manager = PlaywrightSessionManager(
                     idle_timeout_seconds=int(idle_timeout),
@@ -39,7 +106,12 @@ def _get_playwright_session_manager() -> PlaywrightSessionManager:
     return _playwright_session_manager
 
 
-def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = None, chat_session_id: str = None) -> list:
+def get_skill_tools(
+    user_id: int,
+    project_id: Optional[int] = None,
+    test_case_id: Optional[int] = None,
+    chat_session_id: Optional[str] = None,
+) -> list[object]:
     """获取 Skill 工具列表（Skills 全局共享，不限制项目）"""
     current_user_id = user_id
     current_project_id = project_id if project_id is not None else 0
@@ -65,15 +137,12 @@ def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = No
         logger.info(f"[read_skill_content] skill_name={skill_name}")
 
         try:
-            skill = Skill.objects.filter(
-                name=skill_name,
-                is_active=True
-            ).first()
+            skill = Skill.objects.filter(name=skill_name, is_active=True).first()
 
             if not skill:
-                available = Skill.objects.filter(
-                    is_active=True
-                ).values_list('name', flat=True)
+                available = Skill.objects.filter(is_active=True).values_list(
+                    "name", flat=True
+                )
                 available_list = list(available)
                 return f"错误: 未找到名为 '{skill_name}' 的 Skill。可用的 Skills: {available_list}"
 
@@ -86,38 +155,25 @@ def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = No
             logger.error(f"[read_skill_content] 读取失败: {e}", exc_info=True)
             return f"错误: {str(e)}"
 
-    @langchain_tool
-    def execute_skill_script(skill_name: str, command: str, session_id: str = None) -> str:
-        """
-        执行指定 Skill 的命令。
-
-        在调用此工具前，应先使用 read_skill_content 获取 Skill 的使用说明。
-        命令会在 Skill 目录下执行，支持任意语言的脚本。
-
-        Args:
-            skill_name: Skill 名称
-            command: 完整的 shell 命令，例如 "python whart_tools.py --action get_projects"
-            session_id: 可选的会话ID。对于 playwright-skill 的 `node run.js ...` 命令，
-                       传入 session_id 可保持浏览器会话跨多次调用持久化。
-                       同一 session_id 的调用会复用同一个浏览器实例。
-
-        Returns:
-            命令执行的输出结果
-        """
+    def _execute_single_skill_script(
+        skill_name: str,
+        command: str,
+        session_id: Optional[str] = None,
+    ) -> str:
+        """内部函数：执行单条 Skill 命令"""
         from skills.models import Skill
 
-        logger.info(f"[execute_skill_script] skill_name={skill_name}, command={command}")
+        logger.info(
+            f"[execute_skill_script] skill_name={skill_name}, command={command}"
+        )
 
         try:
-            skill = Skill.objects.filter(
-                name=skill_name,
-                is_active=True
-            ).first()
+            skill = Skill.objects.filter(name=skill_name, is_active=True).first()
 
             if not skill:
-                available = Skill.objects.filter(
-                    is_active=True
-                ).values_list('name', flat=True)
+                available = Skill.objects.filter(is_active=True).values_list(
+                    "name", flat=True
+                )
                 available_list = list(available)
                 return f"错误: 未找到名为 '{skill_name}' 的 Skill。可用的 Skills: {available_list}"
 
@@ -128,49 +184,23 @@ def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = No
             logger.info(f"[execute_skill_script] 在目录 {skill_dir} 执行: {command}")
 
             env = os.environ.copy()
-            env['WHARTTEST_BACKEND_URL'] = getattr(settings, 'WHARTTEST_BACKEND_URL', 'http://localhost:8000')
-            env['WHARTTEST_API_KEY'] = getattr(settings, 'WHARTTEST_API_KEY', '')
+            env["WHARTTEST_BACKEND_URL"] = getattr(
+                settings, "WHARTTEST_BACKEND_URL", "http://localhost:8000"
+            )
+            env["WHARTTEST_API_KEY"] = getattr(settings, "WHARTTEST_API_KEY", "")
 
-            # 截图目录：使用 playwright-skill 目录下的 media/screenshots（跨 skill 共享）
-            # 优先使用 test_case_id（最稳定），其次 session_id，最后 _default
-            playwright_skill = Skill.objects.filter(name='playwright-skill', is_active=True).first()
-            if playwright_skill and playwright_skill.skill_path:
-                playwright_skill_dir = os.path.join(settings.MEDIA_ROOT, playwright_skill.skill_path)
-            else:
-                playwright_skill_dir = skill_dir
-
-            # 确定截图子目录 key
             case_dir_key = None
             if current_test_case_id:
                 case_dir_key = str(current_test_case_id)
             elif session_id:
                 case_dir_key = session_id
 
-            if case_dir_key:
-                screenshots_dir = os.path.abspath(os.path.join(playwright_skill_dir, 'media', 'screenshots', case_dir_key))
-                # 使用标记文件记录当前 chat_session_id，不同对话时清空目录
-                session_marker = os.path.join(screenshots_dir, '.chat_session')
-                current_chat_id = current_chat_session_id or 'default'
-                should_clear = False
-                if os.path.exists(screenshots_dir):
-                    if os.path.exists(session_marker):
-                        with open(session_marker, 'r') as f:
-                            stored_chat_id = f.read().strip()
-                        if stored_chat_id != current_chat_id:
-                            should_clear = True
-                    else:
-                        should_clear = True
-                if should_clear:
-                    import shutil
-                    shutil.rmtree(screenshots_dir, ignore_errors=True)
-                    logger.info(f"[execute_skill_script] 清空旧截图目录: {screenshots_dir}")
-                os.makedirs(screenshots_dir, exist_ok=True)
-                with open(session_marker, 'w') as f:
-                    f.write(current_chat_id)
-            else:
-                screenshots_dir = os.path.abspath(os.path.join(playwright_skill_dir, 'media', 'screenshots', '_default'))
-                os.makedirs(screenshots_dir, exist_ok=True)
-            env['SCREENSHOT_DIR'] = screenshots_dir
+            screenshots_dir = _prepare_skill_screenshots_dir(
+                project_id=current_project_id,
+                case_dir_key=case_dir_key,
+                chat_session_id=current_chat_session_id,
+            )
+            env["SCREENSHOT_DIR"] = screenshots_dir
 
             # Windows 兼容：将单引号包裹的参数转换为双引号（用于 cmd.exe）
             # 同时处理多行字符串，将换行符转换为单行
@@ -178,13 +208,16 @@ def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = No
             import re
 
             exec_command = command
-            if platform.system() == 'Windows':
+            if platform.system() == "Windows":
                 # 处理多行字符串：将双引号内的换行符替换为空格或分号
                 def collapse_multiline(m):
                     content = m.group(1)
                     # 将换行替换为空格，保持代码可执行
-                    collapsed = ' '.join(line.strip() for line in content.split('\n') if line.strip())
+                    collapsed = " ".join(
+                        line.strip() for line in content.split("\n") if line.strip()
+                    )
                     return f'"{collapsed}"'
+
                 # 匹配 "..." 形式的多行字符串
                 exec_command = re.sub(r'"([^"]*\n[^"]*)"', collapse_multiline, command)
 
@@ -194,14 +227,17 @@ def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = No
                     value = m.group(2)
                     escaped = value.replace('"', '\\"')
                     return f'{param}"{escaped}"'
-                exec_command = re.sub(r"(--\w+\s+)'([^']*)'", convert_quotes, exec_command)
+
+                exec_command = re.sub(
+                    r"(--\w+\s+)'([^']*)'", convert_quotes, exec_command
+                )
 
                 if exec_command != command:
                     logger.info(f"[execute_skill_script] Windows 命令转换完成")
 
             # 持久化 Playwright 会话路径
             # 仅当 session_id 存在 + skill_name == 'playwright-skill' + 命令是 run.js 调用时启用
-            if session_id and skill_name == 'playwright-skill':
+            if session_id and skill_name == "playwright-skill":
                 run_js_args = extract_runjs_args(exec_command)
                 if run_js_args is not None:
                     # 调试日志
@@ -218,19 +254,32 @@ def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = No
                             env=env,
                             timeout_seconds=120,
                         )
-                        logger.info(f"[execute_skill_script] 持久化会话执行完成, session_key={session_key}")
-                        result_output = output.strip() if output.strip() else "(无输出)"
-                        return f"[PERSISTENT_SESSION] session_id={session_id}\n[SCREENSHOT_DIR] {screenshots_dir}\n{result_output}\n[提示] 后续步骤请继续使用 session_id=\"{session_id}\"；截图已保存在 {screenshots_dir}"
+                        logger.info(
+                            f"[execute_skill_script] 持久化会话执行完成, session_key={session_key}"
+                        )
+                        cleaned_output = strip_terminal_control_sequences(output)
+                        result_output = (
+                            cleaned_output.strip()
+                            if cleaned_output.strip()
+                            else "(无输出)"
+                        )
+                        return f'[PERSISTENT_SESSION] session_id={session_id}\n[SCREENSHOT_DIR] {screenshots_dir}\n{result_output}\n[提示] 后续步骤请继续使用 session_id="{session_id}"；截图已保存在 {screenshots_dir}'
                     except TimeoutError:
-                        logger.error("[execute_skill_script] 持久化 Playwright 执行超时")
+                        logger.error(
+                            "[execute_skill_script] 持久化 Playwright 执行超时"
+                        )
                         return "错误: 命令执行超时（120秒）"
                     except Exception as e:
-                        logger.error(f"[execute_skill_script] 持久化 Playwright 执行失败: {e}", exc_info=True)
+                        logger.error(
+                            f"[execute_skill_script] 持久化 Playwright 执行失败: {e}",
+                            exc_info=True,
+                        )
                         return f"错误: {str(e)}"
 
             # Windows 编码处理：cmd.exe 默认使用 GBK (cp936)，需要使用系统默认编码
             import locale
-            if platform.system() == 'Windows':
+
+            if platform.system() == "Windows":
                 # Windows cmd 默认使用 GBK 编码，使用 None 让 subprocess 自动检测
                 result = subprocess.run(
                     exec_command,
@@ -240,17 +289,18 @@ def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = No
                     timeout=120,
                     env=env,
                 )
+
                 # 智能解码：先尝试 UTF-8（现代工具通常输出 UTF-8），失败再用 GBK（Windows cmd 默认）
                 def smart_decode(data: bytes) -> str:
                     if not data:
-                        return ''
+                        return ""
                     try:
-                        return data.decode('utf-8')
+                        return data.decode("utf-8")
                     except UnicodeDecodeError:
-                        return data.decode('gbk', errors='replace')
-                
-                stdout = smart_decode(result.stdout)
-                stderr = smart_decode(result.stderr)
+                        return data.decode("gbk", errors="replace")
+
+                stdout = strip_terminal_control_sequences(smart_decode(result.stdout))
+                stderr = strip_terminal_control_sequences(smart_decode(result.stderr))
             else:
                 result = subprocess.run(
                     exec_command,
@@ -260,32 +310,38 @@ def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = No
                     text=True,
                     timeout=120,
                     env=env,
-                    encoding='utf-8',
-                    errors='replace'
+                    encoding="utf-8",
+                    errors="replace",
                 )
-                stdout = result.stdout or ''
-                stderr = result.stderr or ''
+                stdout = strip_terminal_control_sequences(result.stdout or "")
+                stderr = strip_terminal_control_sequences(result.stderr or "")
 
-            output = ''
+            output = ""
             if stdout:
                 output += stdout
             if stderr:
                 if output:
-                    output += '\n--- stderr ---\n'
+                    output += "\n--- stderr ---\n"
                 output += stderr
 
             if result.returncode != 0:
                 output = f"命令执行失败 (退出码: {result.returncode})\n{output}"
 
-            logger.info(f"[execute_skill_script] 执行完成, returncode={result.returncode}, output_len={len(output)}")
+            logger.info(
+                f"[execute_skill_script] 执行完成, returncode={result.returncode}, output_len={len(output)}"
+            )
             if output:
                 logger.debug(f"[execute_skill_script] output: {output[:500]}")
             result_output = output.strip() if output.strip() else "(无输出)"
 
             # 如果是 playwright-skill 的 run.js 调用但没有使用 session_id，提醒 LLM
-            if skill_name == 'playwright-skill' and 'run.js' in command and not session_id:
+            if (
+                skill_name == "playwright-skill"
+                and "run.js" in command
+                and not session_id
+            ):
                 result_output = f"[SCREENSHOT_DIR] {screenshots_dir}\n{result_output}\n\n[注意] 此次执行未使用 session_id，浏览器已关闭。如果这是多步骤测试的一部分，请在后续调用中使用 session_id 参数保持浏览器会话。"
-            elif skill_name == 'playwright-skill':
+            elif skill_name == "playwright-skill":
                 result_output = f"[SCREENSHOT_DIR] {screenshots_dir}\n{result_output}"
 
             return result_output
@@ -296,5 +352,126 @@ def get_skill_tools(user_id: int, project_id: int = None, test_case_id: int = No
         except Exception as e:
             logger.error(f"[execute_skill_script] 执行失败: {e}", exc_info=True)
             return f"错误: {str(e)}"
+
+    @langchain_tool
+    def execute_skill_script(
+        skill_name: Optional[str] = None,
+        command: Optional[str] = None,
+        session_id: Optional[str] = None,
+        commands: Optional[list[dict[str, str]]] = None,
+        parallel: bool = True,
+        max_workers: int = 10,
+    ) -> str:
+        """
+        执行 Skill 命令，支持单个执行或批量并发执行。
+
+        **单个执行模式**：传入 skill_name 和 command
+        **批量执行模式**：传入 commands 列表（自动并发，大幅提升效率）
+
+        Args:
+            skill_name: Skill 名称（单个执行时必填）
+            command: shell 命令，如 "python whart_tools.py --action get_projects"（单个执行时必填）
+            session_id: 可选会话ID，用于 playwright-skill 保持浏览器会话
+            commands: 批量命令列表，每个元素包含 skill_name、command、session_id（可选）
+                示例: [
+                    {"skill_name": "whart-test", "command": "python whart_tools.py --action add_testcase ..."},
+                    {"skill_name": "whart-test", "command": "python whart_tools.py --action add_testcase ..."}
+                ]
+            parallel: 批量模式下是否并发执行（默认 True）
+            max_workers: 批量模式下最大并发数（默认 10）
+
+        Returns:
+            单个模式返回命令输出；批量模式返回 JSON 格式结果汇总
+        """
+        import json
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # 批量执行模式
+        if commands:
+            logger.info(
+                f"[execute_skill_script] 批量模式: {len(commands)} 条命令, parallel={parallel}, max_workers={max_workers}"
+            )
+
+            if not commands:
+                return json.dumps({"error": "命令列表为空"}, ensure_ascii=False)
+
+            def execute_single(idx: int, cmd: dict[str, str]) -> dict[str, object]:
+                cmd_skill_name = cmd.get("skill_name")
+                cmd_command = cmd.get("command")
+                cmd_session_id = cmd.get("session_id")
+
+                if not cmd_skill_name or not cmd_command:
+                    return {
+                        "index": idx,
+                        "skill_name": cmd_skill_name,
+                        "command": cmd_command,
+                        "error": "缺少 skill_name 或 command",
+                    }
+
+                try:
+                    result = _execute_single_skill_script(
+                        cmd_skill_name, cmd_command, cmd_session_id
+                    )
+                    return {
+                        "index": idx,
+                        "skill_name": cmd_skill_name,
+                        "command": cmd_command,
+                        "result": result,
+                    }
+                except Exception as e:
+                    return {
+                        "index": idx,
+                        "skill_name": cmd_skill_name,
+                        "command": cmd_command,
+                        "error": str(e),
+                    }
+
+            results: list[Optional[dict[str, object]]] = [None] * len(commands)
+
+            if parallel and len(commands) > 1:
+                with ThreadPoolExecutor(
+                    max_workers=min(max_workers, len(commands))
+                ) as executor:
+                    future_to_idx = {
+                        executor.submit(execute_single, idx, cmd): idx
+                        for idx, cmd in enumerate(commands)
+                    }
+                    for future in as_completed(future_to_idx):
+                        idx = future_to_idx[future]
+                        results[idx] = future.result()
+            else:
+                for idx, cmd in enumerate(commands):
+                    results[idx] = execute_single(idx, cmd)
+
+            success_count = sum(
+                1
+                for r in results
+                if r is not None and "result" in r and "error" not in r
+            )
+            error_count = len(results) - success_count
+
+            logger.info(
+                f"[execute_skill_script] 批量完成: {success_count} 成功, {error_count} 失败"
+            )
+
+            return json.dumps(
+                {
+                    "summary": {
+                        "total": len(commands),
+                        "success": success_count,
+                        "error": error_count,
+                        "parallel": parallel,
+                    },
+                    "results": [r for r in results if r is not None],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        # 单个执行模式
+        if not skill_name or not command:
+            return "错误: 单个执行模式需要提供 skill_name 和 command 参数"
+
+        return _execute_single_skill_script(skill_name, command, session_id)
 
     return [read_skill_content, execute_skill_script]

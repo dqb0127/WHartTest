@@ -1,76 +1,149 @@
 """
-URL configuration for wharttest_django project.
+wharttest_django 项目的 URL 路由配置。
 
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/5.2/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+`urlpatterns` 用于将 URL 路径分发到对应视图。
+更多说明见：
+https://docs.djangoproject.com/en/5.2/topics/http/urls/
 """
+
+# 导入 Django 后台站点对象。
 from django.contrib import admin
-from django.urls import path, include # Added include
+
+
+# 导入 path/include，用于声明 URL 与组合子路由。
+from django.urls import path, include
+
+# 导入项目配置，后续用于读取 MEDIA/STATIC 设置。
 from django.conf import settings
+
+# 导入开发环境静态路由辅助函数。
 from django.conf.urls.static import static
+
+# 导入 DRF 默认路由器。
 from rest_framework.routers import DefaultRouter
+
+# 导入 DRF 嵌套路由器。
 from rest_framework_nested.routers import NestedSimpleRouter
-from rest_framework_simplejwt.views import (
-    TokenRefreshView,
-)
-from accounts.views import MyTokenObtainPairView # 修改为导入自定义视图
-from projects.views import ProjectViewSet # 导入 ProjectViewSet
+
+
+
+# 导入 JWT 刷新视图。
+from rest_framework_simplejwt.views import TokenRefreshView
+
+# 导入自定义 token 获取视图。
+from accounts.views import MyTokenObtainPairView
+
+# 导入项目视图集。
+from projects.views import ProjectViewSet
+
+# 导入测试相关视图集。
 from testcases.views import (
-    TestCaseViewSet, TestCaseModuleViewSet,
-    TestSuiteViewSet, TestExecutionViewSet,
-    AutomationScriptViewSet, ScriptExecutionViewSet
-)  # 导入 TestCase、TestCaseModule、TestSuite、TestExecution 和自动化用例视图集
-from skills.views import SkillViewSet  # 导入 Skill 视图集
-from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+    TestCaseViewSet,
+    TestCaseModuleViewSet,
+    TestSuiteViewSet,
+    TestExecutionViewSet,
+)
 
+# 导入技能视图集。
+from skills.views import SkillViewSet
+
+# 导入 OpenAPI schema 与文档视图。
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularSwaggerView,
+    SpectacularRedocView,
+)
+
+# 创建主路由器实例。
 router = DefaultRouter()
-router.register(r'projects', ProjectViewSet, basename='project')
-router.register(r'automation-scripts', AutomationScriptViewSet, basename='automation-scripts')
-router.register(r'script-executions', ScriptExecutionViewSet, basename='script-executions')
 
-projects_router = NestedSimpleRouter(router, r'projects', lookup='project')
-projects_router.register(r'testcases', TestCaseViewSet, basename='project-testcases')
-projects_router.register(r'testcase-modules', TestCaseModuleViewSet, basename='project-testcase-modules')
-projects_router.register(r'test-suites', TestSuiteViewSet, basename='project-test-suites')
-projects_router.register(r'test-executions', TestExecutionViewSet, basename='project-test-executions')
-projects_router.register(r'skills', SkillViewSet, basename='project-skills')
+# 注册项目一级资源路由。
+router.register(r"projects", ProjectViewSet, basename="project")
 
+# 创建项目维度嵌套路由器。
+projects_router = NestedSimpleRouter(router, r"projects", lookup="project")
+
+# 注册项目下测试用例路由。
+projects_router.register(r"testcases", TestCaseViewSet, basename="project-testcases")
+
+# 注册项目下用例模块路由。
+projects_router.register(
+    r"testcase-modules",
+    TestCaseModuleViewSet,
+    basename="project-testcase-modules",
+)
+
+# 注册项目下测试套件路由。
+projects_router.register(
+    r"test-suites", TestSuiteViewSet, basename="project-test-suites"
+)
+
+# 注册项目下测试执行路由。
+projects_router.register(
+    r"test-executions",
+    TestExecutionViewSet,
+    basename="project-test-executions",
+)
+
+# 注册项目下技能路由。
+projects_router.register(r"skills", SkillViewSet, basename="project-skills")
+
+# 定义根 URL 路由表。
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/token/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'), # 修改为使用自定义视图
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('api/accounts/', include('accounts.urls')), # Added accounts urls
-    # path('api/projects/', include('projects.urls')), # 注释掉旧的 projects.urls include
-    path('api/', include(router.urls)), # 包含主 router 的 URL
-    path('api/', include(projects_router.urls)), # 包含嵌套的 testcases router 的 URL
-    path('api/lg/', include('langgraph_integration.urls')), # LangGraph Integration URLs
-    path('api/mcp_tools/', include('mcp_tools.urls')), # MCP Tools URLs
-    path('api/', include('api_keys.urls')), # API Keys URLs
-    path('api/knowledge/', include('knowledge.urls')), # Knowledge Base URLs
-    path('api/prompts/', include('prompts.urls')), # 提示词管理 URLs
-    path('api/requirements/', include('requirements.urls')), # 需求评审管理 URLs
-    path('api/orchestrator/', include('orchestrator_integration.urls')), # 智能编排 URLs
-    path('api/', include('testcase_templates.urls')), # 用例导入导出模版 URLs
-    # DRF Spectacular - OpenAPI schema and docs
-    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    # Optional UI:
-    path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    path('api/schema/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    # 挂载 Django Admin。
+    path("admin/", admin.site.urls),
+    # 挂载 JWT 获取接口。
+    path("api/token/", MyTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    # 挂载 JWT 刷新接口。
+    path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    # 挂载账户模块路由。
+    path("api/accounts/", include("accounts.urls")),
+    # 旧 projects include 保留注释历史（当前不启用）。
+    # 如需启用旧版 projects 路由，可在此恢复对应 include 配置。
+    # 挂载主路由器自动生成的一级 REST 路由。
+    path("api/", include(router.urls)),
+    # 挂载项目嵌套路由。
+    path("api/", include(projects_router.urls)),
+    # 挂载 LangGraph 路由。
+    path("api/lg/", include("langgraph_integration.urls")),
+    # 挂载 MCP 工具路由。
+    path("api/mcp_tools/", include("mcp_tools.urls")),
+    # 挂载 API Keys 路由。
+    path("api/", include("api_keys.urls")),
+    # 挂载知识库路由。
+    path("api/knowledge/", include("knowledge.urls")),
+    # 挂载提示词管理路由。
+    path("api/prompts/", include("prompts.urls")),
+    # 挂载需求评审路由。
+    path("api/requirements/", include("requirements.urls")),
+    # 挂载智能编排路由。
+    path("api/orchestrator/", include("orchestrator_integration.urls")),
+    # 挂载用例模板路由。
+    path("api/", include("testcase_templates.urls")),
+    # 挂载 UI 自动化路由。
+    path("api/ui-automation/", include("ui_automation.urls")),
+    # 挂载 OpenAPI schema 接口。
+    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    # 挂载 Swagger UI。
+    path(
+        "api/schema/swagger-ui/",
+        SpectacularSwaggerView.as_view(url_name="schema"),
+        name="swagger-ui",
+    ),
+    # 挂载 ReDoc 文档。
+    path(
+        "api/schema/redoc/",
+        SpectacularRedocView.as_view(url_name="schema"),
+        name="redoc",
+    ),
 ]
 
-# 提供媒体文件访问
-# 在生产环境中,通常由 Nginx 等 Web 服务器处理静态文件
-# 但在容器化部署中,可能需要 Django 提供媒体文件服务
+# 追加媒体文件访问路由（开发/容器环境使用）。
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-# 同时提供静态文件访问
-urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT if hasattr(settings, 'STATIC_ROOT') else None)
+
+
+# 追加静态文件访问路由。
+urlpatterns += static(
+    settings.STATIC_URL,
+    document_root=settings.STATIC_ROOT if hasattr(settings, "STATIC_ROOT") else None,
+)

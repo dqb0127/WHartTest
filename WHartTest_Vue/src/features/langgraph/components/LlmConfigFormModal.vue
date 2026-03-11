@@ -23,8 +23,19 @@
           </a-form-item>
         </a-col>
 
-        <!-- 第二行：模型名称 (全宽 + 刷新按钮内联) -->
-        <a-col :span="24">
+        <!-- 第二行：供应商 + 模型名称 -->
+        <a-col :span="8">
+          <a-form-item field="provider" label="供应商" required>
+            <a-select
+              v-model="formData.provider"
+              :options="providerOptions"
+              placeholder="请选择供应商"
+              allow-clear
+              @change="handleProviderChange"
+            />
+          </a-form-item>
+        </a-col>
+        <a-col :span="16">
           <a-form-item field="name" label="模型名称" required>
             <div class="model-input-wrapper">
               <a-auto-complete
@@ -53,7 +64,7 @@
         <!-- 第三行：API URL + API Key -->
         <a-col :span="12">
           <a-form-item field="api_url" label="API URL" required>
-            <a-input v-model="formData.api_url" placeholder="https://api.openai.com/v1" />
+            <a-input v-model="formData.api_url" :placeholder="apiUrlPlaceholder" />
           </a-form-item>
         </a-col>
         <a-col :span="12">
@@ -67,7 +78,7 @@
 
         <!-- 提示信息 + 测试按钮 -->
         <a-col :span="24" class="test-button-row">
-          <span class="api-hint">仅支持 OpenAI 兼容格式的 API</span>
+          <span class="api-hint">{{ apiHintText }}</span>
           <a-button 
             type="outline"
             status="success"
@@ -164,6 +175,7 @@ import {
   Textarea as ATextarea,
   Switch as ASwitch,
   AutoComplete as AAutoComplete,
+  Select as ASelect,
   Button as AButton,
   Row as ARow,
   Col as ACol,
@@ -174,7 +186,7 @@ import {
   type FieldRule,
 } from '@arco-design/web-vue';
 import { IconRefresh, IconThunderbolt } from '@arco-design/web-vue/es/icon';
-import { createLlmConfig, partialUpdateLlmConfig, testLlmConnection, fetchModels } from '@/features/langgraph/services/llmConfigService';
+import { createLlmConfig, partialUpdateLlmConfig, testLlmConnection, fetchModels, getProviders } from '@/features/langgraph/services/llmConfigService';
 import type { LlmConfig, CreateLlmConfigRequest, PartialUpdateLlmConfigRequest } from '@/features/langgraph/types/llmConfig';
 
 interface Props {
@@ -197,8 +209,13 @@ const emit = defineEmits<{
 
 const formRef = ref<FormInstance | null>(null);
 const modelOptions = ref<string[]>([]);
+const providerOptions = ref<Array<{ label: string; value: string }>>([
+  { label: 'OpenAI 兼容', value: 'openai_compatible' },
+  { label: 'Qwen/通义千问', value: 'qwen' },
+]);
 const loadingModels = ref(false);
 const testingModel = ref(false);
+const QWEN_DEFAULT_API_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const defaultFormData: CreateLlmConfigRequest = {
   config_name: '',
   provider: 'openai_compatible',
@@ -223,11 +240,44 @@ const effectiveConfigId = computed(() => props.configData?.id || currentConfigId
 
 const formRules: Record<string, FieldRule[]> = {
   config_name: [{ required: true, message: '配置名称不能为空' }],
+  provider: [{ required: true, message: '供应商不能为空' }],
   name: [{ required: true, message: '模型名称不能为空' }],
   api_url: [
     { required: true, message: 'API URL 不能为空' },
     { type: 'url', message: '请输入有效的 URL' },
   ],
+};
+
+const apiUrlPlaceholder = computed(() => (
+  formData.value.provider === 'qwen'
+    ? QWEN_DEFAULT_API_URL
+    : 'https://api.openai.com/v1'
+));
+
+const apiHintText = computed(() => (
+  formData.value.provider === 'qwen'
+    ? 'Qwen 建议使用 DashScope 兼容地址（可自定义）'
+    : 'OpenAI 兼容供应商请填写兼容 API 地址'
+));
+
+const loadProviderOptions = async () => {
+  try {
+    const response = await getProviders();
+    if (response.status === 'success' && response.data?.choices?.length) {
+      providerOptions.value = response.data.choices.map((item) => ({
+        label: item.label,
+        value: item.value,
+      }));
+    }
+  } catch (error) {
+    console.warn('加载供应商列表失败，使用默认选项', error);
+  }
+};
+
+const handleProviderChange = (provider?: string) => {
+  if (provider === 'qwen' && !formData.value.api_url) {
+    formData.value.api_url = QWEN_DEFAULT_API_URL;
+  }
 };
 
 
@@ -236,11 +286,12 @@ watch(
   (newVal) => {
     if (newVal) {
       currentConfigId.value = null;
+      void loadProviderOptions();
       if (props.configData && props.configData.id) {
         // 编辑模式：填充表单，但不包括 API Key（除非用户想修改）
         formData.value = {
           config_name: props.configData.config_name,
-          provider: props.configData.provider,
+          provider: props.configData.provider || 'openai_compatible',
           name: props.configData.name,
           api_url: props.configData.api_url,
           api_key: '', // 编辑时不显示旧 Key，留空表示不修改
@@ -256,6 +307,7 @@ watch(
         // 新增模式：重置表单
         formData.value = { ...defaultFormData };
       }
+      handleProviderChange(formData.value.provider);
       // 清除之前的校验状态
       nextTick(() => {
         formRef.value?.clearValidate();

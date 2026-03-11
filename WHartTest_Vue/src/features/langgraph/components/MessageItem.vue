@@ -22,22 +22,30 @@
     <!-- 其他消息类型：使用头像+气泡布局 -->
     <template v-else>
       <div class="avatar">
-        <img v-if="message.messageType === 'ai'" :src="logo" alt="AI Avatar" class="avatar-img" />
+        <img v-if="message.messageType === 'ai'" :src="brandLogoUrl" alt="AI Avatar" class="avatar-img" />
         <div v-else class="avatar-img" :class="avatarClass">
-          {{ avatarText }}
+          <icon-tool v-if="message.messageType === 'tool'" class="tool-avatar-icon" />
+          <span v-else>{{ avatarText }}</span>
         </div>
       </div>
       <div class="message-content">
       <!-- 图片显示（在消息气泡之前） -->
-      <div v-if="message.imageDataUrl || message.imageBase64" class="message-image-container">
+      <div v-if="toolImageSrc && isThisImageFloating" class="tool-image-float-placeholder" @click="emit('float-tool-image', toolImageSrc)">
+        <img :src="toolImageSrc" alt="工具截图" class="float-placeholder-thumb" />
+        <span class="float-placeholder-label">悬浮预览中</span>
+      </div>
+      <div v-else-if="message.imageDataUrl || message.imageBase64" class="message-image-container">
         <img 
-          :src="message.imageDataUrl || `data:image/jpeg;base64,${message.imageBase64}`" 
+          :src="imageDisplaySrc" 
           alt="上传的图片" 
           class="message-image" 
         />
+        <div v-if="isToolImage" class="float-action-btn" @click="emit('float-tool-image', toolImageSrc!)">
+          悬浮
+        </div>
       </div>
       
-      <div class="message-bubble">
+      <div ref="messageBubbleRef" class="message-bubble">
         <div v-if="message.isLoading" class="typing-indicator">
           <span></span>
           <span></span>
@@ -59,6 +67,19 @@
           >
             {{ message.isExpanded ? '收起' : '展开' }}
             <i :class="message.isExpanded ? 'icon-up' : 'icon-down'"></i>
+          </div>
+          <div v-if="canPreviewDiagram || canPreviewHtml" class="diagram-preview-actions">
+            <a-button v-if="canPreviewDiagram" type="outline" size="mini" class="diagram-preview-btn" @click="handlePreviewDiagram">
+              <template #icon><icon-eye /></template>
+              预览图表
+            </a-button>
+            <a-button v-if="canPreviewHtml" type="outline" size="mini" class="diagram-preview-btn" @click="handlePreviewHtml">
+              <template #icon><icon-eye /></template>
+              预览HTML
+            </a-button>
+            <a-button v-if="canPreviewDiagram" type="text" size="mini" class="diagram-preview-btn" @click="openDiagramInNewTab">
+              新标签打开
+            </a-button>
           </div>
         </div>
 
@@ -82,6 +103,12 @@
           :class="{ 'streaming-content': isStreamingMessage }"
           v-html="formattedContent"
         ></div>
+        <div v-if="canPreviewHtml && message.messageType === 'ai'" class="diagram-preview-actions">
+          <a-button type="outline" size="mini" class="diagram-preview-btn" @click="handlePreviewHtml">
+            <template #icon><icon-eye /></template>
+            预览HTML
+          </a-button>
+        </div>
       </div>
 
       <!-- 消息操作按钮 -->
@@ -115,12 +142,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, onUpdated, ref, watch } from 'vue';
 import { Button as AButton, Tooltip as ATooltip, Message } from '@arco-design/web-vue';
-import { IconCopy, IconReply, IconRefresh, IconDelete } from '@arco-design/web-vue/es/icon';
+import { IconCopy, IconReply, IconRefresh, IconDelete, IconEye, IconTool } from '@arco-design/web-vue/es/icon';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import logo from '/WHartTest.png';
+import { brandLogoUrl } from '@/utils/assetUrl';
+import { extractDiagramToolPayload } from '../utils/diagramToolParser';
+import { extractHtmlPreviewContent } from '../utils/htmlPreviewParser';
 
 // 配置marked以确保代码块正确渲染
 // marked v5+ API发生了变化，许多选项被移除或更改。
@@ -159,16 +188,47 @@ interface ChatMessage {
 
 interface Props {
   message: ChatMessage;
+  floatingToolImageSrc?: string | null;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  floatingToolImageSrc: null,
+});
 
-defineEmits<{
+const emit = defineEmits<{
   'toggle-expand': [message: ChatMessage];
   'quote': [message: ChatMessage];
   'retry': [message: ChatMessage];
   'delete': [message: ChatMessage];
+  'preview-diagram': [payload: { xml: string; sourceMessage: ChatMessage }];
+  'preview-html': [payload: { html: string; sourceMessage: ChatMessage }];
+  'tool-image-detected': [src: string];
+  'float-tool-image': [src: string];
 }>();
+
+// 工具图片相关
+const toolImageSrc = computed(() => {
+  if (props.message.messageType !== 'tool') return null;
+  return props.message.imageDataUrl || (props.message.imageBase64 ? `data:image/jpeg;base64,${props.message.imageBase64}` : null);
+});
+
+const isToolImage = computed(() => props.message.messageType === 'tool' && !!toolImageSrc.value);
+
+const isThisImageFloating = computed(() => {
+  return isToolImage.value && props.floatingToolImageSrc === toolImageSrc.value;
+});
+
+const imageDisplaySrc = computed(() => {
+  return props.message.imageDataUrl || `data:image/jpeg;base64,${props.message.imageBase64}`;
+});
+
+// 工具图片被检测到时通知父组件
+onMounted(() => {
+  if (toolImageSrc.value) emit('tool-image-detected', toolImageSrc.value);
+});
+watch(toolImageSrc, (src) => {
+  if (src) emit('tool-image-detected', src);
+});
 
 // 操作按钮可见性
 const showActions = computed(() => {
@@ -179,6 +239,17 @@ const showActions = computed(() => {
 const canQuote = computed(() => ['human', 'ai'].includes(props.message.messageType || ''));
 const canRetry = computed(() => ['human', 'ai'].includes(props.message.messageType || '') && !props.message.isStreaming && !props.message.isLoading);
 const canDelete = computed(() => props.message.messageType !== 'system' && showActions.value);
+
+const htmlPreviewContent = computed(() => {
+  if (props.message.isLoading) return null;
+  return extractHtmlPreviewContent(props.message.content);
+});
+
+const canPreviewHtml = computed(() => {
+  return Boolean(htmlPreviewContent.value);
+});
+const messageBubbleRef = ref<HTMLElement | null>(null);
+let previewScrollRafId: number | null = null;
 
 // 复制到剪贴板（兼容HTTP环境）
 const handleCopy = async () => {
@@ -261,14 +332,57 @@ const isStreamingMessage = computed(() => {
          props.message.content.length > 0;
 });
 
+// 从工具消息中提取图表XML（display_diagram/edit_diagram）
+const diagramPayload = computed(() => {
+  if (props.message.messageType !== 'tool') return null;
+  return extractDiagramToolPayload(props.message.content);
+});
+
 // 判断工具消息是否需要折叠
 const shouldCollapse = computed(() => {
   if (props.message.messageType !== 'tool') return false;
+
+  // 图表工具结果（display/edit）默认折叠，避免大段JSON/XML占据聊天区
+  if (diagramPayload.value?.action === 'display' || diagramPayload.value?.action === 'edit') {
+    return true;
+  }
+
   const lines = props.message.content.split('\n').length;
   return lines > 4;
 });
 
+const canPreviewDiagram = computed(() => {
+  return Boolean(diagramPayload.value?.xml);
+});
+
+const diagramPreviewUrl = computed(() => {
+  if (!diagramPayload.value?.xml) return '';
+  return `https://app.diagrams.net/?splash=0#R${encodeURIComponent(diagramPayload.value.xml)}`;
+});
+
+const handlePreviewDiagram = () => {
+  if (!diagramPayload.value?.xml) return;
+  emit('preview-diagram', {
+    xml: diagramPayload.value.xml,
+    sourceMessage: props.message
+  });
+};
+
+const openDiagramInNewTab = () => {
+  if (!diagramPreviewUrl.value) return;
+  window.open(diagramPreviewUrl.value, '_blank', 'noopener,noreferrer');
+};
+
+const handlePreviewHtml = () => {
+  if (!htmlPreviewContent.value) return;
+  emit('preview-html', {
+    html: htmlPreviewContent.value,
+    sourceMessage: props.message
+  });
+};
+
 const REQUIREMENT_DOC_ID_RE = /需求文档ID[:：]\s*([0-9a-fA-F-]{36})/;
+const CODE_LANG_CLASS_RE = /\blanguage-([a-zA-Z0-9_+-]+)\b/;
 
 const replaceDocImgPlaceholders = (content: string): string => {
   if (!content || !content.includes('docimg://')) return content;
@@ -285,6 +399,75 @@ const escapeHtml = (text: string): string => {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+};
+
+const getCodePreviewText = (preElement: HTMLElement, maxLines = 3, fromEnd = false): string => {
+  const codeElement = preElement.querySelector('code');
+  const rawCode = (codeElement?.textContent || preElement.textContent || '').replace(/\r\n/g, '\n');
+  const lines = rawCode.split('\n');
+  const previewLines = fromEnd ? lines.slice(-maxLines) : lines.slice(0, maxLines);
+  const preview = previewLines.join('\n').trimEnd();
+  return preview || '// ...';
+};
+
+const detectCodeLanguage = (preElement: HTMLElement): string => {
+  const codeElement = preElement.querySelector('code');
+  if (!codeElement?.className) return '';
+  const match = codeElement.className.match(CODE_LANG_CLASS_RE);
+  return match?.[1] || '';
+};
+
+const wrapCodeBlocksAsCollapsible = (html: string, isStreaming = false): string => {
+  if (!html || !html.includes('<pre')) return html;
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(`<div id="__code_root__">${html}</div>`, 'text/html');
+  const root = doc.getElementById('__code_root__');
+  if (!root) return html;
+
+  const preElements = root.querySelectorAll('pre');
+  preElements.forEach((preNode) => {
+    if (!(preNode instanceof HTMLElement)) return;
+    if (preNode.closest('details.message-code-collapse')) return;
+
+    const details = doc.createElement('details');
+    details.className = isStreaming ? 'message-code-collapse is-streaming' : 'message-code-collapse';
+
+    const summary = doc.createElement('summary');
+    summary.className = 'message-code-toggle';
+
+    const language = detectCodeLanguage(preNode);
+    const header = doc.createElement('span');
+    header.className = 'message-code-toggle-header';
+    header.textContent = language ? `代码块 (${language})` : '代码块';
+    summary.appendChild(header);
+
+    if (isStreaming) {
+      const previewViewport = doc.createElement('span');
+      previewViewport.className = 'message-code-preview-viewport';
+
+      const preview = doc.createElement('code');
+      preview.className = 'message-code-preview message-code-preview-stream';
+      preview.textContent = getCodePreviewText(preNode, 12, true);
+
+      previewViewport.appendChild(preview);
+      summary.appendChild(previewViewport);
+    } else {
+      const preview = doc.createElement('code');
+      preview.className = 'message-code-preview';
+      preview.textContent = getCodePreviewText(preNode, 3);
+      summary.appendChild(preview);
+    }
+
+    const parent = preNode.parentNode;
+    if (!parent) return;
+
+    parent.insertBefore(details, preNode);
+    details.appendChild(summary);
+    details.appendChild(preNode);
+  });
+
+  return root.innerHTML;
 };
 
 // 格式化消息内容
@@ -318,16 +501,51 @@ const formattedContent = computed(() => {
     }
 
     // 使用marked解析Markdown (同步版本)
-    const htmlContent = marked(processedContent) as string;
+    let htmlContent = marked(processedContent) as string;
+    htmlContent = wrapCodeBlocksAsCollapsible(htmlContent, Boolean(props.message.isStreaming));
 
     // 使用DOMPurify净化HTML防止XSS攻击
     return DOMPurify.sanitize(htmlContent, {
-      ADD_TAGS: ['img'],
-      ADD_ATTR: ['src', 'alt', 'title'],
+      ADD_TAGS: ['img', 'details', 'summary'],
+      ADD_ATTR: ['src', 'alt', 'title', 'class'],
     });
   } catch (error) {
     console.error('Error parsing markdown:', error);
     return props.message.content;
+  }
+});
+
+const scrollStreamingCodePreviewToBottom = () => {
+  if (!props.message.isStreaming || !messageBubbleRef.value) return;
+
+  const viewports = messageBubbleRef.value.querySelectorAll('.message-code-preview-viewport');
+  viewports.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    node.scrollTop = node.scrollHeight;
+  });
+};
+
+const scheduleStreamingPreviewScroll = () => {
+  if (previewScrollRafId !== null) {
+    cancelAnimationFrame(previewScrollRafId);
+  }
+  previewScrollRafId = requestAnimationFrame(() => {
+    scrollStreamingCodePreviewToBottom();
+    previewScrollRafId = null;
+  });
+};
+
+onUpdated(() => {
+  if (!props.message.isStreaming) return;
+  nextTick(() => {
+    scheduleStreamingPreviewScroll();
+  });
+});
+
+onUnmounted(() => {
+  if (previewScrollRafId !== null) {
+    cancelAnimationFrame(previewScrollRafId);
+    previewScrollRafId = null;
   }
 });
 
@@ -398,24 +616,79 @@ const handleStreamingMarkdown = (content: string) => {
 const formatToolMessage = (content: string) => {
   try {
     // 先尝试解析为 JSON
-    const jsonData = JSON.parse(content);
+    let jsonData = JSON.parse(content);
+    
+    // 处理 MCP 工具返回的数组格式: [{"type": "text", "text": "..."}]
+    if (Array.isArray(jsonData) && jsonData.length > 0 && jsonData[0]?.type === 'text' && jsonData[0]?.text) {
+      // 提取 text 字段的内容
+      const textContent = jsonData[0].text;
+      try {
+        // 尝试解析 text 内容为 JSON
+        const innerJson = JSON.parse(textContent);
+        // 如果是数组，格式化为列表
+        if (Array.isArray(innerJson)) {
+          return innerJson.map((item: any) => `• ${item}`).join('\n');
+        }
+        // 对象格式化为 JSON 代码块
+        const formattedJson = JSON.stringify(innerJson, null, 2);
+        return `\`\`\`json\n${formattedJson}\n\`\`\``;
+      } catch {
+        // text 内容不是 JSON，直接显示
+        return textContent;
+      }
+    }
+    
+    // 如果是简单数组，格式化为列表
+    if (Array.isArray(jsonData) && jsonData.length > 0 && typeof jsonData[0] !== 'object') {
+      return jsonData.map((item: any) => `• ${item}`).join('\n');
+    }
+    
+    // 其他 JSON 格式化为代码块
     const formattedJson = JSON.stringify(jsonData, null, 2);
     return `\`\`\`json\n${formattedJson}\n\`\`\``;
   } catch {
-    // 如果不是 JSON,检查是否已经包含代码块标记
-    if (content.includes('```')) {
-      return content;
+    // 尝试修复 Python 格式的字符串（单引号转双引号）
+    try {
+      const fixedContent = content.replace(/'/g, '"');
+      const jsonData = JSON.parse(fixedContent);
+      
+      // 处理 MCP 格式
+      if (Array.isArray(jsonData) && jsonData.length > 0 && jsonData[0]?.type === 'text' && jsonData[0]?.text) {
+        const textContent = jsonData[0].text;
+        try {
+          const innerJson = JSON.parse(textContent);
+          if (Array.isArray(innerJson)) {
+            return innerJson.map((item: any) => `• ${item}`).join('\n');
+          }
+          const formattedJson = JSON.stringify(innerJson, null, 2);
+          return `\`\`\`json\n${formattedJson}\n\`\`\``;
+        } catch {
+          return textContent;
+        }
+      }
+      
+      if (Array.isArray(jsonData) && jsonData.length > 0 && typeof jsonData[0] !== 'object') {
+        return jsonData.map((item: any) => `• ${item}`).join('\n');
+      }
+      
+      const formattedJson = JSON.stringify(jsonData, null, 2);
+      return `\`\`\`json\n${formattedJson}\n\`\`\``;
+    } catch {
+      // 如果不是 JSON,检查是否已经包含代码块标记
+      if (content.includes('```')) {
+        return content;
+      }
+      
+      // 检测是否为纯数字或简单文本(少于 50 字符且无换行)
+      const trimmedContent = content.trim();
+      if (trimmedContent.length < 50 && !trimmedContent.includes('\n')) {
+        // 简单文本直接显示,无需代码块
+        return trimmedContent;
+      }
+      
+      // 其他情况包装为代码块
+      return `\`\`\`\n${content}\n\`\`\``;
     }
-    
-    // 检测是否为纯数字或简单文本(少于 50 字符且无换行)
-    const trimmedContent = content.trim();
-    if (trimmedContent.length < 50 && !trimmedContent.includes('\n')) {
-      // 简单文本直接显示,无需代码块
-      return trimmedContent;
-    }
-    
-    // 其他情况包装为代码块
-    return `\`\`\`\n${content}\n\`\`\``;
   }
 };
 </script>
@@ -575,6 +848,10 @@ const formatToolMessage = (content: string) => {
   background-color: #ff7d00;
 }
 
+.tool-avatar-icon {
+  font-size: 18px;
+}
+
 
 
 .message-content {
@@ -588,19 +865,63 @@ const formatToolMessage = (content: string) => {
 .message-image-container {
   margin-bottom: 8px;
   max-width: 100%;
-  width: 100%;
+  width: fit-content;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   display: flex;
-  justify-content: center; /* 居中显示图片 */
+  justify-content: center;
+  position: relative;
+}
+
+.float-action-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.message-image-container:hover .float-action-btn {
+  opacity: 1;
+}
+
+/* 悬浮预览中的占位 */
+.tool-image-float-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border: 1px dashed #c9cdd4;
+  border-radius: 8px;
+  cursor: pointer;
+  background: #f7f8fa;
+  transition: background 0.2s;
+}
+.tool-image-float-placeholder:hover {
+  background: #e8f3ff;
+}
+.float-placeholder-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.float-placeholder-label {
+  font-size: 12px;
+  color: #86909c;
 }
 
 .message-image {
-  width: 100%;
+  width: auto;
   height: auto;
-  max-width: 100%;
-  max-width: min(100%, 600px); /* 限制图片最大宽度为600px或容器宽度，取较小值 */
+  max-width: min(100%, 300px);
   display: block;
   cursor: pointer;
   transition: transform 0.2s ease;
@@ -694,10 +1015,10 @@ const formatToolMessage = (content: string) => {
 .tool-header {
   font-size: 0.9em;
   font-weight: 600;
-  color: #666;
+  color: var(--theme-text-secondary);
   margin-bottom: 8px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #e6f4ea;
+  border-bottom: 1px solid rgba(var(--theme-accent-rgb), 0.16);
 }
 
 .tool-content {
@@ -723,7 +1044,7 @@ const formatToolMessage = (content: string) => {
   left: 0;
   right: 0;
   height: 40px;
-  background: linear-gradient(transparent, #fff7e6);
+  background: linear-gradient(transparent, color-mix(in srgb, var(--theme-surface) 78%, white 22%));
   pointer-events: none;
 }
 
@@ -763,6 +1084,18 @@ const formatToolMessage = (content: string) => {
 
 .icon-down::before {
   content: '▼';
+}
+
+.diagram-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.diagram-preview-btn {
+  border-radius: 6px !important;
 }
 
 /* 消息操作按钮 */
@@ -910,6 +1243,140 @@ const formatToolMessage = (content: string) => {
   margin: 8px 0;
 }
 
+.message-bubble :deep(details.message-code-collapse) {
+  margin: 8px 0;
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+.message-bubble :deep(details.message-code-collapse > summary.message-code-toggle) {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding: 8px 58px 10px 10px;
+  font-size: 12px;
+  color: #4e5969;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.message-bubble :deep(details.message-code-collapse > summary.message-code-toggle::-webkit-details-marker) {
+  display: none;
+}
+
+.message-bubble :deep(details.message-code-collapse > summary.message-code-toggle::before) {
+  content: '▶';
+  position: absolute;
+  top: 11px;
+  left: 10px;
+  font-size: 10px;
+  color: #86909c;
+}
+
+.message-bubble :deep(details.message-code-collapse > summary.message-code-toggle::after) {
+  content: '展开';
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 12px;
+  color: #86909c;
+}
+
+.message-bubble :deep(.message-code-toggle-header) {
+  font-weight: 600;
+  padding-left: 16px;
+  line-height: 1.4;
+}
+
+.message-bubble :deep(.message-code-preview) {
+  display: block;
+  margin-left: 16px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.05);
+  white-space: pre;
+  line-height: 1.4;
+  max-height: calc(1.4em * 3 + 12px);
+  overflow: hidden;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  color: #4e5969;
+}
+
+.message-bubble :deep(.message-code-preview-viewport) {
+  display: block;
+  margin-left: 16px;
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.05);
+  max-height: calc(1.4em * 3 + 12px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.message-bubble :deep(.message-code-preview-viewport::-webkit-scrollbar) {
+  display: none;
+}
+
+.message-bubble :deep(.message-code-preview-stream) {
+  margin: 0;
+  border-radius: 0;
+  background-color: transparent;
+  min-height: auto;
+}
+
+.message-bubble :deep(details.message-code-collapse[open] > summary.message-code-toggle) {
+  border-bottom: 1px solid #e5e6eb;
+}
+
+.message-bubble :deep(details.message-code-collapse[open] > summary.message-code-toggle::before) {
+  content: '▼';
+}
+
+.message-bubble :deep(details.message-code-collapse[open] > summary.message-code-toggle::after) {
+  content: '收起';
+}
+
+.message-bubble :deep(details.message-code-collapse[open] > summary .message-code-preview) {
+  display: none;
+}
+
+.message-bubble :deep(details.message-code-collapse[open] > summary .message-code-preview-viewport) {
+  display: none;
+}
+
+.message-bubble :deep(details.message-code-collapse > pre) {
+  margin: 0;
+  border-radius: 0 0 8px 8px;
+  border: none;
+}
+
+.message-bubble :deep(details.message-code-collapse.is-streaming[open] > pre) {
+  position: relative;
+  overflow: hidden;
+}
+
+.message-bubble :deep(details.message-code-collapse.is-streaming[open] > pre::after) {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -100%;
+  height: 100%;
+  background: linear-gradient(to bottom, rgba(22, 93, 255, 0), rgba(22, 93, 255, 0.12), rgba(22, 93, 255, 0));
+  animation: code-streaming-sweep 1.8s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes code-streaming-sweep {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(200%); }
+}
+
 .ai-message .message-bubble :deep(pre) {
   background-color: #f2f3f5;
 }
@@ -978,14 +1445,14 @@ const formatToolMessage = (content: string) => {
 .message-bubble :deep(h3) { font-size: 1.1em; }
 
 .message-bubble :deep(blockquote) {
-  border-left: 3px solid #ddd;
+  border-left: 3px solid var(--theme-border);
   margin: 8px 0;
   padding-left: 12px;
-  color: #666;
+  color: var(--theme-text-secondary);
 }
 
 .message-bubble :deep(img) {
-  max-width: 100%;
+  max-width: min(100%, 400px);
   height: auto;
   border-radius: 4px;
 }
@@ -1058,19 +1525,19 @@ const formatToolMessage = (content: string) => {
 /* 响应式图片尺寸调整 */
 @media (max-width: 768px) {
   .message-image {
-    max-width: min(100%, 400px); /* 在小屏幕上限制最大宽度为400px */
+    max-width: min(100%, 320px);
   }
 }
 
 @media (max-width: 480px) {
   .message-image {
-    max-width: min(100%, 300px); /* 在手机上限制最大宽度为300px */
+    max-width: min(100%, 240px);
   }
 }
 
 /* 确保消息气泡内的图片不会超出容器 */
 .message-bubble :deep(img) {
-  max-width: 100%;
+  max-width: min(100%, 400px);
   height: auto;
   display: block;
   margin: 8px 0;
@@ -1083,7 +1550,7 @@ const formatToolMessage = (content: string) => {
 }
 
 .user-message .message-image {
-  max-width: min(100%, 500px); /* 用户消息的图片稍微小一些 */
+  max-width: min(100%, 400px);
 }
 
 /* AI消息中的图片样式 */

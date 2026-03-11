@@ -63,3 +63,20 @@ export const getReviewStatusColor = (status?: string): string => {
   const option = REVIEW_STATUS_OPTIONS.find(o => o.value === status);
   return option?.color || 'gray';
 };
+
+// 测试类型选项
+export const TEST_TYPE_OPTIONS = [
+  { value: 'smoke', label: '冒烟测试' },
+  { value: 'functional', label: '功能测试' },
+  { value: 'boundary', label: '边界测试' },
+  { value: 'exception', label: '异常测试' },
+  { value: 'permission', label: '权限测试' },
+  { value: 'security', label: '安全测试' },
+  { value: 'compatibility', label: '兼容性测试' },
+] as const;
+
+export const getTestTypeLabel = (testType?: string): string => {
+  if (!testType) return '功能测试';
+  const option = TEST_TYPE_OPTIONS.find(o => o.value === testType);
+  return option?.label || testType;
+};

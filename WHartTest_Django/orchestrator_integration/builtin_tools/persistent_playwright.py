@@ -4,6 +4,7 @@ Playwright 持久化会话管理
 提供跨多次 execute_skill_script 调用的浏览器会话保持能力。
 通过 stdin/stdout JSON-RPC 与长驻 Node.js 进程通信。
 """
+
 from __future__ import annotations
 
 import atexit
@@ -20,9 +21,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+
 import logging
 
-logger = logging.getLogger('orchestrator_integration')
+from .output_sanitizer import strip_terminal_control_sequences
+
+logger = logging.getLogger("orchestrator_integration")
 
 
 class PlaywrightPersistentSessionError(RuntimeError):
@@ -53,19 +57,19 @@ def _unescape_js_string(s: str) -> str:
     """
     result = s
     # 使用临时标记保护 JS 需要的三层转义
-    result = result.replace('\\\\\\"', '\x00JS_ESCAPED_DQUOTE\x00')
-    result = result.replace("\\\\'", '\x00JS_ESCAPED_SQUOTE\x00')
+    result = result.replace('\\\\\\"', "\x00JS_ESCAPED_DQUOTE\x00")
+    result = result.replace("\\\\'", "\x00JS_ESCAPED_SQUOTE\x00")
 
     # 去除命令行层的两层转义
     result = result.replace('\\"', '"')
     result = result.replace("\\'", "'")
 
     # 恢复 JS 需要的转义
-    result = result.replace('\x00JS_ESCAPED_DQUOTE\x00', '\\"')
-    result = result.replace('\x00JS_ESCAPED_SQUOTE\x00', "\\'")
+    result = result.replace("\x00JS_ESCAPED_DQUOTE\x00", '\\"')
+    result = result.replace("\x00JS_ESCAPED_SQUOTE\x00", "\\'")
 
     # 处理反斜杠本身
-    result = result.replace('\\\\', '\\')
+    result = result.replace("\\\\", "\\")
     return result
 
 
@@ -83,8 +87,8 @@ def _filter_misplaced_options(args: List[str]) -> List[str]:
         if skip_next:
             skip_next = False
             continue
-        if arg.startswith('--session_id') or arg.startswith('--session-id'):
-            if '=' not in arg:
+        if arg.startswith("--session_id") or arg.startswith("--session-id"):
+            if "=" not in arg:
                 skip_next = True
             continue
         filtered.append(arg)
@@ -116,12 +120,16 @@ def extract_runjs_args(command: str) -> Optional[List[str]]:
         return [code]
 
     # 方法1.5: 处理 LLM 误放 --session_id 在命令中的情况
-    # node run.js --session_id xxx "code..."
-    match = re.search(r'run\.js\s+--session[-_]id\s+\S+\s+["\'](.+)["\']$', raw, re.DOTALL)
+    # 示例：node run.js --session_id xxx "code..."
+    match = re.search(
+        r'run\.js\s+--session[-_]id\s+\S+\s+["\'](.+)["\']$', raw, re.DOTALL
+    )
     if match:
         code = match.group(1)
         code = _unescape_js_string(code)
-        logger.warning("[extract_runjs_args] LLM 误将 --session_id 放在命令中，已自动过滤")
+        logger.warning(
+            "[extract_runjs_args] LLM 误将 --session_id 放在命令中，已自动过滤"
+        )
         return [code]
 
     # 方法2: 回退到 shlex 解析（保持向后兼容）
@@ -140,7 +148,7 @@ def extract_runjs_args(command: str) -> Optional[List[str]]:
     for idx, token in enumerate(parts):
         name = os.path.basename(token).lower()
         if name == "run.js" or token.lower().endswith("run.js"):
-            args = parts[idx + 1:]
+            args = parts[idx + 1 :]
             processed = [_strip_outer_quotes(a) for a in args]
             processed = [_unescape_js_string(a) for a in processed]
             processed = _filter_misplaced_options(processed)
@@ -203,12 +211,12 @@ class _PlaywrightNodeProcess:
             self._stdout_thread = threading.Thread(
                 target=self._stdout_reader,
                 name=f"pw-stdout[{self.skill_dir[-30:]}]",
-                daemon=True
+                daemon=True,
             )
             self._stderr_thread = threading.Thread(
                 target=self._stderr_reader,
                 name=f"pw-stderr[{self.skill_dir[-30:]}]",
-                daemon=True
+                daemon=True,
             )
             self._stdout_thread.start()
             self._stderr_thread.start()
@@ -216,7 +224,9 @@ class _PlaywrightNodeProcess:
             # 增加超时时间以容纳首次 npm install（如果需要）
             resp = self.request("ping", params={}, timeout_seconds=120)
             if not resp.get("ok", False):
-                raise PlaywrightPersistentSessionError(self._format_response_error(resp))
+                raise PlaywrightPersistentSessionError(
+                    self._format_response_error(resp)
+                )
 
         logger.info(f"[persistent_playwright] Node.js 进程启动成功: {self.skill_dir}")
 
@@ -232,7 +242,9 @@ class _PlaywrightNodeProcess:
             try:
                 msg = json.loads(raw)
             except Exception:
-                self._stderr_tail.append(f"[stdout] {raw}")
+                self._stderr_tail.append(
+                    strip_terminal_control_sequences(f"[stdout] {raw}")
+                )
                 continue
 
             req_id = msg.get("id")
@@ -256,7 +268,7 @@ class _PlaywrightNodeProcess:
         for line in self._proc.stderr:
             raw = (line or "").rstrip("\n")
             if raw:
-                self._stderr_tail.append(raw)
+                self._stderr_tail.append(strip_terminal_control_sequences(raw))
 
     def _fail_all_pending(self, reason: str) -> None:
         with self._pending_lock:
@@ -264,22 +276,30 @@ class _PlaywrightNodeProcess:
             self._pending.clear()
         for req_id, q in items:
             try:
-                q.put_nowait({
-                    "id": req_id,
-                    "ok": False,
-                    "error": reason,
-                    "stderr": list(self._stderr_tail),
-                })
+                q.put_nowait(
+                    {
+                        "id": req_id,
+                        "ok": False,
+                        "error": reason,
+                        "stderr": list(self._stderr_tail),
+                    }
+                )
             except Exception:
                 continue
 
     def _ensure_alive(self) -> None:
         if self._proc is None:
-            raise PlaywrightPersistentSessionError("Playwright persistent process not started")
+            raise PlaywrightPersistentSessionError(
+                "Playwright persistent process not started"
+            )
         if self._proc.poll() is not None:
-            raise PlaywrightPersistentSessionError("Playwright persistent process is not running")
+            raise PlaywrightPersistentSessionError(
+                "Playwright persistent process is not running"
+            )
 
-    def request(self, method: str, params: Dict[str, Any], timeout_seconds: int) -> Dict[str, Any]:
+    def request(
+        self, method: str, params: Dict[str, Any], timeout_seconds: int
+    ) -> Dict[str, Any]:
         self._ensure_alive()
         assert self._proc is not None
         assert self._proc.stdin is not None
@@ -300,20 +320,26 @@ class _PlaywrightNodeProcess:
         except Exception as exc:
             with self._pending_lock:
                 self._pending.pop(req_id, None)
-            raise PlaywrightPersistentSessionError(f"Failed to write to Playwright session: {exc}") from exc
+            raise PlaywrightPersistentSessionError(
+                f"Failed to write to Playwright session: {exc}"
+            ) from exc
 
         try:
             resp = q.get(timeout=timeout_seconds)
         except queue.Empty:
             self.terminate(graceful=False)
-            raise TimeoutError(f"Playwright persistent request timed out after {timeout_seconds}s")
+            raise TimeoutError(
+                f"Playwright persistent request timed out after {timeout_seconds}s"
+            )
         finally:
             with self._pending_lock:
                 self._pending.pop(req_id, None)
 
         return resp
 
-    def exec_run_js(self, run_js_args: List[str], env: Dict[str, str], timeout_seconds: int) -> str:
+    def exec_run_js(
+        self, run_js_args: List[str], env: Dict[str, str], timeout_seconds: int
+    ) -> str:
         params: Dict[str, Any] = {"args": run_js_args or [], "env": env or {}}
         resp = self.request("exec", params=params, timeout_seconds=timeout_seconds)
 
@@ -326,11 +352,19 @@ class _PlaywrightNodeProcess:
 
         output = ""
         if stdout_lines:
-            output += "\n".join(str(x) for x in stdout_lines if x is not None)
+            output += "\n".join(
+                strip_terminal_control_sequences(str(x))
+                for x in stdout_lines
+                if x is not None
+            )
         if stderr_lines:
             if output:
                 output += "\n--- stderr ---\n"
-            output += "\n".join(str(x) for x in stderr_lines if x is not None)
+            output += "\n".join(
+                strip_terminal_control_sequences(str(x))
+                for x in stderr_lines
+                if x is not None
+            )
 
         if not resp.get("ok", False):
             err = resp.get("error")
@@ -338,7 +372,7 @@ class _PlaywrightNodeProcess:
                 if output:
                     output = f"{err}\n{output}"
                 else:
-                    output = str(err)
+                    output = strip_terminal_control_sequences(str(err))
 
         return output
 
@@ -429,8 +463,10 @@ class PlaywrightSessionManager:
         with self._lock:
             if len(self._entries) <= self.max_sessions:
                 return
-            victims = sorted(self._entries.values(), key=lambda e: e.last_used_monotonic)
-            to_close = victims[:max(0, len(self._entries) - self.max_sessions)]
+            victims = sorted(
+                self._entries.values(), key=lambda e: e.last_used_monotonic
+            )
+            to_close = victims[: max(0, len(self._entries) - self.max_sessions)]
 
         for entry in to_close:
             self.close_session(entry.session_key)
@@ -473,7 +509,9 @@ class PlaywrightSessionManager:
 
         entry.proc._start(env=env)
 
-        output = entry.proc.exec_run_js(run_js_args=run_js_args, env=env, timeout_seconds=int(timeout_seconds))
+        output = entry.proc.exec_run_js(
+            run_js_args=run_js_args, env=env, timeout_seconds=int(timeout_seconds)
+        )
 
         # 执行结束后再次更新时间戳
         with self._lock:

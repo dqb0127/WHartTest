@@ -3,6 +3,7 @@ import type {
   Skill,
   SkillListItem,
   SkillUploadResponse,
+  SkillGitImportResponse,
   SkillListResponse,
   SkillDetailResponse,
   SkillContentResponse
@@ -69,13 +70,13 @@ export class SkillService {
     projectId: number,
     gitUrl: string,
     branch?: string
-  ): Promise<Skill> {
+  ): Promise<Skill[]> {
     const payload: { git_url: string; branch?: string } = { git_url: gitUrl }
     if (branch) {
       payload.branch = branch
     }
 
-    const response = await request<SkillUploadResponse>({
+    const response = await request<SkillGitImportResponse>({
       url: `/projects/${projectId}/skills/import-git/`,
       method: 'POST',
       data: payload
@@ -83,7 +84,7 @@ export class SkillService {
 
     const api = response.data as any
     if (response.success && api?.data) {
-      return api.data
+      return Array.isArray(api.data) ? api.data : [api.data]
     }
     throw new Error(api?.message || response.error || '从 Git 导入 Skill 失败')
   }

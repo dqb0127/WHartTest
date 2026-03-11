@@ -43,7 +43,7 @@ MODEL_CONTEXT_LIMITS = {
     'chatglm': 8192,
     
     # 默认值
-    'default': 4096
+    'default': 128000
 }
 
 # 预留token数（用于系统提示词、响应等）

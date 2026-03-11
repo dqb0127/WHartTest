@@ -331,6 +331,7 @@ service.interceptors.response.use(
       success: false,
       status,
       error: message,
+      errors: response?.data?.errors, // 保留原始的字段验证错误
     });
   }
 );

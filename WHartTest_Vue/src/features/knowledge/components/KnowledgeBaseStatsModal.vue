@@ -221,7 +221,7 @@ const getAverageChunksPerDocument = () => {
 
 .loading-text {
   margin-top: 16px;
-  color: #666;
+  color: var(--theme-text-secondary);
   font-size: 14px;
 }
 
@@ -233,8 +233,8 @@ const getAverageChunksPerDocument = () => {
   margin: 0 0 16px 0;
   font-size: 16px;
   font-weight: bold;
-  color: #333;
-  border-bottom: 1px solid #e5e6eb;
+  color: var(--theme-text);
+  border-bottom: 1px solid var(--theme-border);
   padding-bottom: 8px;
 }
 
@@ -252,7 +252,7 @@ const getAverageChunksPerDocument = () => {
   display: flex;
   align-items: center;
   padding: 20px;
-  background: #f7f8fa;
+  background: color-mix(in srgb, var(--theme-surface-soft) 72%, white 28%);
   border-radius: 8px;
   border-left: 4px solid #00a0e9;
 }
@@ -288,13 +288,13 @@ const getAverageChunksPerDocument = () => {
 .stat-value {
   font-size: 24px;
   font-weight: bold;
-  color: #333;
+  color: var(--theme-text);
   line-height: 1;
 }
 
 .stat-label {
   font-size: 12px;
-  color: #666;
+  color: var(--theme-text-secondary);
   margin-top: 4px;
 }
 
@@ -338,7 +338,7 @@ const getAverageChunksPerDocument = () => {
 
 .status-label {
   font-size: 12px;
-  color: #666;
+  color: var(--theme-text-secondary);
 }
 
 .recent-queries {
@@ -347,9 +347,9 @@ const getAverageChunksPerDocument = () => {
 
 .empty-queries {
   text-align: center;
-  color: #999;
+  color: var(--theme-empty-text);
   padding: 40px 20px;
-  background: #f7f8fa;
+  background: color-mix(in srgb, var(--theme-surface-soft) 72%, white 28%);
   border-radius: 8px;
 }
 
@@ -360,10 +360,10 @@ const getAverageChunksPerDocument = () => {
 
 .query-item {
   padding: 12px 16px;
-  border: 1px solid #e5e6eb;
+  border: 1px solid var(--theme-border);
   border-radius: 6px;
   margin-bottom: 8px;
-  background: white;
+  background: var(--theme-surface);
 }
 
 .query-item:last-child {
@@ -372,7 +372,7 @@ const getAverageChunksPerDocument = () => {
 
 .query-text {
   font-size: 14px;
-  color: #333;
+  color: var(--theme-text);
   margin-bottom: 4px;
   line-height: 1.4;
 }
@@ -381,7 +381,7 @@ const getAverageChunksPerDocument = () => {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
-  color: #666;
+  color: var(--theme-text-secondary);
 }
 
 .performance-metrics h3 {
@@ -396,14 +396,14 @@ const getAverageChunksPerDocument = () => {
 
 .metric-item {
   padding: 16px;
-  background: #f7f8fa;
+  background: color-mix(in srgb, var(--theme-surface-soft) 72%, white 28%);
   border-radius: 8px;
   text-align: center;
 }
 
 .metric-label {
   font-size: 12px;
-  color: #666;
+  color: var(--theme-text-secondary);
   margin-bottom: 8px;
 }
 

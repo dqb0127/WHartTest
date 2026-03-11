@@ -45,6 +45,9 @@
         <a-descriptions-item label="优先级">
           <a-tag :color="getLevelColor(testCaseDetail.level)">{{ testCaseDetail.level }}</a-tag>
         </a-descriptions-item>
+        <a-descriptions-item label="测试类型">
+          <a-tag>{{ getTestTypeLabel(testCaseDetail.test_type) }}</a-tag>
+        </a-descriptions-item>
         <a-descriptions-item label="审核状态">
           <a-select
             :model-value="testCaseDetail.review_status"
@@ -342,7 +345,7 @@ import {
   type ReviewStatus,
 } from '@/services/testcaseService';
 import { type TestCaseModule } from '@/services/testcaseModuleService';
-import { formatDate, getLevelColor, REVIEW_STATUS_OPTIONS } from '@/utils/formatters';
+import { formatDate, getLevelColor, getTestTypeLabel, REVIEW_STATUS_OPTIONS } from '@/utils/formatters';
 
 const props = defineProps<{
   testCaseId: number | null;
@@ -1249,12 +1252,12 @@ const handleBatchDeleteScreenshots = () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: #f5f5f5;
+  background: color-mix(in srgb, var(--theme-surface-soft) 72%, white 28%);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #999;
+  color: var(--theme-text-tertiary);
   font-size: 12px;
   text-align: center;
   padding: 10px;

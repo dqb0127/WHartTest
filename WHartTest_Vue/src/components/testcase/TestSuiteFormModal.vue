@@ -37,91 +37,54 @@
         />
         <div class="field-hint">
           <icon-info-circle style="margin-right: 4px;" />
-          设置同时执行的测试用例/脚本数量。1表示串行执行，2-10表示并发执行。
+          设置同时执行的测试用例数量。1表示串行执行，2-10表示并发执行。
         </div>
       </a-form-item>
 
-      <!-- 标签页切换用例和脚本选择 -->
+      <!-- 选择测试用例 -->
       <a-form-item required>
         <template #label>
           <div class="label-with-hint">
-            <span>选择测试内容</span>
-            <a-tag v-if="selectedTestCaseIds.length === 0 && selectedScriptIds.length === 0" color="orangered" size="small">
+            <span>选择测试用例</span>
+            <a-tag v-if="selectedTestCaseIds.length === 0" color="orangered" size="small">
               请至少选择一个
             </a-tag>
             <a-tag v-else color="green" size="small">
-              已选 {{ selectedTestCaseIds.length }} 用例 + {{ selectedScriptIds.length }} 脚本
+              已选 {{ selectedTestCaseIds.length }} 用例
             </a-tag>
           </div>
         </template>
 
-        <a-tabs default-active-key="testcase">
-          <a-tab-pane key="testcase" title="功能用例">
-            <div class="content-selection">
-              <a-alert v-if="selectedTestCaseIds.length > 0" type="info" style="margin-bottom: 12px;">
-                已选择 <strong>{{ selectedTestCaseIds.length }}</strong> 个功能用例
-              </a-alert>
-              <a-button
-                type="outline"
-                @click="showTestCaseSelector = true"
-                style="width: 100%; margin-bottom: 12px;"
-              >
-                <template #icon><icon-plus /></template>
-                {{ selectedTestCaseIds.length > 0 ? '重新选择功能用例' : '选择功能用例' }}
-              </a-button>
+        <div class="content-selection">
+          <a-alert v-if="selectedTestCaseIds.length > 0" type="info" style="margin-bottom: 12px;">
+            已选择 <strong>{{ selectedTestCaseIds.length }}</strong> 个功能用例
+          </a-alert>
+          <a-button
+            type="outline"
+            @click="showTestCaseSelector = true"
+            style="width: 100%; margin-bottom: 12px;"
+          >
+            <template #icon><icon-plus /></template>
+            {{ selectedTestCaseIds.length > 0 ? '重新选择功能用例' : '选择功能用例' }}
+          </a-button>
 
-              <div v-if="selectedTestCases.length > 0" class="selected-items">
-                <div class="item-list-header">
-                  <span>已选择的功能用例:</span>
-                  <a-button type="text" size="small" status="danger" @click="handleClearTestCases">清空</a-button>
-                </div>
-                <a-list :max-height="200" :scrollbar="true">
-                  <a-list-item v-for="tc in selectedTestCases" :key="tc.id" class="item-row">
-                    <a-list-item-meta :title="tc.name" :description="`优先级: ${tc.level}`" />
-                    <template #actions>
-                      <a-button type="text" size="small" status="danger" @click="handleRemoveTestCase(tc.id)">
-                        <icon-close />
-                      </a-button>
-                    </template>
-                  </a-list-item>
-                </a-list>
-              </div>
+          <div v-if="selectedTestCases.length > 0" class="selected-items">
+            <div class="item-list-header">
+              <span>已选择的功能用例:</span>
+              <a-button type="text" size="small" status="danger" @click="handleClearTestCases">清空</a-button>
             </div>
-          </a-tab-pane>
-
-          <a-tab-pane key="script" title="自动化脚本">
-            <div class="content-selection">
-              <a-alert v-if="selectedScriptIds.length > 0" type="info" style="margin-bottom: 12px;">
-                已选择 <strong>{{ selectedScriptIds.length }}</strong> 个自动化脚本
-              </a-alert>
-              <a-button
-                type="outline"
-                @click="showScriptSelector = true"
-                style="width: 100%; margin-bottom: 12px;"
-              >
-                <template #icon><icon-plus /></template>
-                {{ selectedScriptIds.length > 0 ? '重新选择自动化脚本' : '选择自动化脚本' }}
-              </a-button>
-
-              <div v-if="selectedScripts.length > 0" class="selected-items">
-                <div class="item-list-header">
-                  <span>已选择的自动化脚本:</span>
-                  <a-button type="text" size="small" status="danger" @click="handleClearScripts">清空</a-button>
-                </div>
-                <a-list :max-height="200" :scrollbar="true">
-                  <a-list-item v-for="sc in selectedScripts" :key="sc.id" class="item-row">
-                    <a-list-item-meta :title="sc.name" :description="`关联用例: ${sc.test_case_name || '-'}`" />
-                    <template #actions>
-                      <a-button type="text" size="small" status="danger" @click="handleRemoveScript(sc.id)">
-                        <icon-close />
-                      </a-button>
-                    </template>
-                  </a-list-item>
-                </a-list>
-              </div>
-            </div>
-          </a-tab-pane>
-        </a-tabs>
+            <a-list :max-height="200" :scrollbar="true">
+              <a-list-item v-for="tc in selectedTestCases" :key="tc.id" class="item-row">
+                <a-list-item-meta :title="tc.name" :description="`优先级: ${tc.level}`" />
+                <template #actions>
+                  <a-button type="text" size="small" status="danger" @click="handleRemoveTestCase(tc.id)">
+                    <icon-close />
+                  </a-button>
+                </template>
+              </a-list-item>
+            </a-list>
+          </div>
+        </div>
       </a-form-item>
     </a-form>
 
@@ -140,22 +103,6 @@
         @cancel="showTestCaseSelector = false"
       />
     </a-modal>
-
-    <!-- 脚本选择器模态框 -->
-    <a-modal
-      v-model:visible="showScriptSelector"
-      title="选择自动化脚本"
-      :width="1000"
-      :footer="false"
-      :mask-closable="false"
-    >
-      <ScriptSelectorTable
-        :current-project-id="currentProjectId"
-        :initial-selected-ids="selectedScriptIds"
-        @confirm="handleScriptSelect"
-        @cancel="showScriptSelector = false"
-      />
-    </a-modal>
   </a-modal>
 </template>
 
@@ -168,25 +115,20 @@ import {
   updateTestSuite,
   getTestSuiteDetail,
   type CreateTestSuiteRequest,
-  type AutomationScriptBrief,
-	} from '@/services/testSuiteService';
-	import { getTestCaseDetail, type TestCase } from '@/services/testcaseService';
-	import { getAutomationScript } from '@/services/automationScriptService';
-	import TestCaseSelectorTable from './TestCaseSelectorTable.vue';
-	import ScriptSelectorTable from './ScriptSelectorTable.vue';
+} from '@/services/testSuiteService';
+import { getTestCaseDetail, type TestCase } from '@/services/testcaseService';
+import TestCaseSelectorTable from './TestCaseSelectorTable.vue';
 
 interface Props {
   visible: boolean;
   currentProjectId: number | null;
   suiteId?: number | null;
   initialTestCaseIds?: number[];
-  initialScriptIds?: number[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
   suiteId: null,
   initialTestCaseIds: () => [],
-  initialScriptIds: () => [],
 });
 
 const emit = defineEmits<{
@@ -203,18 +145,14 @@ const isEditing = computed(() => !!props.suiteId);
 
 const formRef = ref();
 const showTestCaseSelector = ref(false);
-const showScriptSelector = ref(false);
 const selectedTestCaseIds = ref<number[]>([]);
 const selectedTestCases = ref<TestCase[]>([]);
-const selectedScriptIds = ref<number[]>([]);
-const selectedScripts = ref<AutomationScriptBrief[]>([]);
 const loading = ref(false);
 
 const formData = ref<CreateTestSuiteRequest>({
   name: '',
   description: '',
   testcase_ids: [],
-  script_ids: [],
   max_concurrent_tasks: 1,
 });
 
@@ -246,37 +184,11 @@ const loadSelectedTestCases = async () => {
   }
 };
 
-// 加载已选择的脚本详情
-	const loadSelectedScripts = async () => {
-	  if (!props.currentProjectId || selectedScriptIds.value.length === 0) {
-	    selectedScripts.value = [];
-	    return;
-	  }
-	  try {
-	    const promises = selectedScriptIds.value.map((id) =>
-	      getAutomationScript(props.currentProjectId!, id)
-	    );
-	    const responses = await Promise.all(promises);
-	    selectedScripts.value = responses
-	      .filter((r) => r.data?.success && r.data?.data)
-	      .map((r) => r.data.data);
-  } catch (error) {
-    console.error('加载脚本详情失败:', error);
-  }
-};
-
 // 处理测试用例选择
 const handleTestCaseSelect = (testcaseIds: number[]) => {
   selectedTestCaseIds.value = testcaseIds;
   loadSelectedTestCases();
   showTestCaseSelector.value = false;
-};
-
-// 处理脚本选择
-const handleScriptSelect = (scriptIds: number[]) => {
-  selectedScriptIds.value = scriptIds;
-  loadSelectedScripts();
-  showScriptSelector.value = false;
 };
 
 // 移除单个测试用例
@@ -285,22 +197,10 @@ const handleRemoveTestCase = (id: number) => {
   selectedTestCases.value = selectedTestCases.value.filter((tc) => tc.id !== id);
 };
 
-// 移除单个脚本
-const handleRemoveScript = (id: number) => {
-  selectedScriptIds.value = selectedScriptIds.value.filter((scId) => scId !== id);
-  selectedScripts.value = selectedScripts.value.filter((sc) => sc.id !== id);
-};
-
 // 清空用例选择
 const handleClearTestCases = () => {
   selectedTestCaseIds.value = [];
   selectedTestCases.value = [];
-};
-
-// 清空脚本选择
-const handleClearScripts = () => {
-  selectedScriptIds.value = [];
-  selectedScripts.value = [];
 };
 
 // 提交表单
@@ -310,9 +210,9 @@ const handleSubmit = async () => {
     return false;
   }
 
-  // 自定义验证：至少选择一个用例或脚本
-  if (selectedTestCaseIds.value.length === 0 && selectedScriptIds.value.length === 0) {
-    Message.error('请至少选择一个功能用例或自动化脚本');
+  // 自定义验证：至少选择一个用例
+  if (selectedTestCaseIds.value.length === 0) {
+    Message.error('请至少选择一个功能用例');
     return false;
   }
 
@@ -321,7 +221,6 @@ const handleSubmit = async () => {
 
     loading.value = true;
     formData.value.testcase_ids = selectedTestCaseIds.value;
-    formData.value.script_ids = selectedScriptIds.value;
 
     const response = isEditing.value
       ? await updateTestSuite(props.currentProjectId, props.suiteId!, formData.value)
@@ -349,8 +248,6 @@ const handleCancel = () => {
   formRef.value?.resetFields();
   selectedTestCaseIds.value = [];
   selectedTestCases.value = [];
-  selectedScriptIds.value = [];
-  selectedScripts.value = [];
   emit('update:visible', false);
 };
 
@@ -376,12 +273,6 @@ const loadSuiteDetail = async () => {
         selectedTestCaseIds.value = suite.testcases_detail.map((tc) => tc.id);
         selectedTestCases.value = [...suite.testcases_detail];
       }
-
-      // 获取脚本ID列表
-      if (suite.scripts_detail && suite.scripts_detail.length > 0) {
-        selectedScriptIds.value = suite.scripts_detail.map((sc) => sc.id);
-        selectedScripts.value = [...suite.scripts_detail];
-      }
     } else {
       Message.error(response.error || '加载套件详情失败');
     }
@@ -402,9 +293,7 @@ watch(
         await loadSuiteDetail();
       } else {
         selectedTestCaseIds.value = [...props.initialTestCaseIds];
-        selectedScriptIds.value = [...props.initialScriptIds];
         loadSelectedTestCases();
-        loadSelectedScripts();
       }
     }
   }
@@ -412,18 +301,6 @@ watch(
 </script>
 
 <style scoped>
-:deep(.arco-tabs) {
-  width: 100%;
-}
-
-:deep(.arco-tabs-content) {
-  width: 100%;
-}
-
-:deep(.arco-tabs-pane) {
-  width: 100%;
-}
-
 .content-selection {
   width: 100%;
 }

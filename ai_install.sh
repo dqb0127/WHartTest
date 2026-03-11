@@ -28,7 +28,7 @@ APPROVE_ALL=0
 LOG_DIR="${AI_INSTALL_LOG_DIR:-data/logs}"
 LOG_FILE=""
 DEBUG_LOG="${AI_INSTALL_DEBUG:-0}"
-MAX_TOKENS="${AI_INSTALL_MAX_TOKENS:-8192}"
+MAX_TOKENS="${AI_INSTALL_MAX_TOKENS:-30000}"
 TEMPERATURE="${AI_INSTALL_TEMPERATURE:-0.7}"
 INCLUDE_TEMPERATURE="${AI_INSTALL_INCLUDE_TEMPERATURE:-1}"
 TIMEOUT="${AI_INSTALL_TIMEOUT:-120}"
@@ -134,7 +134,8 @@ $sys_info
 
 **命令输出格式（必须严格遵守）**：
 - 命令必须单独占一行，放在回复的**最后**
-- 格式：【执行命令：命令】
+- 格式：{\"command\":\"命令\"}
+- JSON 必须是单行对象，且只包含一个 command 字段
 - 命令必须是纯 shell 命令，不能包含中文
 - 每次只能输出一个命令
 - 先写说明，最后一行写命令
@@ -142,15 +143,15 @@ $sys_info
 正确格式示例：
 \`\`\`
 让我检查一下 Docker 版本。
-【执行命令：docker --version】
+{\"command\":\"docker --version\"}
 \`\`\`
 
 错误格式（禁止）：
 \`\`\`
-【执行命令：docker --version】让我检查版本
+{\"command\":\"docker --version\"}让我检查版本
 \`\`\`
 \`\`\`
-让我【执行命令：docker --version】检查一下
+让我{\"command\":\"docker --version\"}检查一下
 \`\`\`
 
 安全规则：
@@ -162,17 +163,17 @@ $sys_info
 - 优先检测环境，推荐合适的安装方式
 - 有 Docker 时推荐 Docker 安装
 - 无 Docker 时指导手动安装
-- Docker 拉取慢时推荐加速镜像：docker.1ms.run、docker.1panel.live、dockerproxy.cn
+- Docker 拉取慢时优先配置 Docker daemon 镜像或私有仓库，避免依赖不稳定的公共代理
 
 示例对话 1：
 用户：帮我检查环境
 你：好的，让我检查一下 Docker 是否已安装。
-【执行命令：docker --version】
+{\"command\":\"docker --version\"}
 
 示例对话 2：
 用户：docs 目录里有什么
 你：让我查看 docs 目录的内容。
-【执行命令：ls -la docs】
+{\"command\":\"ls -la docs\"}
 
 示例对话 3：
 用户：帮我安装 Docker
@@ -180,7 +181,7 @@ $sys_info
 
 用户：可以
 你：好的，正在为您安装 Docker。
-【执行命令：curl -fsSL https://get.docker.com | sh】
+{\"command\":\"curl -fsSL https://get.docker.com | sh\"}
 
 现在，请开始与用户对话，了解他们的需求。"
 }
@@ -502,7 +503,7 @@ test_api_connection() {
     local payload_file="$TMP_DIR/ai_install_test_payload_$$.json"
     printf '%s' "$payload" > "$payload_file"
 
-    local response=$(curl -sS --http1.1 -w "\n%{http_code}" --connect-timeout "$CONNECT_TIMEOUT" --max-time "$TIMEOUT" -X POST "$API_URL/chat/completions" \
+    local response=$(curl -sS -w "\n%{http_code}" --connect-timeout "$CONNECT_TIMEOUT" --max-time "$TIMEOUT" -X POST "$API_URL/chat/completions" \
         -H "Authorization: Bearer $API_KEY" \
         -H "Content-Type: application/json" \
         -H "Expect:" \
@@ -783,7 +784,7 @@ call_ai() {
         local temp_response="$TMP_DIR/ai_install_stream_$$.tmp"
 
         # 使用 curl 流式读取，--no-buffer 确保实时输出
-        curl -sS --no-buffer --http1.1 --connect-timeout "$CONNECT_TIMEOUT" --max-time "$TIMEOUT" \
+        curl -sS --no-buffer --connect-timeout "$CONNECT_TIMEOUT" --max-time "$TIMEOUT" \
             -w "\n__HTTP_CODE__:%{http_code}" \
             -X POST "$API_URL/chat/completions" \
             -H "Authorization: Bearer $API_KEY" \
@@ -839,7 +840,7 @@ call_ai() {
 
     # 非流式模式（原逻辑）
     else
-        local response=$(curl -sS --http1.1 -w "\n%{http_code}" --connect-timeout "$CONNECT_TIMEOUT" --max-time "$TIMEOUT" -X POST "$API_URL/chat/completions" \
+        local response=$(curl -sS -w "\n%{http_code}" --connect-timeout "$CONNECT_TIMEOUT" --max-time "$TIMEOUT" -X POST "$API_URL/chat/completions" \
             -H "Authorization: Bearer $API_KEY" \
             -H "Content-Type: application/json" \
             -H "Expect:" \
@@ -870,7 +871,7 @@ call_ai() {
             fi
 
             local fallback_response
-            fallback_response=$(curl -sS --http1.1 -w "\n%{http_code}" --connect-timeout "$CONNECT_TIMEOUT" --max-time "$TIMEOUT" -X POST "$API_URL/chat/completions" \
+            fallback_response=$(curl -sS -w "\n%{http_code}" --connect-timeout "$CONNECT_TIMEOUT" --max-time "$TIMEOUT" -X POST "$API_URL/chat/completions" \
                 -H "Authorization: Bearer $API_KEY" \
                 -H "Content-Type: application/json" \
                 -H "Expect:" \
@@ -992,6 +993,174 @@ execute_command() {
     printf '%s' "$feedback"
 }
 
+# 清理候选命令（不做猜测性修复）
+sanitize_command_candidate() {
+    local cmd="$1"
+
+    cmd=$(printf '%s' "$cmd" | tr -d '\r')
+    cmd=$(printf '%s' "$cmd" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    cmd="${cmd//：/:}"
+
+    # 去掉常见包裹符号
+    cmd=$(printf '%s' "$cmd" | sed "s/^[\`'\"[:space:]]*//;s/[\`'\"[:space:]]*$//")
+    cmd=$(printf '%s' "$cmd" | sed 's/^[\$>#][[:space:]]*//')
+    cmd="${cmd%】}"
+    cmd="${cmd%]}"
+
+    # 支持简单 JSON 包裹格式：{"command":"..."}
+    if printf '%s' "$cmd" | grep -Eq '^\{.*\}$'; then
+        local json_cmd=""
+        if command -v perl >/dev/null 2>&1; then
+            json_cmd=$(printf '%s' "$cmd" | perl -ne '
+                if (/"(?:command|cmd|execute|执行命令|命令)"\s*:\s*"((?:[^"\\]|\\.)*)"/i) {
+                    my $v = $1;
+                    $v =~ s/\\\\/__BS__/g;
+                    $v =~ s/\\"/"/g;
+                    $v =~ s/\\n/ /g;
+                    $v =~ s/\\t/ /g;
+                    $v =~ s/\\r//g;
+                    $v =~ s/\\\//\//g;
+                    $v =~ s/__BS__/\\/g;
+                    print $v;
+                }
+            ' 2>/dev/null || true)
+        else
+            json_cmd=$(printf '%s' "$cmd" | sed -n $SED_EXTENDED_FLAG 's/^[[:space:]]*\{.*"(command|cmd|execute|执行命令|命令)"[[:space:]]*:[[:space:]]*"([^"]*)".*\}[[:space:]]*$/\2/Ip' | head -n1)
+        fi
+        [ -n "$json_cmd" ] && cmd="$json_cmd"
+    fi
+
+    # 去掉前缀标签
+    cmd=$(printf '%s' "$cmd" | sed $SED_EXTENDED_FLAG 's/^(执行命令|命令|command|cmd|execute):[[:space:]]*//I')
+    cmd=$(printf '%s' "$cmd" | sed 's/[。；;，,[:space:]]*$//')
+
+    # 处理“一整句里带命令标签”的情况
+    if echo "$cmd" | grep -Eiq '(执行命令|命令|command|cmd|execute):'; then
+        local tagged=""
+        tagged=$(printf '%s' "$cmd" | sed -n $SED_EXTENDED_FLAG 's/.*(执行命令|命令|command|cmd|execute):[[:space:]]*//Ip' | head -n1)
+        if [ -n "$tagged" ]; then
+            cmd="$tagged"
+            cmd=$(printf '%s' "$cmd" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            cmd=$(printf '%s' "$cmd" | sed 's/[。；;，,[:space:]]*$//')
+        fi
+    fi
+
+    printf '%s' "$cmd"
+}
+
+# 判断文本是否像一条 shell 命令（避免误把自然语言当命令）
+is_likely_shell_command() {
+    local cmd="$1"
+    cmd=$(printf '%s' "$cmd" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [ -z "$cmd" ] && return 1
+
+    # 仅处理单行命令
+    case "$cmd" in
+        *$'\n'*)
+            return 1
+            ;;
+    esac
+
+    local probe="$cmd"
+    # 跳过前置环境变量（例如 FOO=1 BAR=2 cmd）
+    while printf '%s' "$probe" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]+[[:space:]]+'; do
+        probe=$(printf '%s' "$probe" | sed 's/^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]*//')
+    done
+
+    local first=""
+    first=$(printf '%s' "$probe" | sed 's/[[:space:]].*$//;s/[;&|].*$//')
+    [ -z "$first" ] && return 1
+
+    case "$first" in
+        -*)
+            return 1
+            ;;
+        "【"*|"["*)
+            return 1
+            ;;
+    esac
+
+    # 绝对/相对路径形式的可执行文件
+    if printf '%s' "$first" | grep -Eq '^(\./|/)'; then
+        return 0
+    fi
+
+    # 允许少量 shell 控制语句
+    case "$first" in
+        if|for|while|case|do|then|fi|{|\(|:)
+            return 0
+            ;;
+    esac
+
+    # 普通命令必须在当前 shell 环境可解析（builtin/alias/function/PATH）
+    if command -v "$first" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    return 1
+}
+
+# 从 AI 回复里提取待执行命令（兼容多种格式）
+extract_commands_from_response() {
+    local text="$1"
+    local normalized_text="$text"
+    normalized_text="${normalized_text//：/:}"
+    local candidates=""
+
+    if command -v perl >/dev/null 2>&1; then
+        candidates=$(printf '%s' "$normalized_text" | perl -0777 -ne '
+            my $t = $_;
+            my @out = ();
+
+            while ($t =~ /(?:^|\n)\s*(\{[^\n{}]*"(?:command|cmd|execute|执行命令|命令)"\s*:\s*"(?:(?:[^"\\]|\\.)*)"[^\n{}]*\})\s*(?=\n|$)/sig) { push @out, $1; }
+            while ($t =~ /【\s*执行命令\s*:\s*(.*?)\s*】/sg) { push @out, $1; }
+            while ($t =~ /\[\s*执行命令\s*:\s*(.*?)\s*\]/sg) { push @out, $1; }
+            while ($t =~ /(?:^|\n)\s*(?:执行命令|命令|command|cmd|execute)\s*:\s*([^\n]+)/sig) { push @out, $1; }
+
+            while ($t =~ /```(?:bash|sh|shell)?[ \t]*\n(.*?)```/sig) {
+                my $blk = $1;
+                $blk =~ s/\r//g;
+                for my $ln (split /\n/, $blk) {
+                    $ln =~ s/^\s+|\s+$//g;
+                    next if $ln eq q{} || $ln =~ /^#/;
+                    $ln =~ s/^\$\s*//;
+                    push @out, $ln;
+                    last;
+                }
+            }
+
+            print "$_\n" for @out;
+        ' 2>/dev/null || true)
+    else
+        candidates=$(printf '%s\n' "$normalized_text" | sed -n \
+            -e 's/^[[:space:]]*\({[^}]*"[Cc]ommand"[[:space:]]*:[[:space:]]*"[^"]*"[^}]*}\)[[:space:]]*$/\1/p' \
+            -e 's/^[[:space:]]*\({[^}]*"[Cc][Mm][Dd]"[[:space:]]*:[[:space:]]*"[^"]*"[^}]*}\)[[:space:]]*$/\1/p' \
+            -e 's/.*【执行命令:[[:space:]]*\([^】]*\)】.*/\1/p' \
+            -e 's/.*\[执行命令:[[:space:]]*\([^]]*\)\].*/\1/p' \
+            -e 's/^[[:space:]]*[Ee]xecute[[:space:]]*:[[:space:]]*\(.*\)$/\1/p' \
+            -e 's/^[[:space:]]*[Cc][Mm][Dd][[:space:]]*:[[:space:]]*\(.*\)$/\1/p')
+    fi
+
+    local result=""
+    local seen=$'\n'
+    local raw=""
+    while IFS= read -r raw; do
+        local cmd=""
+        cmd=$(sanitize_command_candidate "$raw")
+        [ -z "$cmd" ] && continue
+        if ! is_likely_shell_command "$cmd"; then
+            continue
+        fi
+        case "$seen" in
+            *$'\n'"$cmd"$'\n'*) continue ;;
+        esac
+        seen="${seen}${cmd}"$'\n'
+        result="${result}${cmd}"$'\n'
+    done <<< "$candidates"
+
+    printf '%s' "$result"
+}
+
 # 处理 AI 响应
 process_ai_response() {
     local response="$1"
@@ -1005,27 +1174,9 @@ process_ai_response() {
         clean_response=$(echo "$clean_response" | sed '/<think>/,/<\/think>/d')
     fi
 
-    # 提取【执行命令：xxx】格式的命令（支持多条；兼容不带结尾 】 的单行输出）
+    # 提取命令（仅接受明确格式；不做残缺猜测）
     local commands=""
-    if command -v perl &> /dev/null; then
-        commands=$(printf '%s' "$clean_response" | perl -0777 -ne '
-            while(/【执行命令：(.*?)】/sg){
-                my $c=$1; $c =~ s/^\s+|\s+$//g;
-                print "$c\n" if length($c);
-            }
-            if($. == 1 && !/【执行命令：/s){ exit 0 }
-            if(!/】/s){
-                while(/【执行命令：([^\n】]*)/g){
-                    my $c=$1; $c =~ s/^\s+|\s+$//g;
-                    print "$c\n" if length($c);
-                }
-            }
-        ')
-    else
-        commands=$(printf '%s\n' "$clean_response" | sed -n \
-            -e 's/.*【执行命令：\([^】]*\)】.*/\1/p' \
-            -e 's/.*【执行命令：\([^】]*\)$/\1/p')
-    fi
+    commands=$(extract_commands_from_response "$clean_response")
     
     # 2. 提取纯文本响应（保留命令标记并高亮）
     # 方案：将【执行命令：xxx】替换为 [准备执行: xxx] 并高亮

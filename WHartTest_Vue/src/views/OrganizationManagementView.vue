@@ -126,7 +126,7 @@ import PermissionTreeSelector from '@/components/permission/PermissionTreeSelect
 const loading = ref(false);
 // 搜索关键词
 const searchKeyword = ref('');
-// Permission tree selector ref
+// 权限树选择器引用
 const permissionTreeSelectorRef = ref();
 
 // 表格列定义

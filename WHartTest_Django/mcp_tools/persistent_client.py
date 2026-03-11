@@ -10,7 +10,22 @@ from langchain_core.tools import BaseTool
 import logging
 import atexit
 
+try:
+    import httpx
+    _CONNECTION_ERRORS = (ConnectionError, OSError, httpx.HTTPStatusError, httpx.ConnectError)
+except ImportError:
+    _CONNECTION_ERRORS = (ConnectionError, OSError)
+
 logger = logging.getLogger(__name__)
+
+
+def _is_connection_error(exc: BaseException) -> bool:
+    """判断是否为连接类错误（服务未启动/不可达）"""
+    if isinstance(exc, _CONNECTION_ERRORS):
+        return True
+    if isinstance(exc, ExceptionGroup):
+        return all(_is_connection_error(e) for e in exc.exceptions)
+    return False
 
 
 class _PersistentSessionEntry:
@@ -43,12 +58,18 @@ class _PersistentSessionEntry:
             self._error = exc
             if not self._ready_event.is_set():
                 self._ready_event.set()
-            logger.error(
-                "Persistent session task for %s failed: %s",
-                self.server_name,
-                exc,
-                exc_info=True,
-            )
+            if _is_connection_error(exc):
+                logger.warning(
+                    "MCP 服务 [%s] 不可达，跳过（服务可能未启动）",
+                    self.server_name,
+                )
+            else:
+                logger.error(
+                    "MCP 会话 [%s] 异常: %s",
+                    self.server_name,
+                    exc,
+                    exc_info=True,
+                )
         finally:
             self.session = None
             self._closed_event.set()
@@ -149,10 +170,18 @@ class PersistentMCPClient:
         try:
             session = await session_entry.get_session()
         except Exception as exc:
-            logger.error(
-                f"Persistent session for {server_name} unavailable, attempting one-time recovery: {exc}",
-                exc_info=True,
-            )
+            if _is_connection_error(exc):
+                logger.warning(
+                    "MCP 服务 [%s] 连接失败，尝试重连...",
+                    server_name,
+                )
+            else:
+                logger.error(
+                    "MCP 会话 [%s] 异常，尝试重建: %s",
+                    server_name,
+                    exc,
+                    exc_info=True,
+                )
             # 移除旧的并重建一次
             async with self._sessions_lock:
                 if self.sessions.get(server_name) is session_entry:
@@ -196,7 +225,17 @@ class PersistentMCPClient:
                 tools = await self.get_persistent_tools(server_name)
                 all_tools.extend(tools)
             except Exception as exc:
-                logger.error(f"Failed to get tools from server {server_name}: {exc}")
+                if _is_connection_error(exc):
+                    logger.warning(
+                        "MCP 服务 [%s] 不可用，已跳过（如需使用请启动该服务）",
+                        server_name,
+                    )
+                else:
+                    logger.error(
+                        "加载 MCP 服务 [%s] 工具失败: %s",
+                        server_name,
+                        exc,
+                    )
                 continue
 
         logger.info(f"Total persistent tools loaded: {len(all_tools)}")

@@ -264,12 +264,12 @@ import {
 } from '@/services/testExecutionService';
 import { formatDateTime, formatDuration } from '@/utils/formatters';
 
-// Types
+// 类型定义
 type ReportData = NonNullable<TestReportResponse['data']>;
 type ReportResult = ReportData['results'][0];
 type ScriptResult = NonNullable<ReportData['script_results']>[0];
 
-// Props
+// 组件属性
 interface Props {
   visible: boolean;
   currentProjectId: number | null;
@@ -277,12 +277,12 @@ interface Props {
 }
 const props = defineProps<Props>();
 
-// Emits
+// 组件事件
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
 }>();
 
-// Data
+// 状态数据
 const loading = ref(false);
 const error = ref('');
 const report = ref<ReportData | null>(null);
@@ -297,7 +297,7 @@ const modalVisible = computed({
   set: (value) => emit('update:visible', value),
 });
 
-// Columns
+// 表格列配置
 const resultColumns = [
   { title: '用例名称', dataIndex: 'testcase_name' },
   { title: '状态', slotName: 'status', width: 100 },
@@ -312,7 +312,7 @@ const scriptResultColumns = [
   { title: '操作', slotName: 'actions', width: 100 },
 ];
 
-// Methods
+// 业务方法
 const fetchReport = async () => {
   if (!props.currentProjectId || !props.executionId) return;
 
@@ -548,7 +548,7 @@ watch(
   }
 );
 
-// Watchers
+// 侦听器
 watch(
   () => props.visible,
   (newVal) => {

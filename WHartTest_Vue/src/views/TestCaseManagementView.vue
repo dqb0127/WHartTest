@@ -102,6 +102,49 @@ import {
 import type { ChatRequest } from '@/features/langgraph/types/chat';
 import { updateTestCaseReviewStatus } from '@/services/testcaseService';
 
+// 测试类型提示词映射
+const TEST_TYPE_PROMPTS: Record<string, string> = {
+  smoke: `【测试类型：冒烟测试】
+- 目标：生成最小化用例，仅验证核心主流程可用性
+- 要求：每个功能点最多1-2条用例，覆盖最基本的正向场景
+- 原则：快速验证系统基本功能是否正常，不深入边界和异常场景`,
+  functional: `【测试类型：功能测试】
+- 目标：使用等价类划分技术，全面验证功能正确性
+- 要求：覆盖有效等价类和无效等价类，每类至少1条用例
+- 原则：确保正向场景完整，主要功能路径全覆盖`,
+  boundary: `【测试类型：边界测试】
+- 目标：使用边界值分析技术，测试临界条件
+- 要求：测试边界值、边界值±1、典型值，每个边界至少3条用例
+- 原则：重点关注数值范围、长度限制、日期边界等`,
+  exception: `【测试类型：异常测试】
+- 目标：使用错误推测法，验证系统容错能力
+- 要求：覆盖异常输入、网络异常、数据异常、并发冲突等场景
+- 原则：验证错误提示友好性和系统稳定性`,
+  permission: `【测试类型：权限测试】
+- 目标：验证角色权限控制的正确性
+- 要求：识别角色矩阵，验证有权限/无权限/越权场景
+- 原则：确保数据隔离和操作权限符合设计`,
+  security: `【测试类型：安全测试】
+- 目标：关注OWASP Top 10安全风险
+- 要求：验证XSS/SQL注入防护、敏感数据保护、认证授权安全
+- 原则：确保系统安全性符合行业标准`,
+  compatibility: `【测试类型：兼容性测试】
+- 目标：验证多设备、多浏览器、多环境的兼容性
+- 要求：从需求中提取目标设备/浏览器列表，为每个环境生成独立用例
+- 原则：确保用户在不同环境下的体验一致性`
+};
+
+// 根据测试类型列表生成提示词片段
+const getTestTypePrompt = (testTypes: string[]): string => {
+  if (!testTypes || testTypes.length === 0) {
+    return TEST_TYPE_PROMPTS['functional'];
+  }
+  const prompts = testTypes
+    .filter(type => type in TEST_TYPE_PROMPTS)
+    .map(type => TEST_TYPE_PROMPTS[type]);
+  return prompts.length > 0 ? prompts.join('\n\n') : TEST_TYPE_PROMPTS['functional'];
+};
+
 const router = useRouter();
 const projectStore = useProjectStore();
 const currentProjectId = computed(() => projectStore.currentProjectId || null);
@@ -230,7 +273,7 @@ const handleModuleUpdated = () => {
   // 同时刷新模块数据给表单用
   fetchAllModulesForForm();
   // 如果用例列表依赖模块信息（比如显示模块名），也可能需要刷新用例列表
-  // testCaseListRef.value?.refreshTestCases();
+  // 如需强制刷新用例列表，可在此调用列表刷新方法。
 };
 
 const showAddTestCaseForm = () => {
@@ -345,6 +388,7 @@ const handleGenerateCasesSubmit = async (formData: {
   selectedModule: { title: string, content: string },
   selectedTestCaseIds: number[],
   selectedTestCases: TestCase[],
+  testTypes: string[],
 }) => {
   if (!currentProjectId.value) {
     Message.error('没有有效的项目ID');
@@ -358,11 +402,16 @@ const handleGenerateCasesSubmit = async (formData: {
   let notificationContent = '';
   let notificationIdPrefix = '';
 
+  // 获取测试类型提示词
+  const testTypePrompt = getTestTypePrompt(formData.testTypes);
+
   switch (formData.generateMode) {
     case 'full':
       // 完整生成模式（原有逻辑）
       message = `
 请根据以下需求模块信息，为我生成测试用例。
+
+${testTypePrompt}
 
 ---
 [需求模块标题]
@@ -385,6 +434,8 @@ ${formData.selectedModule.content}
       // 标题生成模式
       message = `
 请根据以下需求模块信息，只保存测试用例的标题，禁止生成测试步骤。
+
+${testTypePrompt}
 
 ---
 [需求模块标题]
@@ -430,6 +481,8 @@ ${formData.selectedTestCases.map(tc => `- 用例ID: ${tc.id}, 名称: ${tc.name}
       // 知识生成模式（基于知识库+需求文档，禁止猜测）
       message = `
 请根据知识库和需求文档的知识，为以下用例生成测试步骤并保存对应用例中。
+
+${testTypePrompt}
 
 【重要约束】
 - 必须基于知识库和需求文档中的实际内容

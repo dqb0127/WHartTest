@@ -167,7 +167,7 @@ import {
 import { formatDate } from '@/utils/formatters';
 import TestExecutionReportModal from './TestExecutionReportModal.vue';
 
-// Props
+// 组件属性
 interface Props {
   visible: boolean;
   currentProjectId: number | null;
@@ -175,7 +175,7 @@ interface Props {
 
 const props = defineProps<Props>();
 
-// Emits
+// 组件事件
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void;
 }>();

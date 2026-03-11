@@ -1,7 +1,7 @@
 from django.test import TestCase
 from django.contrib.auth.models import User
 from projects.models import Project
-from testcases.models import TestSuite, TestCase as TestCaseModel, AutomationScript, TestExecution, TestCaseModule
+from testcases.models import TestSuite, TestCase as TestCaseModel, TestExecution, TestCaseModule
 from testcases.serializers import TestSuiteSerializer, TestExecutionCreateSerializer
 from rest_framework.exceptions import ValidationError
 
@@ -18,29 +18,14 @@ class TestSuiteExecutionTests(TestCase):
             creator=self.user
         )
         
-        self.script = AutomationScript.objects.create(
-            test_case=self.testcase,
-            name='Test Script 1',
-            script_content='print("Hello")',
-            creator=self.user,
-            source='ai_generated'
-        )
-        
         self.suite = TestSuite.objects.create(
             project=self.project,
             name='Test Suite 1',
             creator=self.user
         )
 
-    def test_suite_validation_with_only_script(self):
-        """测试仅包含脚本的套件验证"""
-        self.suite.automation_scripts.add(self.script)
-        
-        serializer = TestExecutionCreateSerializer(data={'suite_id': self.suite.id})
-        self.assertTrue(serializer.is_valid(), serializer.errors)
-        
-    def test_suite_validation_with_only_testcase(self):
-        """测试仅包含用例的套件验证"""
+    def test_suite_validation_with_testcase(self):
+        """测试包含用例的套件验证"""
         self.suite.testcases.add(self.testcase)
         
         serializer = TestExecutionCreateSerializer(data={'suite_id': self.suite.id})
@@ -51,7 +36,7 @@ class TestSuiteExecutionTests(TestCase):
         serializer = TestExecutionCreateSerializer(data={'suite_id': self.suite.id})
         self.assertFalse(serializer.is_valid())
         self.assertIn('suite_id', serializer.errors)
-        self.assertEqual(str(serializer.errors['suite_id'][0]), "测试套件中没有测试用例或自动化脚本")
+        self.assertEqual(str(serializer.errors['suite_id'][0]), "测试套件中没有测试用例")
 
     def test_suite_serializer_partial_update(self):
         """测试套件序列化器的部分更新"""
@@ -70,7 +55,6 @@ class TestSuiteExecutionTests(TestCase):
             'name': 'Empty Suite',
             'project': self.project.id,
             'testcases': [],
-            'automation_scripts': []
         }
         # 需要提供 context
         context = {'project_id': self.project.id, 'request': None}

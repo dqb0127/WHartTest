@@ -329,3 +329,84 @@ const handleCancel = () => {
   font-size: 12px;
 }
 </style>
+
+<style>
+:root[data-theme='black'] .optimization-modal {
+  color: var(--theme-page-text);
+}
+
+:root[data-theme='black'] .optimization-modal .basic-info,
+:root[data-theme='black'] .optimization-modal .notes-section {
+  background: var(--theme-shell-soft);
+  border: 1px solid var(--theme-border);
+}
+
+:root[data-theme='black'] .optimization-modal .info-label,
+:root[data-theme='black'] .optimization-modal .section-label,
+:root[data-theme='black'] .optimization-modal .suggestion-optional {
+  color: var(--theme-text-tertiary);
+}
+
+:root[data-theme='black'] .optimization-modal .info-value,
+:root[data-theme='black'] .optimization-modal .section-header,
+:root[data-theme='black'] .optimization-modal .suggestion-title,
+:root[data-theme='black'] .optimization-modal .col-action {
+  color: var(--theme-text);
+}
+
+:root[data-theme='black'] .optimization-modal .section-text {
+  color: var(--theme-page-text);
+}
+
+:root[data-theme='black'] .optimization-modal .precondition-section {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.14), rgba(180, 83, 9, 0.08));
+  border-left-color: rgba(251, 191, 36, 0.78);
+  color: #fde68a;
+}
+
+:root[data-theme='black'] .optimization-modal .steps-table {
+  border-color: var(--theme-border);
+  background: var(--theme-card-bg);
+}
+
+:root[data-theme='black'] .optimization-modal .table-header {
+  background: var(--theme-shell-soft);
+  color: var(--theme-text-secondary);
+  border-bottom-color: var(--theme-border);
+}
+
+:root[data-theme='black'] .optimization-modal .table-row {
+  background: transparent;
+  border-bottom-color: rgba(148, 163, 184, 0.12);
+}
+
+:root[data-theme='black'] .optimization-modal .table-row:hover {
+  background: rgba(var(--theme-accent-rgb), 0.08);
+}
+
+:root[data-theme='black'] .optimization-modal .col-step {
+  border-right-color: rgba(148, 163, 184, 0.12);
+  color: var(--theme-accent-hover);
+}
+
+:root[data-theme='black'] .optimization-modal .table-header .col-step,
+:root[data-theme='black'] .optimization-modal .table-header .col-action,
+:root[data-theme='black'] .optimization-modal .table-header .col-expected {
+  color: var(--theme-text-secondary);
+  border-right-color: var(--theme-border);
+}
+
+:root[data-theme='black'] .optimization-modal .col-action {
+  border-right-color: rgba(148, 163, 184, 0.12);
+}
+
+:root[data-theme='black'] .optimization-modal .col-expected {
+  color: #86efac;
+}
+
+:root[data-theme='black'] .optimization-modal .optimization-hint {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.18), rgba(29, 78, 216, 0.1));
+  border: 1px solid rgba(var(--theme-accent-rgb), 0.28);
+  color: #bfdbfe;
+}
+</style>

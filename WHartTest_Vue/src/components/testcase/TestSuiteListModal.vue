@@ -247,9 +247,8 @@ const handleViewDetail = (_suite: TestSuite) => {
 
 // 执行测试套件
 const handleExecute = (suite: TestSuite) => {
-  const totalCount = (suite.testcase_count || 0) + (suite.script_count || 0);
-  if (totalCount === 0) {
-    Message.warning('该测试套件没有用例或脚本，无法执行');
+  if ((suite.testcase_count || 0) === 0) {
+    Message.warning('该测试套件没有用例，无法执行');
     return;
   }
   selectedSuite.value = suite;

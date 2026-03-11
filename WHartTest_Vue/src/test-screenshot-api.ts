@@ -27,11 +27,7 @@ export async function testScreenshotAPI() {
     console.log('1. 测试截图上传接口...');
     
     // 注意：这里只是测试接口定义，实际调用需要有效的认证和服务器
-    // const uploadResponse: ScreenshotUploadResponse = await uploadTestCaseScreenshot(
-    //   projectId,
-    //   testCaseId,
-    //   mockFile
-    // );
+    // 示例调用可参考 uploadTestCaseScreenshot 的函数签名。
     
     console.log('截图上传接口定义正确');
 

@@ -1,4 +1,4 @@
-// src/store/projectStore.ts
+// 项目状态仓库
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { getProjectList, type Project } from '@/services/projectService';

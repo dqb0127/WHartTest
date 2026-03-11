@@ -218,7 +218,7 @@ export const useAuthStore = defineStore('auth', {
           // 如果需要自动登录，可以调用 login action 或者直接设置 state
           this.isLoading = false;
           // 可以考虑将注册成功信息（如用户名）暂时存起来，以便在注册成功页面显示
-          // this.user = { username: response.data.username, email: response.data.email, id: response.data.id };
+          // 如需注册后自动登录，可在此设置 user 状态。
           // 清理可能存在的旧的认证信息
           this.logout(); // 调用 logout 清理 localStorage 和 state
           return true;

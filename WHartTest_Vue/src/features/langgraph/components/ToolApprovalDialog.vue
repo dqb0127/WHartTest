@@ -241,7 +241,7 @@ const handleReject = async () => {
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--theme-surface) 84%, rgba(var(--theme-accent-rgb), 0.14)) 0%, color-mix(in srgb, var(--theme-shell-soft) 82%, rgba(var(--theme-accent-rgb), 0.2)) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -250,7 +250,7 @@ const handleReject = async () => {
 
 .warning-icon :deep(svg) {
   font-size: 28px;
-  color: #fa8c16;
+  color: var(--theme-accent);
 }
 
 .header-content {

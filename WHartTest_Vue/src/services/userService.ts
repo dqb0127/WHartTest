@@ -1,5 +1,5 @@
-// src/services/userService.ts
-// src/services/userService.ts
+// 用户管理服务
+// 用户管理服务
 import axios from 'axios';
 import { request } from '@/utils/request';
 import { useAuthStore } from '@/store/authStore';

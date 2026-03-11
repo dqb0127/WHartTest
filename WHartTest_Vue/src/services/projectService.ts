@@ -593,14 +593,6 @@ export interface ProjectStatistics {
       unavailable: number;
     };
   };
-  automation_scripts: {
-    total: number;
-    by_status: {
-      draft: number;
-      active: number;
-      deprecated: number;
-    };
-  };
   executions: {
     total_executions: number;
     by_status: {
@@ -623,7 +615,7 @@ export interface ProjectStatistics {
       passed: number;
       failed: number;
     }>;
-    summary_7d: {
+    summary_30d: {
       execution_count: number;
       passed: number;
       failed: number;
@@ -642,11 +634,14 @@ export interface ProjectStatistics {
     total: number;
     active: number;
   };
-  requirements: {
-    total: number;
-  };
-  knowledge: {
-    total: number;
+  ui_automation: {
+    total_cases: number;
+    total_executions: number;
+    by_status: {
+      success: number;
+      failed: number;
+      cancelled: number;
+    };
   };
 }
 

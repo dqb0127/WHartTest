@@ -1,4 +1,4 @@
-// src/services/authService.ts
+// 认证服务
 import axios from 'axios';
 import { request } from '@/utils/request';
 
@@ -93,10 +93,19 @@ export const login = async (username: string, password: string): Promise<AuthSer
       };
     } else {
       // API 返回了非 success 状态或数据格式不正确
+      const responseStatus = (response as any).status as number | undefined;
+      let errorMessage = response.error || '认证失败：响应数据格式不正确。';
+
+      if (responseStatus === 503) {
+        errorMessage = response.error || '认证服务正在启动，请稍后重试。';
+      } else if (errorMessage.includes('服务器无响应') || errorMessage.includes('Network Error')) {
+        errorMessage = '认证服务暂未就绪，请稍后重试。';
+      }
+
       return {
         success: false,
-        error: response.error || '认证失败：响应数据格式不正确。',
-        statusCode: 500,
+        error: errorMessage,
+        statusCode: responseStatus ?? 500,
       };
     }
   } catch (error) {
@@ -108,7 +117,9 @@ export const login = async (username: string, password: string): Promise<AuthSer
         // 后端返回了错误响应
         statusCode = error.response.status;
         const responseData = error.response.data;
-        if (responseData && typeof responseData.message === 'string') {
+        if (statusCode === 503) {
+          errorMessage = '认证服务正在启动，请稍后重试。';
+        } else if (responseData && typeof responseData.message === 'string') {
           errorMessage = responseData.message;
         } else if (responseData && typeof responseData.detail === 'string') { // Django REST framework 常见错误格式
           errorMessage = responseData.detail;
@@ -117,7 +128,7 @@ export const login = async (username: string, password: string): Promise<AuthSer
         }
       } else if (error.request) {
         // 请求已发出，但没有收到响应 (例如网络错误)
-        errorMessage = '网络连接超时或服务器无响应。';
+        errorMessage = '认证服务暂未就绪，请稍后重试。';
       }
     }
     // 对于其他类型的错误，保留通用消息

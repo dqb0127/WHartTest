@@ -553,6 +553,6 @@ onMounted(async () => {
 
 .stats-cell {
   font-size: 12px;
-  color: #666;
+  color: var(--theme-text-secondary);
 }
 </style>

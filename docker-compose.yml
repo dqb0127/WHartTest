@@ -1,5 +1,5 @@
 # 默认配置 - 使用预构建的Docker镜像
-# 使用方式: docker-compose up -d
+# 使用方式: ./run_compose.sh remote
 #
 # 镜像会从 GitHub Container Registry (ghcr.io) 自动拉取
 # 如果需要本地构建镜像（开发环境），请注释掉 image 行，取消注释 build 部分
@@ -11,7 +11,7 @@
 services:
   # PostgreSQL 数据库服务（生产环境默认启用）
   postgres:
-    image: docker.1ms.run/library/postgres:16-alpine
+    image: ${DOCKER_POSTGRES_IMAGE:-postgres:16-alpine}
     container_name: wharttest-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -32,12 +32,7 @@ services:
 
   # Redis 服务 - Celery的broker和backend
   redis:
-    # 当前使用 DaoCloud 镜像加速（国内最稳定的公共镜像源之一）
-    # 如果拉取失败，可尝试：
-    # - dockerproxy.com/library/redis:7-alpine
-    # - docker.1panel.live/library/redis:7-alpine
-    # - docker.rainbond.cc/library/redis:7-alpine
-    image: docker.1ms.run/library/redis:7-alpine
+    image: ${DOCKER_REDIS_IMAGE:-redis:7-alpine}
     container_name: wharttest-redis
     ports:
       - "8911:6379"
@@ -55,7 +50,7 @@ services:
 
   # 后端 Django 服务（包含Celery Worker和Beat）
   backend:
-    image: ghcr.io/mgdaaslab/wharttest-backend:latest
+    image: ${DOCKER_BACKEND_IMAGE:-ghcr.io/mgdaaslab/wharttest-backend:latest}
     # 如果需要本地构建，注释掉上面的image行，取消注释下面的build部分
     # build:
     #   context: ./WHartTest_Django
@@ -67,6 +62,7 @@ services:
     volumes:
       - ./data:/app/data
       - backend-static:/app/static
+      - ./WHartTest_Skills:/app/bundled_skills:ro
     environment:
       # 数据库配置
       # 默认使用 PostgreSQL（生产环境推荐）
@@ -96,6 +92,7 @@ services:
       - QDRANT_URL=http://qdrant:6333
       # 内部API基础URL - 使用localhost因为在同一容器
       - DJANGO_BASE_URL=http://localhost:8000
+      - HF_ENDPOINT=${DOCKER_HF_ENDPOINT:-https://huggingface.co}
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,7 +104,7 @@ services:
       - wharttest-network
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/')" ]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/')" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -115,7 +112,7 @@ services:
 
   # 前端 Vue 服务
   frontend:
-    image: ghcr.io/mgdaaslab/wharttest-frontend:latest
+    image: ${DOCKER_FRONTEND_IMAGE:-ghcr.io/mgdaaslab/wharttest-frontend:latest}
     # 如果需要本地构建，注释掉上面的image行，取消注释下面的build部分
     # build:
     #   context: ./WHartTest_Vue
@@ -137,7 +134,7 @@ services:
 
   # MCP 服务（独立容器）
   mcp:
-    image: ghcr.io/mgdaaslab/wharttest-mcp:latest
+    image: ${DOCKER_MCP_IMAGE:-ghcr.io/mgdaaslab/wharttest-mcp:latest}
     # 如果需要本地构建，注释掉上面的image行，取消注释下面的build部分
     # build:
     #   context: ./WHartTest_MCP
@@ -172,7 +169,7 @@ services:
 
   # Playwright MCP 服务（官方Docker镜像）
   playwright-mcp:
-    image: mcr.microsoft.com/playwright/mcp
+    image: ${DOCKER_PLAYWRIGHT_MCP_IMAGE:-mcr.microsoft.com/playwright/mcp}
     container_name: wharttest-playwright-mcp
     user: root # 以 root 用户运行,确保有权限写入挂载目录
     entrypoint: node
@@ -194,7 +191,7 @@ services:
 
   # Qdrant 向量数据库服务
   qdrant:
-    image: docker.1ms.run/qdrant/qdrant:latest
+    image: ${DOCKER_QDRANT_IMAGE:-qdrant/qdrant:latest}
     container_name: wharttest-qdrant
     ports:
       - "8918:6333"  # REST API
@@ -209,30 +206,30 @@ services:
           memory: 2G
 
   # Xinference 模型推理服务（Embedding + Reranker）
-  xinference:
-    image: xprobe/xinference:latest-cpu
-    container_name: wharttest-xinference
-    ports:
-      - "8917:9997"
-    volumes:
-      - xinference-data:/root/.xinference
-      - xinference-cache:/root/.cache/huggingface
-    environment:
-      - HF_ENDPOINT=https://hf-mirror.com
-    networks:
-      - wharttest-network
-    restart: unless-stopped
-    command: xinference-local -H 0.0.0.0
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9997/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    deploy:
-      resources:
-        limits:
-          memory: 4G
+  # xinference:
+  #   image: xprobe/xinference:latest-cpu
+  #   container_name: wharttest-xinference
+  #   ports:
+  #     - "8917:9997"
+  #   volumes:
+  #     - xinference-data:/root/.xinference
+  #     - xinference-cache:/root/.cache/huggingface
+  #   environment:
+  #     - HF_ENDPOINT=https://hf-mirror.com
+  #   networks:
+  #     - wharttest-network
+  #   restart: unless-stopped
+  #   command: xinference-local -H 0.0.0.0
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:9997/"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 60s
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 4G
     # 启动后需要部署模型:
     # Embedding 模型
 # curl -X POST "http://localhost:8917/v1/models" \
@@ -243,26 +240,6 @@ services:
 # curl -X POST "http://localhost:8917/v1/models" \
 #   -H "Content-Type: application/json" \
 #   -d '{"model_name": "bge-reranker-v2-m3", "model_type": "rerank", "model_uid": "bge-reranker-v2-m3"}'
-
-  # Draw.io 自托管服务（图表编辑器）
-  drawio:
-    # 使用 DaoCloud 镜像加速
-    image: docker.1ms.run/jgraph/drawio:latest
-    container_name: wharttest-drawio
-    ports:
-      - "8920:8080"
-    networks:
-      - wharttest-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 512M
 
 networks:
   wharttest-network:

@@ -16,10 +16,9 @@ import uuid
 import httpx
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import TestExecution, TestSuite, TestCaseResult, TestCase, ScriptExecution
+from .models import TestExecution, TestSuite, TestCaseResult, TestCase
 from prompts.models import UserPrompt, PromptType
 from asgiref.sync import sync_to_async
-from .script_executor import execute_automation_script
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +50,8 @@ def execute_test_suite(self, execution_id):
         # 1. 获取套件中的所有测试用例
         testcases = suite.testcases.all().order_by('level', 'id')  # 按优先级排序
         
-        # 2. 获取套件中的所有自动化脚本
-        scripts = suite.automation_scripts.all().order_by('id')
-        
         # 更新总数
-        execution.total_count = testcases.count() + scripts.count()
+        execution.total_count = testcases.count()
         execution.save(update_fields=['total_count', 'updated_at'])
         
         # 收集所有待执行的任务
@@ -69,17 +65,6 @@ def execute_test_suite(self, execution_id):
                 status='pending'
             )
             all_tasks.append(result)
-            
-        # 为每个自动化脚本创建执行记录
-        for script in scripts:
-            script_exec = ScriptExecution.objects.create(
-                script=script,
-                test_execution=execution,
-                executor=execution.executor,
-                status='pending',
-                browser_type='chromium'
-            )
-            all_tasks.append(script_exec)
         
         # 获取并发配置
         max_concurrent = suite.max_concurrent_tasks
@@ -183,11 +168,11 @@ def execute_single_testcase(result: TestCaseResult):
 
 async def _execute_tasks_concurrently(execution, tasks_list, max_concurrent):
     """
-    并发执行测试任务（包括用例和脚本）
+    并发执行测试任务
     
     Args:
         execution: TestExecution实例
-        tasks_list: TestCaseResult 或 ScriptExecution 列表
+        tasks_list: TestCaseResult 列表
         max_concurrent: 最大并发数
     """
     import asyncio
@@ -201,7 +186,7 @@ async def _execute_tasks_concurrently(execution, tasks_list, max_concurrent):
             # 检查是否已取消
             current_execution = await sync_to_async(TestExecution.objects.get)(id=execution.id)
             if current_execution.status == 'cancelled':
-                task_name = getattr(task_obj, 'testcase', getattr(task_obj, 'script', task_obj)).name
+                task_name = task_obj.testcase.name
                 logger.info(f"测试执行已取消，跳过任务: {task_name}")
                 return
             
@@ -211,17 +196,9 @@ async def _execute_tasks_concurrently(execution, tasks_list, max_concurrent):
                 task_obj.started_at = timezone.now()
                 await sync_to_async(task_obj.save)()
                 
-                # 根据任务类型调用不同的执行逻辑
-                if isinstance(task_obj, TestCaseResult):
-                    # 执行测试用例
-                    await _execute_testcase_via_chat_api(task_obj)
-                    task_name = task_obj.testcase.name
-                elif isinstance(task_obj, ScriptExecution):
-                    # 执行自动化脚本
-                    await _execute_script_task(task_obj)
-                    task_name = task_obj.script.name
-                else:
-                    raise ValueError(f"未知的任务类型: {type(task_obj)}")
+                # 执行测试用例
+                await _execute_testcase_via_chat_api(task_obj)
+                task_name = task_obj.testcase.name
                 
                 logger.info(f"任务执行成功: {task_name}")
                 
@@ -241,11 +218,7 @@ async def _execute_tasks_concurrently(execution, tasks_list, max_concurrent):
                 await sync_to_async(_update_execution_counts)(execution, normalized_status)
                 
             except Exception as e:
-                task_name = "Unknown"
-                if hasattr(task_obj, 'testcase'):
-                    task_name = task_obj.testcase.name
-                elif hasattr(task_obj, 'script'):
-                    task_name = task_obj.script.name
+                task_name = task_obj.testcase.name
                     
                 error_msg = f"并发执行任务失败: {str(e)}"
                 logger.error(f"{error_msg} - {task_name}", exc_info=True)
@@ -268,65 +241,6 @@ async def _execute_tasks_concurrently(execution, tasks_list, max_concurrent):
     
     # 并发执行所有任务
     await asyncio.gather(*async_tasks, return_exceptions=True)
-
-
-@sync_to_async
-def _execute_script_task(script_execution):
-    """
-    同步执行脚本任务的包装器
-    """
-    from .script_executor import ScriptExecutor
-    
-    script = script_execution.script
-    
-    # 创建执行器
-    executor = ScriptExecutor(
-        timeout_seconds=script.timeout_seconds,
-        browser_type='chromium'
-    )
-    
-    try:
-        # 判断是否使用 pytest
-        use_pytest = (
-            script.script_type == 'playwright_python'
-            and 'import pytest' in script.script_content
-            and 'def test_' in script.script_content
-        )
-        
-        # 执行脚本
-        result = executor.execute_script(
-            script_content=script.script_content,
-            use_pytest=use_pytest,
-            headless=script.headless,
-            record_video=False # 暂时不开启录屏，或者从配置获取
-        )
-        
-        # 更新执行记录
-        script_execution.completed_at = result['completed_at']
-        script_execution.execution_time = result['execution_time']
-        script_execution.output = result['output']
-        
-        if result['success']:
-            script_execution.status = 'pass'
-        else:
-            script_execution.status = 'fail'
-            script_execution.error_message = result['error_message']
-            script_execution.stack_trace = result['stack_trace']
-        
-        script_execution.screenshots = result['screenshots']
-        script_execution.videos = result.get('videos', [])
-        script_execution.save()
-        
-        # 清理临时目录
-        executor.cleanup()
-        
-    except Exception as e:
-        script_execution.status = 'error'
-        script_execution.error_message = str(e)
-        script_execution.completed_at = timezone.now()
-        script_execution.save()
-        executor.cleanup()
-        raise
 
 
 def _update_execution_counts(execution, status):

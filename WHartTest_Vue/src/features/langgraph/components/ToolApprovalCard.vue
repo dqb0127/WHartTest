@@ -237,12 +237,12 @@ const handleReject = async () => {
 
 <style scoped>
 .approval-card {
-  background: linear-gradient(135deg, #fffbe6 0%, #fff7e6 100%);
-  border: 1px solid #ffe58f;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--theme-surface) 92%, rgba(var(--theme-accent-rgb), 0.08)) 0%, color-mix(in srgb, var(--theme-shell-soft) 88%, rgba(var(--theme-accent-rgb), 0.12)) 100%);
+  border: 1px solid rgba(var(--theme-accent-rgb), 0.18);
   border-radius: 12px;
   margin: 0 16px 12px 16px;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(250, 173, 20, 0.15);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.14);
 }
 
 .card-content {
@@ -335,11 +335,11 @@ const handleReject = async () => {
 
 .remember-option :deep(.arco-select-view-single) {
   background: rgba(255, 255, 255, 0.8);
-  border-color: #ffe58f;
+  border-color: rgba(var(--theme-accent-rgb), 0.18);
 }
 
 .remember-option :deep(.arco-select-view-single:hover) {
-  border-color: #ffc53d;
+  border-color: rgba(var(--theme-accent-rgb), 0.28);
 }
 
 .action-buttons {
@@ -369,8 +369,8 @@ const handleReject = async () => {
 
 /* 参数详情 */
 .args-detail {
-  background: rgba(255, 255, 255, 0.8);
-  border-top: 1px solid #ffe58f;
+  background: color-mix(in srgb, var(--theme-surface) 88%, transparent);
+  border-top: 1px solid rgba(var(--theme-accent-rgb), 0.18);
   padding: 12px 16px;
   max-height: 200px;
   overflow-y: auto;
@@ -387,9 +387,9 @@ const handleReject = async () => {
   align-items: flex-start;
   gap: 12px;
   padding: 8px 12px;
-  background: linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--theme-surface-soft) 78%, white 22%) 0%, color-mix(in srgb, var(--theme-surface) 84%, white 16%) 100%);
   border-radius: 6px;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--theme-border);
 }
 
 .arg-key {

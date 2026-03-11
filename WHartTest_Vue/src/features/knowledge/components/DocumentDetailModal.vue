@@ -364,7 +364,7 @@ watch(
 }
 
 .content-display {
-  border: 1px solid #e5e6eb;
+  border: 1px solid var(--theme-border);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -397,8 +397,8 @@ watch(
 .preview-notice {
   margin-bottom: 12px;
   padding: 8px 12px;
-  background-color: #fff7e6;
-  border: 1px solid #ffd591;
+  background-color: color-mix(in srgb, var(--theme-surface) 90%, rgba(var(--theme-accent-rgb), 0.08));
+  border: 1px solid rgba(var(--theme-accent-rgb), 0.18);
   border-radius: 4px;
   color: #d46b08;
 }
@@ -411,7 +411,7 @@ watch(
 .chunks-info {
   margin-bottom: 12px;
   padding: 8px 12px;
-  background-color: #f7f8fa;
+  background-color: color-mix(in srgb, var(--theme-surface-soft) 72%, white 28%);
   border-radius: 4px;
   border-left: 3px solid #165dff;
 }
@@ -432,11 +432,11 @@ watch(
 }
 
 .chunk-item {
-  border: 1px solid #e5e6eb;
+  border: 1px solid var(--theme-border);
   border-radius: 6px;
   padding: 16px;
   margin-bottom: 12px;
-  background-color: #fff;
+  background-color: var(--theme-surface);
   transition: box-shadow 0.2s ease;
 }
 

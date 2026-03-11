@@ -4,7 +4,7 @@
     <a-layout-header class="header">
       <div class="left-section">
         <div class="logo" unselectable="on">
-          <img src="/WHartTest.png" alt="WHartTest Logo" class="logo-icon" />
+          <img :src="brandLogoUrl" alt="WHartTest Logo" class="logo-icon" />
           <span class="logo-text">WHartTest</span>
         </div>
         <div class="project-selector" v-if="showProjectSelector">
@@ -27,6 +27,16 @@
         </div>
       </div>
       <div class="user-info">
+        <button
+          type="button"
+          class="theme-switch-button"
+          :aria-label="themeButtonLabel"
+          :title="themeButtonLabel"
+          @click="themeStore.toggleTheme"
+        >
+          <icon-sun-fill v-if="themeStore.isBlack" class="theme-switch-icon" />
+          <icon-moon-fill v-else class="theme-switch-icon" />
+        </button>
         <!-- 版本号显示 -->
         <a-popover v-if="hasUpdate" position="bottom" trigger="hover" content-class="version-popover">
           <a 
@@ -58,7 +68,7 @@
         </a-popover>
         <span v-else class="version-badge">当前版本: {{ currentVersion }}</span>
         
-        <a-avatar class="avatar" style="background-color: #00a0e9; color: white;">
+        <a-avatar class="avatar">
           <span>{{ userInitial }}</span>
         </a-avatar>
         <a-dropdown trigger="click" class="user-dropdown-wrapper">
@@ -119,6 +129,11 @@
             <a href="#" @click="checkProjectAndNavigate($event, '/ai-diagram')">智能图表</a>
           </a-menu-item>
 
+          <a-menu-item key="ui-automation" v-if="hasUiAutomationPermission">
+            <template #icon><icon-computer /></template>
+            <a href="#" @click="checkProjectAndNavigate($event, '/ui-automation')">UI自动化</a>
+          </a-menu-item>
+
           <!-- 测试管理子菜单 -->
           <a-sub-menu key="test-management" v-if="hasTestManagementMenuItems">
             <template #icon><icon-experiment /></template>
@@ -128,10 +143,6 @@
             <a-menu-item key="testcases" v-if="hasTestcasesPermission">
               <template #icon><icon-code-block /></template>
               <a href="#" @click="checkProjectAndNavigate($event, '/testcases')">用例管理</a>
-            </a-menu-item>
-            <a-menu-item key="automation-scripts" v-if="hasAutomationScriptsPermission">
-              <template #icon><icon-robot /></template>
-              <a href="#" @click="checkProjectAndNavigate($event, '/automation-scripts')">UI脚本库</a>
             </a-menu-item>
             <a-menu-item key="testsuites" v-if="hasTestSuitesPermission">
               <template #icon><icon-folder /></template>
@@ -183,7 +194,7 @@
               <template #icon><icon-cloud /></template>
               <a href="#" @click="checkProjectAndNavigate($event, '/remote-mcp-configs')">MCP配置</a>
             </a-menu-item>
-            <a-menu-item key="skills" v-if="hasMcpConfigsPermission">
+            <a-menu-item key="skills" v-if="hasSkillsPermission">
               <template #icon><icon-apps /></template>
               <a href="#" @click="checkProjectAndNavigate($event, '/skills')">Skills管理</a>
             </a-menu-item>
@@ -223,6 +234,8 @@ import { ref, computed, nextTick, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/store/authStore';
 import { useProjectStore } from '@/store/projectStore';
+import { useThemeStore } from '@/store/themeStore';
+import { brandLogoUrl } from '@/utils/assetUrl';
 import {
   getCurrentVersion,
   formatVersion,
@@ -258,8 +271,10 @@ import {
   IconFolder,
   IconHistory,
   IconExperiment,
-  IconRobot,
   IconHome,
+  IconComputer,
+  IconSunFill,
+  IconMoonFill,
 } from '@arco-design/web-vue/es/icon';
 import '@arco-design/web-vue/dist/arco.css'; // 引入 Arco Design 样式
 
@@ -272,6 +287,7 @@ const AOption = ASelect.Option;
 const router = useRouter();
 const authStore = useAuthStore();
 const projectStore = useProjectStore();
+const themeStore = useThemeStore();
 
 // 版本信息
 const currentVersion = ref(formatVersion(getCurrentVersion()));
@@ -310,6 +326,8 @@ const userInitial = computed(() => {
   return username.value.charAt(0).toUpperCase();
 });
 
+const themeButtonLabel = computed(() => themeStore.isBlack ? '切换到默认主题' : '切换到黑色主题');
+
 // 当前激活的菜单项
 const activeMenu = computed(() => {
   const path = router.currentRoute.value.path;
@@ -318,7 +336,6 @@ const activeMenu = computed(() => {
   if (path.startsWith('/requirements')) return 'requirements'; // 添加对需求管理路由的识别
   if (path.startsWith('/testsuites')) return 'testsuites'; // 添加对测试套件路由的识别
   if (path.startsWith('/test-executions')) return 'test-executions'; // 添加对执行历史路由的识别
-  if (path.startsWith('/automation-scripts')) return 'automation-scripts'; // 添加对自动化用例路由的识别
   if (path.startsWith('/testcases')) return 'testcases';
   if (path.startsWith('/users')) return 'users';
   if (path.startsWith('/organizations')) return 'organizations';
@@ -360,14 +377,16 @@ const hasTestExecutionsPermission = computed(() => {
   return authStore.hasPermission('testcases.view_testexecution');
 });
 
-const hasAutomationScriptsPermission = computed(() => {
-  return authStore.hasPermission('testcases.view_automationscript');
-});
-
 const hasLangGraphChatPermission = computed(() => {
   return authStore.hasPermission('langgraph_integration.view_llmconfig') ||
          authStore.hasPermission('langgraph_integration.view_chatsession') ||
          authStore.hasPermission('langgraph_integration.view_chatmessage');
+});
+
+const hasUiAutomationPermission = computed(() => {
+  return authStore.hasPermission('ui_automation.view_uimodule') ||
+         authStore.hasPermission('ui_automation.view_uipage') ||
+         authStore.hasPermission('ui_automation.view_uitestcase');
 });
 
 const hasKnowledgePermission = computed(() => {
@@ -401,12 +420,15 @@ const hasMcpConfigsPermission = computed(() => {
   return authStore.hasPermission('mcp_tools.view_remotemcpconfig');
 });
 
+const hasSkillsPermission = computed(() => {
+  return authStore.hasPermission('skills.view_skill');
+});
+
 // 检查是否有测试管理菜单项的权限
 const hasTestManagementMenuItems = computed(() => {
   return hasTestcasesPermission.value ||
          hasTestSuitesPermission.value ||
-         hasTestExecutionsPermission.value ||
-         hasAutomationScriptsPermission.value;
+         hasTestExecutionsPermission.value;
 });
 
 // 检查是否有系统管理菜单项的权限
@@ -416,7 +438,8 @@ const hasSystemMenuItems = computed(() => {
          hasPermissionsPermission.value ||
          hasLlmConfigsPermission.value ||
          hasApiKeysPermission.value ||
-         hasMcpConfigsPermission.value;
+         hasMcpConfigsPermission.value ||
+         hasSkillsPermission.value;
 });
 
 // 切换侧边栏收起状态
@@ -600,6 +623,37 @@ onMounted(async () => {
   gap: 12px;
 }
 
+.theme-switch-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--theme-border);
+  border-radius: 999px;
+  background: var(--theme-toggle-bg);
+  color: var(--theme-text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.theme-switch-button:hover {
+  color: var(--theme-text);
+  border-color: rgba(var(--theme-accent-rgb), 0.36);
+  background: var(--theme-toggle-hover);
+}
+
+.theme-switch-button:focus-visible {
+  outline: 2px solid rgba(var(--theme-accent-rgb), 0.45);
+  outline-offset: 2px;
+}
+
+.theme-switch-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
 /* 版本号样式 */
 .version-badge {
   font-size: 13px;
@@ -747,11 +801,16 @@ onMounted(async () => {
 
 .dropdown-role {
   font-size: 11px;
-  color: #00a0e9;
-  background-color: rgba(0, 160, 233, 0.1);
+  color: var(--theme-accent);
+  background-color: rgba(var(--theme-accent-rgb), 0.1);
   padding: 1px 4px;
   border-radius: 3px;
   display: inline-block;
+}
+
+.avatar {
+  background-color: var(--theme-accent);
+  color: #ffffff;
 }
 
 .user-dropdown-wrapper :deep(.arco-dropdown-content) {
@@ -836,11 +895,11 @@ onMounted(async () => {
 }
 
 :deep(.arco-menu-light .arco-menu-item:hover) {
-  color: #00a0e9;
+  color: var(--theme-accent);
 }
 
 :deep(.arco-menu-light .arco-menu-selected) {
-  color: #00a0e9;
+  color: var(--theme-accent);
   background-color: transparent;
   border-left: none;
 }
@@ -853,11 +912,11 @@ onMounted(async () => {
 }
 
 :deep(.arco-menu-light .arco-menu-inline-header:hover) {
-  color: #00a0e9;
+  color: var(--theme-accent);
 }
 
 :deep(.arco-menu-light .arco-menu-inline-header.arco-menu-selected) {
-  color: #00a0e9;
+  color: var(--theme-accent);
   background-color: transparent;
   border-left: none;
 }
@@ -912,7 +971,7 @@ onMounted(async () => {
 
 .main-layout {
   height: 100vh;
-  background-color: #f8f9fc;
+  background-color: var(--theme-page-bg);
   overflow: hidden;
 }
 
@@ -922,7 +981,7 @@ onMounted(async () => {
 
 .content {
   padding: 0;
-  background-color: #f8f9fc;
+  background-color: var(--theme-page-bg);
   height: calc(100vh - 86px); /* 保持 86px 是因为底部还有 10px 的 margin */
   margin: 0 10px 10px 10px;
   overflow: hidden; /* 让子组件自行控制滚动 */
@@ -938,20 +997,20 @@ onMounted(async () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--theme-border);
 }
 
 .collapse-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
+  color: var(--theme-text-secondary);
   padding: 0;
   margin: 0 auto;
 }
 
 .collapse-button:hover {
-  color: #00a0e9;
+  color: var(--theme-accent);
 }
 
 /* 收起状态下的按钮样式 */

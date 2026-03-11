@@ -1,14 +1,22 @@
+# 导入 Django 管理命令基类。
 from django.core.management.base import BaseCommand
+
+# 导入用户模型工厂，兼容自定义 User 模型。
 from django.contrib.auth import get_user_model
+
+# 导入环境变量读取模块。
 import os
 
+# 获取当前项目实际使用的用户模型。
 User = get_user_model()
 
+
 class Command(BaseCommand):
+    # 命令说明：初始化管理员、默认 API Key、MCP 配置与演示数据。
     help = '创建默认管理员账号和默认API Key'
 
     def handle(self, *args, **options):
-        # 从环境变量获取管理员信息
+        # 读取管理员初始化参数，未配置时使用开发默认值。
         admin_username = os.environ.get('DJANGO_ADMIN_USERNAME', 'admin')
         admin_email = os.environ.get('DJANGO_ADMIN_EMAIL', 'admin@example.com')
         admin_password = os.environ.get('DJANGO_ADMIN_PASSWORD', 'admin123456')
@@ -17,12 +25,13 @@ class Command(BaseCommand):
         admin_user = User.objects.filter(username=admin_username).first()
         admin_created = False
         
+        # 条件：管理员账号已存在；动作：跳过创建；结果：保证命令可重复执行且幂等。
         if admin_user:
             self.stdout.write(
                 self.style.WARNING(f'管理员账号 "{admin_username}" 已存在，跳过创建')
             )
         else:
-            # 创建管理员账号（注意：信号会自动初始化提示词）
+            # 条件：管理员不存在；动作：创建超级用户；结果：完成系统首个管理账号初始化。
             admin_user = User.objects.create_superuser(
                 username=admin_username,
                 email=admin_email,
@@ -39,7 +48,7 @@ class Command(BaseCommand):
                 )
             )
         
-        # 为管理员初始化提示词（无论是新建还是已存在）
+        # 无论管理员是新建还是已存在，都执行提示词初始化补齐逻辑。
         self._initialize_admin_prompts(admin_user, admin_created)
         
         # 创建默认API Key（用于MCP服务）
@@ -53,12 +62,13 @@ class Command(BaseCommand):
             name="Default MCP Key (Auto-generated)"
         ).first()
         
+        # 条件：默认 Key 已存在；动作：跳过；结果：避免重复生成固定演示密钥。
         if default_key:
             self.stdout.write(
                 self.style.WARNING('默认API Key已存在，跳过创建')
             )
         else:
-            # 创建默认API Key
+            # 条件：默认 Key 不存在；动作：创建预置 MCP Key；结果：开箱即用联调 MCP 服务。
             APIKey.objects.create(
                 user=admin_user,
                 name="Default MCP Key (Auto-generated)",
@@ -94,6 +104,7 @@ class Command(BaseCommand):
         ]
         
         created_configs = []
+        # 逐项检查并创建默认 MCP 配置，保证重复执行时不会覆盖用户已有配置。
         for config in mcp_configs:
             existing_config = RemoteMCPConfig.objects.filter(
                 name=config['name']
@@ -115,6 +126,7 @@ class Command(BaseCommand):
                     self.style.SUCCESS(f'  ✅ 创建MCP配置: {config["name"]} ({config["url"]})')
                 )
         
+        # 仅在本次确实创建了配置时输出汇总信息，避免日志噪声。
         if created_configs:
             self.stdout.write(
                 self.style.SUCCESS(
@@ -129,12 +141,13 @@ class Command(BaseCommand):
         demo_project_name = "演示项目 (Demo Project)"
         demo_project = Project.objects.filter(name=demo_project_name).first()
         
+        # 条件：演示项目已存在；动作：跳过；结果：保持命令幂等，不重复制造演示数据。
         if demo_project:
             self.stdout.write(
                 self.style.WARNING(f'演示项目 "{demo_project_name}" 已存在，跳过创建')
             )
         else:
-            # 创建演示项目
+            # 条件：演示项目不存在；动作：创建项目+Owner 成员；结果：首次部署后可直接体验业务流程。
             demo_project = Project.objects.create(
                 name=demo_project_name,
                 description=(
@@ -171,7 +184,7 @@ class Command(BaseCommand):
                 )
             )
         
-        # 初始化知识库全局配置（使用Xinference默认配置）
+        # 初始化知识库全局配置（仅在未被手工配置时注入默认值）。
         self._initialize_knowledge_global_config(admin_user)
         
         self.stdout.write(
@@ -194,13 +207,14 @@ class Command(BaseCommand):
         try:
             from prompts.services import initialize_user_prompts
             
+            # 条件：管理员是新建用户；动作：仅提示结果；结果：避免和 post_save 信号重复写入。
             if admin_created:
                 # 新创建的用户，信号已经自动初始化了提示词
                 self.stdout.write(
                     self.style.SUCCESS('✅ 管理员提示词已通过信号自动初始化')
                 )
             else:
-                # 已存在的用户，检查并补充缺失的提示词
+                # 条件：管理员为已存在用户；动作：补齐缺失提示词；结果：历史环境升级后也能拿到完整默认提示词。
                 result = initialize_user_prompts(admin_user, force_update=False)
                 
                 if result['summary']['created_count'] > 0:
@@ -217,6 +231,7 @@ class Command(BaseCommand):
                     )
                     
         except Exception as e:
+            # 提示词初始化失败不影响主流程，记录错误便于后续人工补偿。
             self.stdout.write(
                 self.style.ERROR(f'❌ 初始化管理员提示词失败: {e}')
             )
@@ -229,7 +244,7 @@ class Command(BaseCommand):
             # 获取或创建配置（单例模式）
             config = KnowledgeGlobalConfig.get_config()
             
-            # 检查是否是默认配置（通过检查updated_by是否为空）
+            # 条件：配置尚未被用户修改；动作：写入默认 Xinference 参数；结果：知识库功能可直接启动。
             if config.updated_by is None:
                 # 设置Xinference默认配置（Docker Compose服务名为xinference）
                 config.embedding_service = 'xinference'
@@ -254,11 +269,13 @@ class Command(BaseCommand):
                     )
                 )
             else:
+                # 条件：已有人工配置；动作：跳过默认覆盖；结果：保留用户现有生产参数。
                 self.stdout.write(
                     self.style.WARNING('知识库全局配置已存在，跳过初始化')
                 )
                 
         except Exception as e:
+            # 配置初始化失败不阻断其他初始化项，输出错误供运维排查。
             self.stdout.write(
                 self.style.ERROR(f'❌ 初始化知识库全局配置失败: {e}')
             )

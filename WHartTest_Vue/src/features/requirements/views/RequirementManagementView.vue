@@ -280,7 +280,7 @@ import {
   DocumentTypeDisplay
 } from '../types';
 
-// Store and Router
+// 状态仓库与路由
 const projectStore = useProjectStore();
 const router = useRouter();
 

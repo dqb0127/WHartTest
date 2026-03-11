@@ -37,11 +37,30 @@
         ref="chatMessagesRef"
         :messages="displayedMessages"
         :is-loading="isLoading && messages.length === 0"
+        :floating-tool-image-src="floatingToolImageSrc"
         @toggle-expand="toggleExpand"
         @quote="handleQuote"
         @retry="handleRetry"
         @delete="handleDeleteMessage"
+        @preview-diagram="handlePreviewDiagram"
+        @preview-html="handlePreviewHtml"
+        @tool-image-detected="handleToolImageDetected"
+        @float-tool-image="handleFloatToolImage"
       />
+
+      <!-- 工具图片悬浮面板（可拖动） -->
+      <div
+        v-if="floatingToolImageSrc"
+        ref="floatingPanelRef"
+        class="floating-tool-image-panel"
+        :style="floatingPanelStyle"
+      >
+        <div class="floating-panel-header" @mousedown="startDrag">
+          <span class="floating-panel-title">📷 工具截图</span>
+          <button class="floating-panel-close" @click="closeFloatingImage">&times;</button>
+        </div>
+        <img :src="floatingToolImageSrc" alt="工具截图" class="floating-panel-img" />
+      </div>
 
       <!-- ⭐ HITL 工具审批卡片（输入框上方） -->
       <ToolApprovalCard
@@ -79,6 +98,53 @@
       v-model:visible="isToolApprovalSettingsVisible"
       :session-id="sessionId"
     />
+
+    <!-- 图表预览弹窗 -->
+    <a-modal
+      v-model:visible="diagramPreviewVisible"
+      title="图表预览"
+      :width="'90%'"
+      :footer="false"
+      :mask-closable="true"
+      :unmount-on-close="true"
+    >
+      <iframe
+        v-if="diagramPreviewUrl"
+        ref="diagramPreviewIframeRef"
+        :src="diagramPreviewUrl"
+        class="diagram-preview-iframe"
+      ></iframe>
+    </a-modal>
+
+    <!-- HTML 预览弹窗 -->
+    <a-modal
+      v-model:visible="htmlPreviewVisible"
+      title="HTML 预览"
+      :width="'90%'"
+      :footer="false"
+      :mask-closable="true"
+      :unmount-on-close="true"
+    >
+      <div v-if="htmlPreviewContent" ref="htmlPreviewContainerRef" class="html-preview-wrapper">
+        <a-button
+          class="html-preview-fullscreen-btn"
+          type="secondary"
+          shape="circle"
+          size="small"
+          @click="toggleHtmlPreviewFullscreen"
+        >
+          <template #icon>
+            <IconFullscreenExit v-if="isHtmlPreviewFullscreen" />
+            <IconFullscreen v-else />
+          </template>
+        </a-button>
+        <iframe
+          class="diagram-preview-iframe html-preview-iframe"
+          :srcdoc="htmlPreviewContent"
+          sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+        ></iframe>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -106,6 +172,7 @@ import type { LlmConfig } from '@/features/langgraph/types/llmConfig';
 import { useProjectStore } from '@/store/projectStore';
 import { useLlmConfigRefresh } from '@/composables/useLlmConfigRefresh';
 import { marked } from 'marked';
+import { IconFullscreen, IconFullscreenExit } from '@arco-design/web-vue/es/icon';
 
 // 导入子组件
 import ChatSidebar from '../components/ChatSidebar.vue';
@@ -154,6 +221,16 @@ interface ChatSession {
   messageCount: number;
 }
 
+interface DiagramPreviewPayload {
+  xml: string;
+  sourceMessage: ChatMessage;
+}
+
+interface HtmlPreviewPayload {
+  html: string;
+  sourceMessage: ChatMessage;
+}
+
 const messages = ref<ChatMessage[]>([]);
 const isLoading = ref(false);
 const sessionId = ref<string>('');
@@ -171,6 +248,78 @@ const topK = ref(5); // 检索结果数量
 
 // 消息操作相关
 const quotedMessage = ref<ChatMessage | null>(null); // 引用的消息
+const diagramPreviewVisible = ref(false);
+const diagramPreviewXml = ref('');
+const diagramPreviewIframeRef = ref<HTMLIFrameElement | null>(null);
+const diagramPreviewReady = ref(false);
+const htmlPreviewVisible = ref(false);
+const htmlPreviewContent = ref('');
+const htmlPreviewContainerRef = ref<HTMLElement | null>(null);
+const isHtmlPreviewFullscreen = ref(false);
+
+// 工具图片悬浮预览（可拖动）
+const floatingToolImageSrc = ref<string | null>(null);
+const floatingPanelRef = ref<HTMLElement | null>(null);
+const panelPos = ref<{ x: number; y: number } | null>(null);
+const dragState = ref<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+
+const floatingPanelStyle = computed(() => {
+  if (!panelPos.value) return {};
+  return { top: `${panelPos.value.y}px`, right: 'auto', left: `${panelPos.value.x}px` };
+});
+
+const startDrag = (e: MouseEvent) => {
+  // 防止在关闭按钮上触发拖动
+  if ((e.target as HTMLElement).closest('.floating-panel-close')) return;
+  e.preventDefault();
+  const panel = floatingPanelRef.value;
+  if (!panel) return;
+
+  const rect = panel.getBoundingClientRect();
+  const containerRect = panel.offsetParent?.getBoundingClientRect() || { left: 0, top: 0 };
+  const currentX = panelPos.value?.x ?? rect.left - containerRect.left;
+  const currentY = panelPos.value?.y ?? rect.top - containerRect.top;
+
+  dragState.value = { startX: e.clientX, startY: e.clientY, origX: currentX, origY: currentY };
+  if (!panelPos.value) panelPos.value = { x: currentX, y: currentY };
+
+  const onMove = (ev: MouseEvent) => {
+    if (!dragState.value) return;
+    panelPos.value = {
+      x: dragState.value.origX + (ev.clientX - dragState.value.startX),
+      y: dragState.value.origY + (ev.clientY - dragState.value.startY),
+    };
+  };
+  const onUp = () => {
+    dragState.value = null;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+};
+
+const handleToolImageDetected = (src: string) => {
+  floatingToolImageSrc.value = src;
+  // 保持用户已拖动的位置，不重置 panelPos
+};
+const handleFloatToolImage = (src: string) => {
+  if (floatingToolImageSrc.value === src) {
+    floatingToolImageSrc.value = null;
+  } else {
+    floatingToolImageSrc.value = src;
+    panelPos.value = null;
+  }
+};
+const closeFloatingImage = () => {
+  floatingToolImageSrc.value = null;
+};
+
+// 切换会话时清除悬浮图片
+watch(sessionId, () => {
+  floatingToolImageSrc.value = null;
+  panelPos.value = null;
+});
 
 // 提示词相关
 const selectedPromptId = ref<number | null>(null); // 用户选择的提示词ID
@@ -241,6 +390,82 @@ const contextTokenInfo = computed(() => {
 
   return { tokenCount: 0, limit: defaultLimit };
 });
+
+// 规范化历史消息内容：
+// 后端历史接口在 tool 消息中可能返回数组/对象（如 [{type:"text", text:"..."}]），
+// 前端渲染链路按字符串处理，需要先统一为字符串。
+const normalizeHistoryContent = (historyItem: ChatHistoryMessage): string => {
+  const rawContent: unknown = (historyItem as any).content;
+
+  if (typeof rawContent === 'string') {
+    return rawContent;
+  }
+
+  if (historyItem.type === 'tool' && Array.isArray(rawContent)) {
+    const textItem = rawContent.find((item: any) =>
+      item && typeof item === 'object' && item.type === 'text' && typeof item.text === 'string'
+    );
+    if (textItem?.text) {
+      return textItem.text;
+    }
+  }
+
+  try {
+    return JSON.stringify(rawContent, null, 2);
+  } catch {
+    return String(rawContent ?? '');
+  }
+};
+
+const getFullUrl = (url: string) => {
+  return url.startsWith('/') ? `${window.location.origin}${url}` : url;
+};
+
+const drawioPreviewBaseUrl = getFullUrl(import.meta.env.VITE_DRAWIO_URL || 'https://embed.diagrams.net');
+const drawioPreviewOrigin = computed(() => new URL(drawioPreviewBaseUrl).origin);
+
+const diagramPreviewUrl = computed(() => {
+  if (!diagramPreviewXml.value) return '';
+  const params = new URLSearchParams({
+    embed: '1',
+    proto: 'json',
+    spin: '1',
+    ui: 'kennedy',
+    splash: '0',
+    noSaveBtn: '1',
+    noExitBtn: '1',
+    toolbar: '0',
+    math: '0'
+  });
+  return `${drawioPreviewBaseUrl}/?${params.toString()}`;
+});
+
+const sendDiagramPreviewXml = () => {
+  if (!diagramPreviewIframeRef.value?.contentWindow || !diagramPreviewXml.value) return;
+  diagramPreviewIframeRef.value.contentWindow.postMessage(
+    JSON.stringify({
+      action: 'load',
+      xml: diagramPreviewXml.value
+    }),
+    drawioPreviewOrigin.value
+  );
+};
+
+const handleDiagramPreviewMessage = (event: MessageEvent) => {
+  if (event.origin !== drawioPreviewOrigin.value) return;
+
+  try {
+    const msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+    if (!msg || typeof msg !== 'object') return;
+
+    if (msg.event === 'init') {
+      diagramPreviewReady.value = true;
+      sendDiagramPreviewXml();
+    }
+  } catch {
+    // 忽略非 JSON 消息
+  }
+};
 
 // ⭐ HITL 工具审批相关
 const toolApprovalDialogVisible = ref(false);
@@ -434,21 +659,20 @@ const loadSessionsFromServer = async () => {
       if (sessionsDetail && sessionsDetail.length > 0) {
         // 直接使用后端返回的会话详情
         const tempSessions: ChatSession[] = sessionsDetail.map(detail => {
-          let lastTime = new Date();
-          if (detail.updated_at) {
+          const timeStr = detail.updated_at || detail.created_at;
+          let lastTime: Date | null = null;
+          if (timeStr) {
             try {
-              lastTime = new Date(detail.updated_at.replace(' ', 'T'));
-              if (isNaN(lastTime.getTime())) {
-                lastTime = new Date();
+              const parsed = new Date(timeStr.replace(' ', 'T'));
+              if (!isNaN(parsed.getTime())) {
+                lastTime = parsed;
               }
-            } catch {
-              lastTime = new Date();
-            }
+            } catch { /* 解析失败时 lastTime 保持 null */ }
           }
           return {
             id: detail.id,
             title: detail.title || '未命名对话',
-            lastTime,
+            lastTime: lastTime ?? new Date(0),
             messageCount: 0
           };
         });
@@ -513,7 +737,7 @@ const enrichMessagesWithSeparators = (rawHistory: ChatHistoryMessage[], formatHi
 
     // 转换历史消息为 ChatMessage 格式
     const message: ChatMessage = {
-      content: historyItem.content,
+      content: normalizeHistoryContent(historyItem),
       isUser: historyItem.type === 'human',
       time: formatHistoryTime(historyItem.timestamp),
       messageType: historyItem.type
@@ -655,7 +879,9 @@ const solidifyStreamContent = () => {
             isUser: false,
             time: msg.time,
             messageType: msg.type as ChatMessage['messageType'],
+            toolName: msg.toolName,
             isExpanded: msg.isExpanded,
+            imageDataUrl: msg.imageDataUrl,
             isThinkingProcess: msg.isThinkingProcess,
             isThinkingExpanded: msg.isThinkingExpanded
           };
@@ -818,6 +1044,51 @@ const toggleExpand = (message: ChatMessage) => {
 // 处理引用消息
 const handleQuote = (message: ChatMessage) => {
   quotedMessage.value = message;
+};
+
+const handlePreviewDiagram = (payload: DiagramPreviewPayload) => {
+  if (!payload.xml || !payload.xml.trim()) {
+    Message.warning('未检测到可预览的图表XML');
+    return;
+  }
+  if (!diagramPreviewVisible.value) {
+    diagramPreviewReady.value = false;
+  }
+  diagramPreviewXml.value = payload.xml;
+  diagramPreviewVisible.value = true;
+
+  if (diagramPreviewReady.value) {
+    sendDiagramPreviewXml();
+  }
+};
+
+const handlePreviewHtml = (payload: HtmlPreviewPayload) => {
+  if (!payload.html || !payload.html.trim()) {
+    Message.warning('未检测到可预览的HTML内容');
+    return;
+  }
+  htmlPreviewContent.value = payload.html;
+  htmlPreviewVisible.value = true;
+};
+
+const syncHtmlPreviewFullscreenState = () => {
+  isHtmlPreviewFullscreen.value = document.fullscreenElement === htmlPreviewContainerRef.value;
+};
+
+const toggleHtmlPreviewFullscreen = async () => {
+  const container = htmlPreviewContainerRef.value;
+  if (!container) return;
+
+  try {
+    if (document.fullscreenElement === container) {
+      await document.exitFullscreen();
+      return;
+    }
+    await container.requestFullscreen();
+  } catch (error) {
+    console.error('切换HTML预览全屏失败:', error);
+    Message.warning('当前环境不支持全屏预览');
+  }
 };
 
 // 清除引用
@@ -1365,7 +1636,9 @@ const displayedMessages = computed(() => {
             isUser: false,
             time: msg.time,
             messageType: msg.type as ChatMessage['messageType'],
+            toolName: msg.toolName,
             isExpanded: msg.isExpanded,
+            imageDataUrl: msg.imageDataUrl,
             isThinkingProcess: msg.isThinkingProcess,
             isThinkingExpanded: msg.isThinkingExpanded
           };
@@ -1804,7 +2077,26 @@ watch([useKnowledgeBase, selectedKnowledgeBaseId, similarityThreshold, topK], ()
   saveKnowledgeBaseSettings();
 }, { deep: true });
 
+watch(diagramPreviewVisible, (visible) => {
+  if (!visible) {
+    diagramPreviewReady.value = false;
+  }
+});
+
+watch(htmlPreviewVisible, async (visible) => {
+  if (!visible && document.fullscreenElement === htmlPreviewContainerRef.value) {
+    try {
+      await document.exitFullscreen();
+    } catch (error) {
+      console.error('退出HTML预览全屏失败:', error);
+    }
+  }
+});
+
 onMounted(async () => {
+  window.addEventListener('message', handleDiagramPreviewMessage);
+  document.addEventListener('fullscreenchange', syncHtmlPreviewFullscreenState);
+
   // ⭐加载保存的提示词ID
   loadSavedPromptId();
   
@@ -1895,6 +2187,8 @@ onActivated(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('message', handleDiagramPreviewMessage);
+  document.removeEventListener('fullscreenchange', syncHtmlPreviewFullscreenState);
   // 组件卸载时，终止任何正在进行的流式请求
   abortController.abort();
 });
@@ -1917,11 +2211,93 @@ export default {
 
 .chat-container {
   flex: 1;
-  min-height: 0; /* 关键：允许 flex 子元素收缩 */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   height: 100%;
   background-color: #f7f8fa;
   overflow: hidden;
+  position: relative;
+}
+
+.diagram-preview-iframe {
+  width: 100%;
+  height: 72vh;
+  border: 1px solid #e5e6eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.html-preview-wrapper {
+  position: relative;
+}
+
+.html-preview-iframe {
+  display: block;
+}
+
+.html-preview-fullscreen-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  border: 1px solid #d9dce3 !important;
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+/* 工具图片悬浮面板 */
+.floating-tool-image-panel {
+  position: absolute;
+  top: 60px;
+  right: 16px;
+  z-index: 100;
+  width: 320px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  animation: float-in 0.25s ease;
+}
+@keyframes float-in {
+  from { opacity: 0; transform: translateY(-12px) scale(0.95); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.floating-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #f2f3f5;
+  border-bottom: 1px solid #e5e6eb;
+  cursor: grab;
+  user-select: none;
+}
+.floating-panel-header:active {
+  cursor: grabbing;
+}
+.floating-panel-title {
+  font-size: 12px;
+  color: #4e5969;
+  font-weight: 500;
+}
+.floating-panel-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  color: #86909c;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.floating-panel-close:hover {
+  color: #1d2129;
+}
+.floating-panel-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 60vh;
+  object-fit: contain;
+  cursor: pointer;
 }
 </style>

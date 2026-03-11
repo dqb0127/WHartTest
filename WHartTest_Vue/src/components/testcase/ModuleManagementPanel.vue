@@ -441,7 +441,7 @@ defineExpose({
   justify-content: center; /* 居中对齐 */
   margin-top: 8px;
   margin-bottom: 16px;
-  /* flex-shrink is now on the parent .module-panel-header */
+  /* flex-shrink 已移动到父级 .module-panel-header */
 }
 
 /* 下拉菜单相关样式 */

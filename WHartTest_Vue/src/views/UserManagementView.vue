@@ -514,7 +514,7 @@ const editUserRules = {
 };
 
 // 显示编辑用户模态框
-// Tab change handler for edit user modal
+// 编辑用户弹窗中的标签切换处理
 const onEditUserTabChange = async (key: string) => {
   if (key === 'permissions' && editUserForm.id) {
     await nextTick()

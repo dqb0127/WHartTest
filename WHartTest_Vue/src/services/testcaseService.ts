@@ -1,4 +1,4 @@
-// src/services/testcaseService.ts
+// 测试用例服务
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import { API_BASE_URL } from '@/config/api';
@@ -57,6 +57,7 @@ export interface TestCase {
   name: string;
   precondition: string;
   level: string; // P0, P1, P2, P3
+  test_type?: string; // smoke, functional, boundary, exception, permission, security, compatibility
   steps: TestCaseStep[];
   notes?: string; // 备注字段
   screenshot?: string; // 兼容旧的单个截图字段
@@ -82,6 +83,7 @@ export interface CreateTestCaseRequest {
   name: string;
   precondition: string;
   level: string; // P0, P1, P2, P3
+  test_type?: string; // smoke, functional, boundary, exception, permission, security, compatibility
   module_id?: number | null; // 所属模块ID
   steps: Omit<TestCaseStep, 'id'>[];
   notes?: string; // 新增备注字段
@@ -92,6 +94,7 @@ export interface UpdateTestCaseRequest {
   name?: string;
   precondition?: string;
   level?: string;
+  test_type?: string; // smoke, functional, boundary, exception, permission, security, compatibility
   module_id?: number | null; // 所属模块ID
   steps?: TestCaseStep[];
   notes?: string; // 新增备注字段
@@ -107,6 +110,8 @@ export interface PaginationParams {
   level?: string; // 添加可选的优先级用于筛选
   review_status?: ReviewStatus; // 添加可选的审核状态用于筛选（单个）
   review_status_in?: ReviewStatus[]; // 多个审核状态筛选
+  test_type?: string; // 单个测试类型筛选
+  test_type_in?: string[]; // 多个测试类型筛选
 }
 
 // 测试用例列表响应接口
@@ -183,6 +188,9 @@ export const getTestCaseList = async (projectId: number, params?: PaginationPara
         review_status: params.review_status, // 传递 review_status（单个）
         // 多个审核状态筛选，用逗号连接
         review_status_in: params.review_status_in?.join(','),
+        test_type: params.test_type, // 传递 test_type（单个）
+        // 多个测试类型筛选，用逗号连接
+        test_type_in: params.test_type_in?.join(','),
       } : undefined,
       headers: {
         'Authorization': `Bearer ${accessToken}`,

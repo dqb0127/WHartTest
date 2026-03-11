@@ -29,6 +29,12 @@ export interface SkillUploadResponse {
   data: Skill | null
 }
 
+export interface SkillGitImportResponse {
+  code: number
+  message: string
+  data: Skill[] | null
+}
+
 export interface SkillListResponse {
   code: number
   message: string

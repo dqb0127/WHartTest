@@ -6,12 +6,12 @@
  *
  * 协议：stdin/stdout 行分隔 JSON
  * 请求：
- *   { id, method: "ping", params: {} }
- *   { id, method: "exec", params: { args: string[], env?: object } }
- *   { id, method: "close", params: {} }
+ *   - 心跳：{ id, method: "ping", params: {} }
+ *   - 执行：{ id, method: "exec", params: { args: string[], env?: object } }
+ *   - 关闭：{ id, method: "close", params: {} }
  *
  * 响应：
- *   { id, ok: boolean, stdout?: string[], stderr?: string[], error?: string, state?: object }
+ *   - 响应结构：{ id, ok: boolean, stdout?: string[], stderr?: string[], error?: string, state?: object }
  */
 
 const fs = require('fs');

@@ -1,4 +1,4 @@
-// src/features/testcase-templates/services/templateService.ts
+// 用例模版服务
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 import { API_BASE_URL } from '@/config/api';
@@ -6,7 +6,7 @@ import { API_BASE_URL } from '@/config/api';
 /**
  * 提取后端统一响应包装器中的实际数据
  * 后端使用 UnifiedResponseRenderer 包装所有响应，格式为:
- * { status, code, message, data, errors }
+ * 包含字段：status、code、message、data、errors
  */
 function unwrapResponse<T>(responseData: any): T {
   if (responseData && typeof responseData === 'object' && 'status' in responseData && 'data' in responseData) {
@@ -407,7 +407,8 @@ export const importTestCases = async (
 export const exportTestCasesWithTemplate = async (
   projectId: number,
   templateId?: number | null,
-  testCaseIds?: number[]
+  testCaseIds?: number[],
+  moduleIds?: number[]
 ): Promise<OperationResponse> => {
   const authStore = useAuthStore();
   const accessToken = authStore.getAccessToken;
@@ -423,6 +424,9 @@ export const exportTestCasesWithTemplate = async (
     }
     if (testCaseIds && testCaseIds.length > 0) {
       params.ids = testCaseIds.join(',');
+    }
+    if (moduleIds && moduleIds.length > 0) {
+      params.module_ids = moduleIds.join(',');
     }
 
     const response = await axios.get(
@@ -465,7 +469,7 @@ export const exportTestCasesWithTemplate = async (
         const errorData = JSON.parse(text);
         errorMessage = errorData.error || errorMessage;
       } catch {
-        // ignore parse error
+        // 忽略解析错误
       }
     }
     return { success: false, error: errorMessage };

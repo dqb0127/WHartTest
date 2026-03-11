@@ -31,7 +31,7 @@ export function getCurrentVersion(): string {
 
 /**
  * 比较版本号
- * @returns 1 if v1 > v2, -1 if v1 < v2, 0 if equal
+ * @returns 当 v1 > v2 返回 1；v1 < v2 返回 -1；相等返回 0
  */
 export function compareVersions(v1: string, v2: string): number {
   const parts1 = v1.replace(/^v/, '').split('.').map(Number)

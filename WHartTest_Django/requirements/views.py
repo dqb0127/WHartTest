@@ -10,50 +10,73 @@ import os
 from wharttest_django.viewsets import BaseModelViewSet
 from prompts.models import UserPrompt
 from .models import (
-    RequirementDocument, RequirementModule, ReviewReport,
-    ReviewIssue, ModuleReviewResult, DocumentImage
+    RequirementDocument,
+    RequirementModule,
+    ReviewReport,
+    ReviewIssue,
+    ModuleReviewResult,
+    DocumentImage,
 )
 from .serializers import (
-    RequirementDocumentSerializer, RequirementDocumentDetailSerializer,
-    RequirementDocumentUploadSerializer, RequirementModuleSerializer,
-    ReviewReportSerializer, ReviewIssueSerializer, ModuleReviewResultSerializer,
-    ModuleAdjustmentSerializer, ReviewAnalysisRequestSerializer,
-    ReviewProgressSerializer
+    RequirementDocumentSerializer,
+    RequirementDocumentDetailSerializer,
+    RequirementDocumentUploadSerializer,
+    RequirementModuleSerializer,
+    ReviewReportSerializer,
+    ReviewIssueSerializer,
+    ModuleReviewResultSerializer,
+    ModuleAdjustmentSerializer,
+    ReviewAnalysisRequestSerializer,
+    ReviewProgressSerializer,
 )
 from .filters import (
-    RequirementDocumentFilter, RequirementModuleFilter, ReviewReportFilter,
-    ReviewIssueFilter, ModuleReviewResultFilter
+    RequirementDocumentFilter,
+    RequirementModuleFilter,
+    ReviewReportFilter,
+    ReviewIssueFilter,
+    ModuleReviewResultFilter,
 )
 from .permissions import (
-    IsProjectMemberForRequirement, IsProjectAdminForRequirement,
-    CanManageRequirementDocument, CanStartReview
+    IsProjectMemberForRequirement,
+    IsProjectAdminForRequirement,
+    CanManageRequirementDocument,
+    CanStartReview,
 )
-from .services import RequirementModuleService, ModuleOperationService, RequirementReviewService
+from .services import (
+    RequirementModuleService,
+    ModuleOperationService,
+    RequirementReviewService,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class RequirementDocumentViewSet(BaseModelViewSet):
     """需求文档视图集"""
+
     queryset = RequirementDocument.objects.all()
     serializer_class = RequirementDocumentSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_class = RequirementDocumentFilter
-    search_fields = ['title', 'description', 'content']
-    ordering_fields = ['uploaded_at', 'updated_at', 'title', 'word_count', 'page_count']
-    ordering = ['-uploaded_at']
+    search_fields = ["title", "description", "content"]
+    ordering_fields = ["uploaded_at", "updated_at", "title", "word_count", "page_count"]
+    ordering = ["-uploaded_at"]
 
     def get_permissions(self):
         """根据操作类型设置不同的权限"""
         # 图片访问接口公开，无需认证
-        if self.action == 'get_image':
+        if self.action == "get_image":
             return []
 
         # 获取基础权限（用户认证 + Django模型权限）
         base_permissions = super().get_permissions()
 
         # 在基础权限之上添加项目特定的权限检查
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+        if self.action in ["create", "update", "partial_update", "destroy"]:
             return base_permissions + [CanManageRequirementDocument()]
         else:
             return base_permissions + [IsProjectMemberForRequirement()]
@@ -71,9 +94,9 @@ class RequirementDocumentViewSet(BaseModelViewSet):
 
     def get_serializer_class(self):
         """根据操作返回不同的序列化器"""
-        if self.action == 'create':
+        if self.action == "create":
             return RequirementDocumentUploadSerializer
-        elif self.action == 'retrieve':
+        elif self.action == "retrieve":
             return RequirementDocumentDetailSerializer
         return RequirementDocumentSerializer
 
@@ -85,6 +108,7 @@ class RequirementDocumentViewSet(BaseModelViewSet):
         if document.file and not document.content:
             try:
                 from .services import DocumentProcessor
+
                 processor = DocumentProcessor()
                 content = processor.extract_content(document)
 
@@ -119,12 +143,17 @@ class RequirementDocumentViewSet(BaseModelViewSet):
         except Exception as e:
             logger.error(f"删除需求文档失败: {e}")
             return Response(
-                {'error': f'删除失败: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": f"删除失败: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    @action(detail=True, methods=['get'], url_path='images/(?P<image_id>[^/.]+)',
-            authentication_classes=[], permission_classes=[])
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="images/(?P<image_id>[^/.]+)",
+        authentication_classes=[],
+        permission_classes=[],
+    )
     def get_image(self, request, pk=None, image_id=None):
         """
         获取文档中的图片（公开访问，无需认证）
@@ -136,38 +165,42 @@ class RequirementDocumentViewSet(BaseModelViewSet):
             document = RequirementDocument.objects.get(pk=pk)
             image = document.images.get(image_id=image_id)
             return FileResponse(
-                open(image.image_file.path, 'rb'),
-                content_type=image.content_type
+                open(image.image_file.path, "rb"), content_type=image.content_type
             )
         except RequirementDocument.DoesNotExist:
-            return Response({'error': '文档不存在'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "文档不存在"}, status=status.HTTP_404_NOT_FOUND)
         except DocumentImage.DoesNotExist:
-            return Response({'error': '图片不存在'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "图片不存在"}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             logger.error(f"获取图片失败: {e}")
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-    @action(detail=True, methods=['get'], url_path='images-list')
+    @action(detail=True, methods=["get"], url_path="images-list")
     def list_images(self, request, pk=None):
         """
         获取文档中所有图片的元信息
         GET /api/requirements/documents/{id}/images-list/
         """
         document = self.get_object()
-        images = document.images.all().order_by('order')
-        data = [{
-            'id': str(img.id),
-            'image_id': img.image_id,
-            'order': img.order,
-            'width': img.width,
-            'height': img.height,
-            'content_type': img.content_type,
-            'file_size': img.file_size,
-            'url': f'/api/requirements/documents/{document.id}/images/{img.image_id}/'
-        } for img in images]
-        return Response({'images': data, 'total': len(data)})
+        images = document.images.all().order_by("order")
+        data = [
+            {
+                "id": str(img.id),
+                "image_id": img.image_id,
+                "order": img.order,
+                "width": img.width,
+                "height": img.height,
+                "content_type": img.content_type,
+                "file_size": img.file_size,
+                "url": f"/api/requirements/documents/{document.id}/images/{img.image_id}/",
+            }
+            for img in images
+        ]
+        return Response({"images": data, "total": len(data)})
 
-    @action(detail=True, methods=['post'], url_path='split-modules')
+    @action(detail=True, methods=["post"], url_path="split-modules")
     def split_modules(self, request, pk=None):
         """
         智能模块拆分 - 支持多种拆分方式
@@ -182,18 +215,18 @@ class RequirementDocumentViewSet(BaseModelViewSet):
         """
         document = self.get_object()
 
-        if document.status not in ['uploaded', 'processing']:
+        if document.status not in ["uploaded", "processing"]:
             return Response(
-                {'error': '文档状态不允许进行模块拆分'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "文档状态不允许进行模块拆分"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             # 获取拆分选项
             split_options = {
-                'split_level': request.data.get('split_level', 'auto'),
-                'include_context': request.data.get('include_context', True),
-                'chunk_size': request.data.get('chunk_size', 2000)
+                "split_level": request.data.get("split_level", "auto"),
+                "include_context": request.data.get("include_context", True),
+                "chunk_size": request.data.get("chunk_size", 2000),
             }
 
             logger.info(f"开始拆分文档 {document.id}，选项: {split_options}")
@@ -205,34 +238,36 @@ class RequirementDocumentViewSet(BaseModelViewSet):
             serializer = RequirementModuleSerializer(modules, many=True)
 
             # 根据拆分方式生成不同的提示信息
-            split_level = split_options['split_level']
-            if split_level == 'auto':
-                split_method = '按内容长度智能拆分'
+            split_level = split_options["split_level"]
+            if split_level == "auto":
+                split_method = "按内容长度智能拆分"
             else:
-                split_method = f'按{split_level.upper()}级别标题拆分'
+                split_method = f"按{split_level.upper()}级别标题拆分"
 
-            return Response({
-                'message': f'{split_method}完成',
-                'split_options': split_options,
-                'modules': serializer.data,
-                'status': document.status,
-                'total_modules': len(modules),
-                'suggestions': [
-                    '请检查模块拆分是否合理',
-                    '如果不满意可以选择其他拆分级别重新拆分',
-                    '可以手动调整模块边界和内容',
-                    '确认无误后可开始评审分析'
-                ]
-            })
+            return Response(
+                {
+                    "message": f"{split_method}完成",
+                    "split_options": split_options,
+                    "modules": serializer.data,
+                    "status": document.status,
+                    "total_modules": len(modules),
+                    "suggestions": [
+                        "请检查模块拆分是否合理",
+                        "如果不满意可以选择其他拆分级别重新拆分",
+                        "可以手动调整模块边界和内容",
+                        "确认无误后可开始评审分析",
+                    ],
+                }
+            )
 
         except Exception as e:
             logger.error(f"模块拆分失败: {e}")
             return Response(
-                {'error': f'模块拆分失败: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": f"模块拆分失败: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    @action(detail=True, methods=['get'], url_path='check-context-limit')
+    @action(detail=True, methods=["get"], url_path="check-context-limit")
     def check_context_limit(self, request, pk=None):
         """
         检查文档是否超过模型上下文限制
@@ -242,38 +277,43 @@ class RequirementDocumentViewSet(BaseModelViewSet):
 
         # 检查用户是否初始化了所有必需的程序调用提示词
         required_prompt_types = [
-            'document_structure', 'direct_analysis', 'global_analysis',
-            'module_analysis', 'consistency_analysis'
+            "document_structure",
+            "direct_analysis",
+            "global_analysis",
+            "module_analysis",
+            "consistency_analysis",
         ]
-        
+
         missing_prompts = []
         for p_type in required_prompt_types:
-            if not UserPrompt.objects.filter(user=request.user, prompt_type=p_type).exists():
+            if not UserPrompt.objects.filter(
+                user=request.user, prompt_type=p_type
+            ).exists():
                 missing_prompts.append(p_type)
 
         if missing_prompts:
             # 获取提示词类型的中英文映射
             prompt_type_display = dict(UserPrompt.PROMPT_TYPE_CHOICES)
-            
+
             # 将缺失的提示词类型转换为中文名称
             missing_prompts_display = [
                 prompt_type_display.get(pt, pt) for pt in missing_prompts
             ]
-            
+
             error_message = (
                 f"缺少必要的程序调用提示词: {', '.join(missing_prompts_display)}。"
                 "请在“提示词管理”页面中，点击“初始化程序调用提示词”按钮来完成配置。"
             )
-            
+
             return Response(
-                {'error': error_message},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": error_message}, status=status.HTTP_400_BAD_REQUEST
             )
 
         # 如果文档内容为空，尝试提取
         if not document.content and document.file:
             try:
                 from .services import DocumentProcessor
+
                 processor = DocumentProcessor()
                 content = processor.extract_content(document)
 
@@ -289,64 +329,72 @@ class RequirementDocumentViewSet(BaseModelViewSet):
 
         if not document.content:
             return Response(
-                {'error': '文档内容为空，请检查文件是否正确上传'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "文档内容为空，请检查文件是否正确上传"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             # 获取模型名称
-            model_name = request.query_params.get('model', 'gpt-3.5-turbo')
+            model_name = request.query_params.get("model", "gpt-3.5-turbo")
 
             # 检查上下文限制
             context_result = document.check_context_limit(model_name)
 
             # 如果超出限制，计算最优拆分大小
-            if context_result['exceeds_limit']:
+            if context_result["exceeds_limit"]:
                 optimal_size = document.get_optimal_split_size(model_name)
-                context_result['optimal_chunk_size'] = optimal_size
+                context_result["optimal_chunk_size"] = optimal_size
 
-            return Response({
-                'document_info': {
-                    'title': document.title,
-                    'content_length': len(document.content),
-                    'word_count': document.word_count,
-                    'page_count': document.page_count
-                },
-                'context_analysis': context_result,
-                'recommendations': self._get_split_recommendations(context_result)
-            })
+            return Response(
+                {
+                    "document_info": {
+                        "title": document.title,
+                        "content_length": len(document.content),
+                        "word_count": document.word_count,
+                        "page_count": document.page_count,
+                    },
+                    "context_analysis": context_result,
+                    "recommendations": self._get_split_recommendations(context_result),
+                }
+            )
 
         except Exception as e:
             logger.error(f"上下文检测失败: {e}")
             return Response(
-                {'error': f'上下文检测失败: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": f"上下文检测失败: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
     def _get_split_recommendations(self, context_result: dict) -> list:
         """根据上下文分析结果生成拆分建议"""
         recommendations = []
 
-        if context_result['suggestion'] == 'SPLIT_REQUIRED':
-            recommendations.extend([
-                '文档超出模型上下文限制，必须进行拆分',
-                '建议使用智能拆分或按标题拆分',
-                f"推荐分块大小: {context_result.get('optimal_chunk_size', 2000)} 字符"
-            ])
-        elif context_result['suggestion'] == 'SPLIT_RECOMMENDED':
-            recommendations.extend([
-                '文档接近上下文限制，建议拆分以获得更好的分析效果',
-                '可以选择按H2或H3级别拆分'
-            ])
+        if context_result["suggestion"] == "SPLIT_REQUIRED":
+            recommendations.extend(
+                [
+                    "文档超出模型上下文限制，必须进行拆分",
+                    "建议使用智能拆分或按标题拆分",
+                    f"推荐分块大小: {context_result.get('optimal_chunk_size', 2000)} 字符",
+                ]
+            )
+        elif context_result["suggestion"] == "SPLIT_RECOMMENDED":
+            recommendations.extend(
+                [
+                    "文档接近上下文限制，建议拆分以获得更好的分析效果",
+                    "可以选择按H2或H3级别拆分",
+                ]
+            )
         else:
-            recommendations.extend([
-                '文档大小适中，可以直接进行分析',
-                '如需要更细粒度的分析，也可以选择拆分'
-            ])
+            recommendations.extend(
+                [
+                    "文档大小适中，可以直接进行分析",
+                    "如需要更细粒度的分析，也可以选择拆分",
+                ]
+            )
 
         return recommendations
 
-    @action(detail=True, methods=['put'], url_path='adjust-modules')
+    @action(detail=True, methods=["put"], url_path="adjust-modules")
     def adjust_modules(self, request, pk=None):
         """
         用户调整模块拆分结果
@@ -354,10 +402,9 @@ class RequirementDocumentViewSet(BaseModelViewSet):
         """
         document = self.get_object()
 
-        if document.status != 'user_reviewing':
+        if document.status != "user_reviewing":
             return Response(
-                {'error': '文档状态不允许调整模块'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "文档状态不允许调整模块"}, status=status.HTTP_400_BAD_REQUEST
             )
 
         serializer = ModuleAdjustmentSerializer(data=request.data)
@@ -367,36 +414,37 @@ class RequirementDocumentViewSet(BaseModelViewSet):
                 document.modules.all().delete()
 
                 # 创建新模块
-                modules_data = serializer.validated_data['modules']
+                modules_data = serializer.validated_data["modules"]
                 modules = []
                 for module_data in modules_data:
                     module = RequirementModule.objects.create(
-                        document=document,
-                        **module_data
+                        document=document, **module_data
                     )
                     modules.append(module)
 
                 # 更新文档状态
-                document.status = 'ready_for_review'
+                document.status = "ready_for_review"
                 document.save()
 
                 response_serializer = RequirementModuleSerializer(modules, many=True)
-                return Response({
-                    'message': '模块调整完成',
-                    'modules': response_serializer.data,
-                    'status': 'ready_for_review'
-                })
+                return Response(
+                    {
+                        "message": "模块调整完成",
+                        "modules": response_serializer.data,
+                        "status": "ready_for_review",
+                    }
+                )
 
             except Exception as e:
                 logger.error(f"模块调整失败: {e}")
                 return Response(
-                    {'error': f'模块调整失败: {str(e)}'},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    {"error": f"模块调整失败: {str(e)}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=True, methods=['post'], url_path='confirm-modules')
+    @action(detail=True, methods=["post"], url_path="confirm-modules")
     def confirm_modules(self, request, pk=None):
         """
         确认模块拆分结果，将状态设置为可评审
@@ -404,10 +452,10 @@ class RequirementDocumentViewSet(BaseModelViewSet):
         """
         document = self.get_object()
 
-        if document.status not in ['user_reviewing', 'uploaded', 'processing']:
+        if document.status not in ["user_reviewing", "uploaded", "processing"]:
             return Response(
-                {'error': f'文档状态 {document.status} 不允许确认模块'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": f"文档状态 {document.status} 不允许确认模块"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
@@ -415,28 +463,35 @@ class RequirementDocumentViewSet(BaseModelViewSet):
             modules_count = document.modules.count()
             if modules_count == 0:
                 return Response(
-                    {'error': '文档还没有模块，请先进行模块拆分'},
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "文档还没有模块，请先进行模块拆分"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
             # 更新文档状态为可评审
-            document.status = 'ready_for_review'
+            document.status = "ready_for_review"
             document.save()
 
-            return Response({
-                'message': '模块确认完成，文档已准备好进行评审',
-                'status': document.status,
-                'modules_count': modules_count
-            })
+            return Response(
+                {
+                    "message": "模块确认完成，文档已准备好进行评审",
+                    "status": document.status,
+                    "modules_count": modules_count,
+                }
+            )
 
         except Exception as e:
             logger.error(f"确认模块失败: {e}")
             return Response(
-                {'error': f'确认模块失败: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": f"确认模块失败: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    @action(detail=True, methods=['post'], url_path='restart-review', permission_classes=[CanStartReview])
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="restart-review",
+        permission_classes=[CanStartReview],
+    )
     def restart_review(self, request, pk=None):
         """
         重新开始需求评审
@@ -445,25 +500,30 @@ class RequirementDocumentViewSet(BaseModelViewSet):
         document = self.get_object()
 
         # 允许在"评审完成"或"处理失败"的状态下重新评审
-        if document.status not in ['review_completed', 'failed']:
+        if document.status not in ["review_completed", "failed"]:
             return Response(
-                {'error': f'文档状态 "{document.get_status_display()}" 不允许重新评审'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": f'文档状态 "{document.get_status_display()}" 不允许重新评审'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # 清理旧的评审数据
-        # document.review_reports.all().delete()
+        # 如需清理历史评审报告，可在此启用删除逻辑。
         # logger.info(f"已清理文档 {document.id} 的旧评审报告。")
 
         # 重置文档状态
-        document.status = 'ready_for_review'
+        document.status = "ready_for_review"
         document.save()
 
         # 为了简化，我们直接调用现有的 start_review 方法
         # 这样可以重用所有的逻辑和参数处理
         return self.start_review(request, pk)
 
-    @action(detail=True, methods=['post'], url_path='start-review', permission_classes=[CanStartReview])
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="start-review",
+        permission_classes=[CanStartReview],
+    )
     def start_review(self, request, pk=None):
         """
         开始需求评审 - 支持直接评审和模块评审（异步处理）
@@ -477,82 +537,90 @@ class RequirementDocumentViewSet(BaseModelViewSet):
         document = self.get_object()
 
         # 获取评审类型
-        direct_review = request.data.get('direct_review', False)
+        direct_review = request.data.get("direct_review", False)
 
         # 检查文档状态
         if direct_review:
             # 直接评审：文档有内容即可
             if not document.content:
                 return Response(
-                    {'error': '文档内容为空，无法进行评审'},
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "文档内容为空，无法进行评审"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
             # 允许的状态：uploaded, processing, user_reviewing, ready_for_review
-            allowed_statuses = ['uploaded', 'processing', 'user_reviewing', 'ready_for_review']
+            allowed_statuses = [
+                "uploaded",
+                "processing",
+                "user_reviewing",
+                "ready_for_review",
+            ]
             if document.status not in allowed_statuses:
                 return Response(
-                    {'error': f'文档状态 {document.status} 不允许直接评审'},
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": f"文档状态 {document.status} 不允许直接评审"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
         else:
             # 模块评审：必须是ready_for_review或failed状态（允许重新评审）
-            if document.status not in ['ready_for_review', 'failed']:
+            if document.status not in ["ready_for_review", "failed"]:
                 return Response(
-                    {'error': '文档状态不允许开始评审，请先完成模块拆分'},
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": "文档状态不允许开始评审，请先完成模块拆分"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
         # 检查权限
         if not CanStartReview().has_object_permission(request, self, document):
             return Response(
-                {'error': '没有权限启动评审'},
-                status=status.HTTP_403_FORBIDDEN
+                {"error": "没有权限启动评审"}, status=status.HTTP_403_FORBIDDEN
             )
 
         try:
             # 准备评审参数
             analysis_options = {
-                'analysis_type': request.data.get('analysis_type', 'comprehensive'),
-                'parallel_processing': request.data.get('parallel_processing', True),
-                'priority_modules': request.data.get('priority_modules', []),
-                'custom_requirements': request.data.get('custom_requirements', ''),
-                'max_workers': request.data.get('max_workers', 3),  # 新增：并发数
-                'direct_review': direct_review
+                "analysis_type": request.data.get("analysis_type", "comprehensive"),
+                "parallel_processing": request.data.get("parallel_processing", True),
+                "priority_modules": request.data.get("priority_modules", []),
+                "custom_requirements": request.data.get("custom_requirements", ""),
+                "max_workers": request.data.get("max_workers", 3),  # 新增：并发数
+                "direct_review": direct_review,
             }
 
             # 立即更新文档状态为评审中
-            document.status = 'reviewing'
+            document.status = "reviewing"
             document.save()
 
             # 启动异步评审任务
             from .tasks import execute_requirement_review
-            
-            review_type = 'direct' if direct_review else 'comprehensive'
+
+
+
+            review_type = "direct" if direct_review else "comprehensive"
             task = execute_requirement_review.delay(
                 str(document.id),
                 analysis_options,
                 review_type,
-                user_id=request.user.id  # 传递用户ID用于获取提示词配置
+                user_id=request.user.id,  # 传递用户ID用于获取提示词配置
             )
 
             # 立即返回，不等待任务完成
-            return Response({
-                'message': f'评审任务已启动',
-                'task_id': task.id,
-                'review_type': '直接评审' if direct_review else '模块评审',
-                'direct_review': direct_review,
-                'status': 'reviewing',
-                'document_id': str(document.id)
-            })
+            return Response(
+                {
+                    "message": f"评审任务已启动",
+                    "task_id": task.id,
+                    "review_type": "直接评审" if direct_review else "模块评审",
+                    "direct_review": direct_review,
+                    "status": "reviewing",
+                    "document_id": str(document.id),
+                }
+            )
 
         except Exception as e:
             logger.error(f"启动评审失败: {e}")
             return Response(
-                {'error': f'启动评审失败: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                {"error": f"启动评审失败: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-    @action(detail=True, methods=['post'], url_path='module-operations')
+    @action(detail=True, methods=["post"], url_path="module-operations")
     def module_operations(self, request, pk=None):
         """
         模块操作接口 - 支持合并、拆分、重排序等操作
@@ -560,47 +628,51 @@ class RequirementDocumentViewSet(BaseModelViewSet):
         """
         document = self.get_object()
 
-        if document.status not in ['user_reviewing', 'ready_for_review']:
+        if document.status not in ["user_reviewing", "ready_for_review"]:
             return Response(
-                {'error': '当前文档状态不允许模块操作'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "当前文档状态不允许模块操作"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         from .serializers import ModuleOperationSerializer, ModuleBatchUpdateSerializer
 
         # 检查是单个操作还是批量操作
-        if 'operations' in request.data:
+        if "operations" in request.data:
             # 批量操作
             serializer = ModuleBatchUpdateSerializer(data=request.data)
             if serializer.is_valid():
                 try:
                     operation_service = ModuleOperationService(document)
                     result = operation_service.execute_batch_operations(
-                        serializer.validated_data['operations']
+                        serializer.validated_data["operations"]
                     )
 
-                    if result['success']:
+                    if result["success"]:
                         # 返回更新后的模块列表
-                        modules = document.modules.order_by('order')
-                        modules_serializer = RequirementModuleSerializer(modules, many=True)
+                        modules = document.modules.order_by("order")
+                        modules_serializer = RequirementModuleSerializer(
+                            modules, many=True
+                        )
 
-                        return Response({
-                            'message': result['message'],
-                            'operations_count': result['operations_count'],
-                            'modules': modules_serializer.data,
-                            'status': document.status
-                        })
+                        return Response(
+                            {
+                                "message": result["message"],
+                                "operations_count": result["operations_count"],
+                                "modules": modules_serializer.data,
+                                "status": document.status,
+                            }
+                        )
                     else:
                         return Response(
-                            {'error': result['error']},
-                            status=status.HTTP_400_BAD_REQUEST
+                            {"error": result["error"]},
+                            status=status.HTTP_400_BAD_REQUEST,
                         )
 
                 except Exception as e:
                     logger.error(f"批量模块操作失败: {e}")
                     return Response(
-                        {'error': f'操作失败: {str(e)}'},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                        {"error": f"操作失败: {str(e)}"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     )
             else:
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -611,24 +683,28 @@ class RequirementDocumentViewSet(BaseModelViewSet):
             if serializer.is_valid():
                 try:
                     operation_service = ModuleOperationService(document)
-                    result = operation_service.execute_operation(serializer.validated_data)
+                    result = operation_service.execute_operation(
+                        serializer.validated_data
+                    )
 
                     # 返回更新后的模块列表
-                    modules = document.modules.order_by('order')
+                    modules = document.modules.order_by("order")
                     modules_serializer = RequirementModuleSerializer(modules, many=True)
 
-                    return Response({
-                        'message': result['message'],
-                        'operation_result': result,
-                        'modules': modules_serializer.data,
-                        'status': document.status
-                    })
+                    return Response(
+                        {
+                            "message": result["message"],
+                            "operation_result": result,
+                            "modules": modules_serializer.data,
+                            "status": document.status,
+                        }
+                    )
 
                 except Exception as e:
                     logger.error(f"模块操作失败: {e}")
                     return Response(
-                        {'error': f'操作失败: {str(e)}'},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                        {"error": f"操作失败: {str(e)}"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     )
             else:
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -636,13 +712,18 @@ class RequirementDocumentViewSet(BaseModelViewSet):
 
 class RequirementModuleViewSet(BaseModelViewSet):
     """需求模块视图集"""
+
     queryset = RequirementModule.objects.all()
     serializer_class = RequirementModuleSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_class = RequirementModuleFilter
-    search_fields = ['title', 'content']
-    ordering_fields = ['order', 'created_at', 'updated_at']
-    ordering = ['document', 'order']
+    search_fields = ["title", "content"]
+    ordering_fields = ["order", "created_at", "updated_at"]
+    ordering = ["document", "order"]
 
     def get_permissions(self):
         """返回此视图所需权限的实例列表"""
@@ -665,13 +746,18 @@ class RequirementModuleViewSet(BaseModelViewSet):
 
 class ReviewReportViewSet(BaseModelViewSet):
     """评审报告视图集"""
+
     queryset = ReviewReport.objects.all()
     serializer_class = ReviewReportSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_class = ReviewReportFilter
-    search_fields = ['summary', 'recommendations']
-    ordering_fields = ['review_date', 'completion_score', 'total_issues']
-    ordering = ['-review_date']
+    search_fields = ["summary", "recommendations"]
+    ordering_fields = ["review_date", "completion_score", "total_issues"]
+    ordering = ["-review_date"]
 
     def get_permissions(self):
         """返回此视图所需权限的实例列表"""
@@ -694,13 +780,18 @@ class ReviewReportViewSet(BaseModelViewSet):
 
 class ReviewIssueViewSet(BaseModelViewSet):
     """评审问题视图集"""
+
     queryset = ReviewIssue.objects.all()
     serializer_class = ReviewIssueSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_class = ReviewIssueFilter
-    search_fields = ['title', 'description', 'suggestion']
-    ordering_fields = ['priority', 'created_at', 'page_number']
-    ordering = ['priority', '-created_at']
+    search_fields = ["title", "description", "suggestion"]
+    ordering_fields = ["priority", "created_at", "page_number"]
+    ordering = ["priority", "-created_at"]
 
     def get_permissions(self):
         """返回此视图所需权限的实例列表"""
@@ -721,15 +812,21 @@ class ReviewIssueViewSet(BaseModelViewSet):
         ).distinct()
 
 
+
 class ModuleReviewResultViewSet(BaseModelViewSet):
     """模块评审结果视图集"""
+
     queryset = ModuleReviewResult.objects.all()
     serializer_class = ModuleReviewResultSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_class = ModuleReviewResultFilter
-    search_fields = ['analysis_content', 'strengths', 'weaknesses', 'recommendations']
-    ordering_fields = ['module__order', 'issues_count', 'severity_score']
-    ordering = ['module__order']
+    search_fields = ["analysis_content", "strengths", "weaknesses", "recommendations"]
+    ordering_fields = ["module__order", "issues_count", "severity_score"]
+    ordering = ["module__order"]
 
     def get_permissions(self):
         """返回此视图所需权限的实例列表"""
